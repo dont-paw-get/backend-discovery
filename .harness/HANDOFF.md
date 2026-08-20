@@ -27,3 +27,15 @@
 1. 다음 티켓 번호와 범위(Step 2/3의 분할 방식)를 사용자로부터 받아 `PLAN.md` 처리 방식을 논의한다.
 2. 원격 브랜치명을 로컬과 맞출지(push 방식) 사용자와 확인한다.
 3. 커밋·push·PR은 사용자가 명시적으로 요청할 때까지 수행하지 않는다.
+
+
+## 2026-08-21 — CLIAR-40 착수
+- CLIAR-21 PR이 `develop`에 머지된 것을 확인(`git pull`로 `origin/develop`이 `36728f7`로 갱신됨).
+- `develop`에서 `CLIAR-40-Core-Implementation` 브랜치를 새로 분기했다.
+- AWS 계정이 확보되어 Bedrock 등 실제 AWS 리소스 접근이 가능해졌다. 다만 로컬 개발 단계는 Mock을 기본으로 유지하고, 기존 `LLM_PROVIDER=mock|bedrock` 스위치로 실 Bedrock 전환이 가능하게 Task 7을 설계하기로 했다(별도 `USE_REAL_BEDROCK` 플래그는 추가하지 않음 — `.harness/DECISIONS.md` 참고).
+- `PLAN.md`를 CLIAR-40 범위(Task 5~8)로 갱신했다. Step 3(API 라우터, Task 9~13)은 이번 티켓 범위 밖이며 별도 티켓이 확정되면 다시 반영한다.
+- 이번 티켓부터는 Task 완료 보고에 사용자가 직접 확인할 수 있는 방법(터미널 명령, psql 조회, /docs 확인 등)을 포함하기로 합의했다.
+
+### 다음 세션이 할 일
+1. Task 5(pgvector 모델링 + tsvector/GIN + 마이그레이션)부터 착수.
+2. 매 Task 완료 시 텍스트 보고와 함께 직접 확인 가능한 검증 방법을 제시하고 사용자 승인을 기다린다.

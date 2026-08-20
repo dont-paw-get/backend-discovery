@@ -9,6 +9,9 @@ from alembic import context
 from discovery.core.config import get_settings
 from discovery.db.base import Base
 
+# ORM 모델을 import해야 Base.metadata에 테이블이 등록된다 (autogenerate 지원용).
+from discovery.domain.book.models import Book  # noqa: F401
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
