@@ -49,6 +49,8 @@ Basic API ──▶ /internal/sync-book ──────────┤
 - 외부 의존성(Bedrock, Redis, 현재 시각)은 Protocol + DI로 주입해 결정론적으로 테스트한다.
 - 응답 스키마는 목록용/상세용을 분리하고, 목록 쿼리는 To-One 연관관계만으로 완성한다.
 - 설정값은 `core/config.py`의 pydantic-settings로만 읽고, 접속 정보 기본값을 코드에 두지 않는다.
+- 커밋 전 `.pre-commit-config.yaml`(ruff, mypy, 커밋 메시지 `[CLIAR-XX]` 형식 검증)이 자동 실행된다.
+  push/merge 승인 정책은 훅 범위가 아니라 `AGENTS.md`의 "Git 작업 정책" 섹션이 규정한다.
 
 ### 목표 디렉토리 구조
 ```

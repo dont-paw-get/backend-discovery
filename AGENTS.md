@@ -123,3 +123,9 @@ API wire 계약과 계약 결정은 `.harness`가 아니라 `docs/api/openapi.ya
 - 브랜치 병합과 삭제는 자동으로 수행하지 않는다. PR 병합은 사용자가 직접 하거나, 사용자가 명시적으로 요청했을 때만 수행한다. `develop → main` 릴리스 병합도 동일하다.
 - 강제 push, `reset --hard`, `clean -fd`, `branch -D` 등 destructive 작업은 사용자의 명시적 허락 없이 수행하지 않는다.
 
+## Git 작업 정책
+
+- commit: Task 단위로 나누어 작성, 형식 `[CLIAR-XX]` 태그 필수 (위 커밋 메시지 컨벤션과 함께 적용).
+- push, merge: 사용자의 명시적 승인 없이 절대 실행 금지 (자동화 대상 아님).
+- push 전 항상 변경 파일 목록과 핵심 diff 요약을 먼저 제시할 것.
+
