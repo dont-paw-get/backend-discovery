@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     llm_provider: str = "mock"
     internal_api_token: str
     aws_region: str | None = None
+    chat_history_max_turns: int = 20
+    chat_session_ttl_seconds: int = 3600
 
 
 @lru_cache

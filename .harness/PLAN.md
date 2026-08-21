@@ -1,7 +1,8 @@
 # PLAN — backend-discovery (CLIAR-40-Core-Implementation)
 
 ## CLIAR-40. 핵심 코드 구현
-- [ ] Task 8: Redis 비동기 대화 세션 스토어
+
+(모든 Task 완료)
 
 ---
 
@@ -10,12 +11,6 @@
 ### CLIAR-40 — 핵심 코드 구현
 (원래 계획의 Step 2에 해당. Step 3 API 라우터 구현은 CLIAR-21 범위 밖으로 분리되었고,
 별도 티켓 범위가 확정되면 새 PLAN 섹션으로 옮긴다. 지금은 이 파일에 손대지 않는다.)
-
-**Task 8: Redis 비동기 대화 세션 스토어**
-- 목표: 멀티턴 대화 문맥을 TTL과 함께 비동기로 저장·조회한다.
-- 가이드: `redis.asyncio` 커넥션 풀을 lifespan에서 관리. `ChatSessionStore`에 `append_turn`, `get_history`, `clear`. 키는 `chat:session:{session_id}`, RPUSH + LTRIM으로 최근 N턴만 유지, 매 쓰기마다 `EXPIRE` 갱신. `session_id`는 서비스가 생성하지 않고 주입받는다(없으면 라우터 의존성에서 발급).
-- 테스트: 통합 — append→get 순서 보장, LTRIM 상한, TTL 설정, clear 후 빈 히스토리.
-- Demo: 같은 `session_id`로 여러 turn을 넣고 순서대로 조회되며 TTL이 걸려 있음을 확인한다.
 
 ### Step 3 — API 라우터 구현
 

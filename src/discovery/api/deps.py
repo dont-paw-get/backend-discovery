@@ -6,6 +6,7 @@ from fastapi import Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from discovery.core.config import get_settings
+from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
 from discovery.infrastructure.llm.factory import (
     create_chat_completion_client,
     create_embedding_client,
@@ -28,3 +29,13 @@ def get_embedding_client() -> EmbeddingClient:
 def get_chat_completion_client() -> ChatCompletionClient:
     """LLM_PROVIDER 설정에 따라 Mock 또는 Bedrock 챗 완성 클라이언트를 반환한다."""
     return create_chat_completion_client(get_settings())
+
+
+def get_chat_session_store(request: Request) -> ChatSessionStore:
+    """app.state.redis(lifespan에서 생성)를 사용하는 대화 세션 스토어."""
+    settings = get_settings()
+    return ChatSessionStore(
+        request.app.state.redis,
+        max_turns=settings.chat_history_max_turns,
+        ttl_seconds=settings.chat_session_ttl_seconds,
+    )
