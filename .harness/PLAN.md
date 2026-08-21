@@ -1,7 +1,6 @@
 # PLAN — backend-discovery (CLIAR-40-Core-Implementation)
 
 ## CLIAR-40. 핵심 코드 구현
-- [ ] Task 6: Pydantic V2 DTO + BookRepository
 - [ ] Task 7: Bedrock Mocking 계층 (Mock 기본, LLM_PROVIDER 스위치로 실 Bedrock 전환 가능하게 설계)
 - [ ] Task 8: Redis 비동기 대화 세션 스토어
 
@@ -12,12 +11,6 @@
 ### CLIAR-40 — 핵심 코드 구현
 (원래 계획의 Step 2에 해당. Step 3 API 라우터 구현은 CLIAR-21 범위 밖으로 분리되었고,
 별도 티켓 범위가 확정되면 새 PLAN 섹션으로 옮긴다. 지금은 이 파일에 손대지 않는다.)
-
-**Task 6: Pydantic V2 DTO와 BookRepository**
-- 목표: 영속성과 프레젠테이션을 분리하고 조회 로직을 리포지토리로 캡슐화한다.
-- 가이드: `api/schemas/`에 목록용(`BookSummary`)·상세용(`BookDetail`) 분리, `model_config = ConfigDict(from_attributes=True)` 명시. `BookRepository`에 `upsert(book)`(`ON CONFLICT DO UPDATE`, `search_vector` 갱신 포함), `search_by_embedding(vector, filters, limit, use_hybrid_search=False)`. 세션 종료 전 `model_validate`로 파싱 완료해 `MissingGreenlet` 차단. 페이징 쿼리에 To-Many `joinedload` 금지.
-- 테스트: 통합 — upsert 멱등성(같은 `book_id` 두 번 → 1행, 값 갱신), 벡터 검색과 하이브리드 검색(옵션 on) 결과 비교. 단위 — DTO 직렬화 필드 검증.
-- Demo: 리포지토리 호출만으로 도서를 저장·갱신하고 Pydantic DTO 리스트를 돌려받는다.
 
 **Task 7: Bedrock Mocking 계층**
 - 목표: AWS 미연동 상태에서 임베딩·챗 응답을 결정론적으로 제공하고, 실연동으로 갈아끼울 수 있게 한다.
