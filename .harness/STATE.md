@@ -8,3 +8,4 @@
 | 계획 수립 | ✅ 계획 수립 완료 | 3스텝(인프라 → 핵심 코드 → API 라우터) 체크리스트를 `PLAN.md`에 확정 |
 | CLIAR-21 인프라 세팅 | ✅ 완료 | Task 1(pyproject.toml+uv.lock, boto3), Task 2(docker-compose·Dockerfile·.env.example), Task 3(FastAPI 앱·/health, db+redis+app 컨테이너 healthy), Task 4(Alembic async 초기화 + pgvector 확장 리비전, `db_session`/`client` 픽스처, 통합 테스트 2건 통과) 모두 완료. develop에 머지됨 |
 | CLIAR-40 핵심 코드 구현 | ✅ 완료 | Task 5(`books` 모델), Task 6(DTO+BookRepository), Task 7(Bedrock Mocking+실 클라이언트, `LLM_PROVIDER` 스위치), Task 8(Redis `ChatSessionStore` — append/get 순서, LTRIM 상한, sliding window TTL, clear, 통합 테스트 4건) 모두 완료. `CHAT_HISTORY_MAX_TURNS`/`CHAT_SESSION_TTL_SECONDS`는 환경변수로 조절 가능 |
+| CLIAR-51 API 라우터 구현 | 🚧 진행 중 | Task 9(`docs/api/openapi.yaml` 3개 엔드포인트 상세 스키마+에러 응답 확정, `X-Internal-Token` 보안 스키마, ADR 0001 작성 — `/internal/sync-book`은 실시간 단건 갱신 전용이며 대량 적재(CSV 배치)는 별도 티켓으로 분리, openapi-spec-validator 통과) 완료. Task 10~13 진행 예정 |

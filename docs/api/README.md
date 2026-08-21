@@ -17,9 +17,14 @@ Schema·계약 테스트를 함께 갱신한다.
 
 ## 현재 상태
 
-`openapi.yaml`은 아직 스켈레톤이다. 3개 엔드포인트(`POST /chat`, `GET /curations/time-based`,
-`POST /internal/sync-book`)의 경로와 보안 스키마(`X-Internal-Token`)만 자리를 잡아두었고,
-상세 요청/응답 스키마 확정은 `.harness/PLAN.md`의 Task 9에서 수행한다.
+`openapi.yaml`의 3개 엔드포인트(`POST /chat`, `GET /curations/time-based`,
+`POST /internal/sync-book`) 계약이 확정되었다(CLIAR-51 Task 9). 요청/응답 스키마,
+에러 응답(400/401/404/422/503), `X-Internal-Token` 보안 스키마가 정의되어 있다.
+`/internal/sync-book`의 범위(실시간 단건 갱신 전용, 대량 적재 수단 아님)는
+`decisions/0001-internal-sync-contract.md`를 참고한다.
+
+라우터 구현은 `.harness/PLAN.md`의 Task 10~13에서 순차 진행 중이다. 코드 구현이
+계약과 어긋나지 않는지는 Task 13의 계약 테스트로 검증한다.
 
 ## 스펙 검증 방법
 

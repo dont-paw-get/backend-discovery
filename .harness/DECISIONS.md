@@ -4,6 +4,7 @@
 
 | 날짜 | 결정 | 이유 |
 | --- | --- | --- |
+| 2026-08-21 | `POST /internal/sync-book`(단건 동기 HTTP)은 실시간 갱신·테스트용으로 범위를 좁히고, 대량 초기 적재는 별도 CSV 배치로 처리한다. Basic API 담당자 확인: 하루 최대 5,000건, 총 약 25만 건 규모이며 25만 건 CSV 원본 파일은 이미 전달받은 상태 | 25만 건 규모를 단건 HTTP 호출로 적재하면 요청 수·지연시간·부분 실패 처리 비용이 커진다. CSV 배치는 대량 적재에 적합한 방식이고, 단건 동기 API는 Basic API 쪽에서 개별 도서가 생성/수정될 때의 실시간 반영과 통합 테스트 용도로 남겨둔다. CSV 배치 자체(동시성 제어, 실패 재시도, 멱등성)는 별도 티켓으로 분리한다(`.harness/BACKLOG.md` 참고). |
 | 2026-08-21 | `redis.asyncio.Redis`의 메서드 반환값은 mypy override(`ignore_missing_imports`)가 아니라 `typing.cast`로 명시적으로 처리 | `redis`는 `pgvector`/`testcontainers`/`boto3`와 달리 `py.typed` 마커가 있어 실제로 타입이 분석된다. 다만 redis-py가 동기/비동기 클라이언트를 같은 시그니처로 오버로드해 반환형이 `Awaitable[T] | T`로 애매하게 잡힌다. override로 모듈 전체를 무시하면 실제 타입 에러까지 놓칠 수 있어, 호출부마다 `cast`로 async 반환형만 명시했다. |
 | 2026-08-21 | 대화 세션 TTL은 고정 만료가 아니라 매 쓰기(`append_turn`)마다 갱신되는 sliding window 방식으로 구현 | 사용자가 대화를 계속 이어가는 도중에 세션이 만료되어 문맥이 끊기면 챗봇 경험이 나빠진다. 마지막 턴 이후 일정 시간(기본 1시간, `CHAT_SESSION_TTL_SECONDS`) 동안 추가 메시지가 없을 때만 만료되게 해, 활성 대화는 계속 유지하면서 방치된 세션은 자동 정리한다. |
 | 2026-08-21 | `mypy-boto3-bedrock-runtime` 스텁을 dev 의존성에 추가하고, `[[tool.mypy.overrides]]`에 `boto3.*` (`ignore_missing_imports = true`)도 함께 추가 | mypy strict에서 `import boto3` 자체가 py.typed 마커 없음 에러(`import-untyped`)를 냈다. `mypy-boto3-bedrock-runtime`은 `BedrockRuntimeClient` 같은 반환 타입 어노테이션에는 유용하지만 `boto3` 패키지 자체의 타입 스텁을 제공하지 않아 이 에러를 해소하지 못했다. `pgvector`/`testcontainers`와 동일하게 `boto3.*`를 override 대상에 추가해 해결했다. |

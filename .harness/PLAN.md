@@ -1,27 +1,18 @@
-# PLAN — backend-discovery (CLIAR-40-Core-Implementation)
+# PLAN — backend-discovery (CLIAR-51-API-Routers)
 
-## CLIAR-40. 핵심 코드 구현
+## CLIAR-51. API 라우터 구현
 
-(모든 Task 완료)
+(Step 3, Task 9~13 진행 중)
 
 ---
 
 ## Task 상세
 
-### CLIAR-40 — 핵심 코드 구현
-(원래 계획의 Step 2에 해당. Step 3 API 라우터 구현은 CLIAR-21 범위 밖으로 분리되었고,
-별도 티켓 범위가 확정되면 새 PLAN 섹션으로 옮긴다. 지금은 이 파일에 손대지 않는다.)
-
-### Step 3 — API 라우터 구현
-
-**Task 9: `docs/api/` 계약 산출물 확정**
-- 목표: 코드보다 먼저 wire 계약을 확정한다.
-- 가이드: `docs/api/openapi.yaml`에 3개 엔드포인트의 경로·요청/응답 스키마·에러 응답(400/401/404/422/503)과 `X-Internal-Token` securityScheme 정의. `docs/api/README.md`에 문서 탐색·검증 방법. `docs/api/decisions/0001-internal-sync-contract.md`에 "Basic API가 push하는 단건 동기 HTTP 방식 채택" ADR. `.harness`에 이 내용을 복제하지 않고 참조만.
-- 테스트: OpenAPI 스펙 유효성 검사 통과.
-- Demo: 스펙 파일을 Swagger UI/Redoc에 넣으면 3개 엔드포인트 계약을 열람할 수 있다.
+### CLIAR-51 — API 라우터 구현
+(원래 계획의 Step 3에 해당. CLIAR-40 핵심 코드 구현 완료 후 별도 티켓으로 분리 확정.)
 
 **Task 10: `POST /internal/sync-book`**
-- 목표: Basic API가 보낸 도서 데이터를 임베딩해 읽기 모델에 멱등 반영한다.
+- 목표: Basic API가 보낸 도서 데이터를 임베딩해 읽기 모델에 멱등 반영한다. 단건·실시간·테스트용이며 대량 적재 수단이 아니다(CSV 배치는 별도 티켓, `.harness/BACKLOG.md` 참고).
 - 가이드: `SyncService.sync(payload)`가 임베딩 대상 텍스트(제목+저자+설명+category)를 조립해 `EmbeddingClient`로 벡터를 얻고 `BookRepository.upsert` 호출(`search_vector`도 같은 upsert에서 갱신). 커밋은 서비스 계층. 라우터에 `verify_internal_token` 의존성 부착. 스키마는 openapi.yaml과 1:1.
 - 테스트: 단위 — mocker로 임베딩/리포지토리 대체, 반환 결과와 조립된 임베딩 입력 텍스트 검증. E2E — 토큰 없으면 401, 유효 요청 200 + DB 1행, 재전송 시에도 1행(멱등).
 - Demo: curl 한 번으로 도서를 동기화하고, 두 번 호출해도 중복 없이 갱신되는 것을 DB에서 확인한다.
@@ -47,7 +38,12 @@
 ---
 
 ## 함께 갱신할 산출물 (AGENTS.md 동기화 정책)
-- Task 1 완료 시 → `.harness/ARCHITECTURE.md` 기술 스택 표 확정
-- Task 5·9 완료 시 → `docs/api/openapi.yaml` 및 필요 시 `docs/api/decisions/` ADR 추가
+- Task 9 완료 시 → `docs/api/openapi.yaml` 확정 + `docs/api/decisions/0001-internal-sync-contract.md` ADR 작성
 - 각 Task 완료 시 → `PLAN.md`에서 항목 제거 + `STATE.md` 단계 한 줄 갱신
 - 세션 종료 시 → `.harness/HANDOFF.md` 인수인계 append
+
+## 운영 규칙 (CLIAR-51)
+- Task 완료마다 커밋을 분리하고 `[CLIAR-51]` 태그를 붙인다.
+- Task 완료 보고에는 사용자가 직접 확인 가능한 방법(curl, psql, `/docs` Swagger UI 등)을 포함한다.
+- push/merge는 사용자의 명시적 승인이 있을 때만 수행하며, push 전 변경 파일 목록과 diff 요약을 먼저 제시한다.
+- Bedrock 실제 API 호출이 필요한 테스트(비용 발생 가능)는 별도 승인 후에만 진행한다.
