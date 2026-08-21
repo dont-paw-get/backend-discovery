@@ -27,3 +27,50 @@
 1. 다음 티켓 번호와 범위(Step 2/3의 분할 방식)를 사용자로부터 받아 `PLAN.md` 처리 방식을 논의한다.
 2. 원격 브랜치명을 로컬과 맞출지(push 방식) 사용자와 확인한다.
 3. 커밋·push·PR은 사용자가 명시적으로 요청할 때까지 수행하지 않는다.
+
+
+## 2026-08-21 — CLIAR-40 착수
+- CLIAR-21 PR이 `develop`에 머지된 것을 확인(`git pull`로 `origin/develop`이 `36728f7`로 갱신됨).
+- `develop`에서 `CLIAR-40-Core-Implementation` 브랜치를 새로 분기했다.
+- AWS 계정이 확보되어 Bedrock 등 실제 AWS 리소스 접근이 가능해졌다. 다만 로컬 개발 단계는 Mock을 기본으로 유지하고, 기존 `LLM_PROVIDER=mock|bedrock` 스위치로 실 Bedrock 전환이 가능하게 Task 7을 설계하기로 했다(별도 `USE_REAL_BEDROCK` 플래그는 추가하지 않음 — `.harness/DECISIONS.md` 참고).
+- `PLAN.md`를 CLIAR-40 범위(Task 5~8)로 갱신했다. Step 3(API 라우터, Task 9~13)은 이번 티켓 범위 밖이며 별도 티켓이 확정되면 다시 반영한다.
+- 이번 티켓부터는 Task 완료 보고에 사용자가 직접 확인할 수 있는 방법(터미널 명령, psql 조회, /docs 확인 등)을 포함하기로 합의했다.
+
+### 다음 세션이 할 일
+1. Task 5(pgvector 모델링 + tsvector/GIN + 마이그레이션)부터 착수.
+2. 매 Task 완료 시 텍스트 보고와 함께 직접 확인 가능한 검증 방법을 제시하고 사용자 승인을 기다린다.
+
+
+## 2026-08-21 — CLIAR-40 Task 5~8 전체 완료
+- CLIAR-40(핵심 코드 구현) 범위였던 Task 5~8을 모두 완료했다. 각 Task는 완료 보고 시
+  사용자가 직접 확인 가능한 방법(psql, redis-cli, pytest 명령, 환경변수 오버라이드 등)을
+  제시하고, 사용자가 실제로 실행해 확인한 뒤 승인받는 방식으로 진행했다.
+  - Task 5: `books` 모델(HNSW/embedding, GIN/search_vector generated column), 마이그레이션 2건.
+  - Task 6: `BookSummary`/`BookDetail` DTO, `BookRepository`(upsert 멱등, 벡터+하이브리드 검색).
+  - Task 7: `EmbeddingClient`/`ChatCompletionClient` Protocol, Mock 구현(결정론적), 실제
+    `boto3` `bedrock-runtime`을 호출하는 `BedrockClient`. `LLM_PROVIDER`(기본 mock) 스위치로
+    선택. 단위 테스트는 `boto3.client`를 `mocker.patch`로 대체해 실제 AWS 호출 없이 검증
+    (AWS 자격증명 unset 상태에서도 통과함을 사용자가 직접 확인).
+  - Task 8: Redis `ChatSessionStore`(RPUSH+LTRIM, sliding window TTL). 최대 턴 수와 TTL은
+    `core/config.py`의 `chat_history_max_turns`/`chat_session_ttl_seconds`로 뽑아 환경변수
+    (`CHAT_HISTORY_MAX_TURNS`, `CHAT_SESSION_TTL_SECONDS`)로 조절 가능하게 했다.
+- 커밋은 Task 단위로 5개 분리 생성(`ba38475`~`c62c083`). 사용자 지시로 pre-commit
+  훅(Git 정책/ruff/mypy/커밋 메시지 검증) 관련 변경도 별도 커밋으로 분리했다.
+- 진행 중 실제 코드 버그 2건을 테스트가 잡아냄: (1) `bedrock_client.py`에서
+  `payload["embedding"]` 직접 접근으로 의도한 `ValueError` 대신 `KeyError`가 나던 문제 →
+  `payload.get(...)`으로 수정. (2) 테스트에서 mypy 변수 타입 재사용으로 인한 오추론(별개
+  이슈, 변수명 분리로 해결).
+- mypy strict 대응: `pgvector`/`testcontainers`/`boto3`는 `[[tool.mypy.overrides]]`로
+  `ignore_missing_imports` 처리했지만, `redis`는 `py.typed`가 실제로 있어 override 대신
+  호출부마다 `typing.cast`로 처리했다(모듈 전체를 무시하면 실제 타입 에러를 놓칠 위험이
+  있어서 — `.harness/DECISIONS.md` 참고).
+- push/PR은 아직 하지 않았다. 사용자가 diff를 직접 확인한 뒤 별도로 요청할 예정이다.
+
+### 다음 세션이 할 일
+1. 사용자가 diff 확인 후 push/PR 여부와 방식을 지시하면 그에 따라 진행한다
+   (`git push -u origin CLIAR-40-Core-Implementation` 등, CLIAR-21 때와 유사한 흐름 예상).
+2. PR 생성 시 base 브랜치가 `develop`으로 명시적으로 잡히는지 확인한다
+   (CLIAR-21 때 GitHub 원격 HEAD가 `main`으로 잡혀 있던 이력이 있음 — 재확인 필요).
+3. CLIAR-40 이후 범위(기존 계획의 Step 3, API 라우터 Task 9~13)는 아직 새 티켓 번호가
+   없다. 사용자가 새 티켓을 알려주면 `develop`에서 새 브랜치를 분기하고 `PLAN.md`를 그
+   범위로 갱신한다.

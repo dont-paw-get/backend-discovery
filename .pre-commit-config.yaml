@@ -1,0 +1,26 @@
+# 커밋 단계 검증만 담당한다. push/merge 승인 정책은 AGENTS.md "Git 작업 정책"이 규정하며
+# 이 훅의 범위가 아니다 (pre-commit은 로컬 커밋 훅만 실행할 수 있어 push를 막을 수 없음).
+#
+# 설치: uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check
+        language: system
+        types: [python]
+        pass_filenames: true
+
+      - id: mypy
+        name: mypy
+        entry: uv run mypy .
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: commit-msg-ticket-format
+        name: 커밋 메시지 [CLIAR-XX] 형식 검증
+        entry: python3 scripts/check_commit_msg.py
+        language: system
+        stages: [commit-msg]
