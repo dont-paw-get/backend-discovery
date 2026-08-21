@@ -1,7 +1,6 @@
 # PLAN — backend-discovery (CLIAR-40-Core-Implementation)
 
 ## CLIAR-40. 핵심 코드 구현
-- [ ] Task 7: Bedrock Mocking 계층 (Mock 기본, LLM_PROVIDER 스위치로 실 Bedrock 전환 가능하게 설계)
 - [ ] Task 8: Redis 비동기 대화 세션 스토어
 
 ---
@@ -11,13 +10,6 @@
 ### CLIAR-40 — 핵심 코드 구현
 (원래 계획의 Step 2에 해당. Step 3 API 라우터 구현은 CLIAR-21 범위 밖으로 분리되었고,
 별도 티켓 범위가 확정되면 새 PLAN 섹션으로 옮긴다. 지금은 이 파일에 손대지 않는다.)
-
-**Task 7: Bedrock Mocking 계층**
-- 목표: AWS 미연동 상태에서 임베딩·챗 응답을 결정론적으로 제공하고, 실연동으로 갈아끼울 수 있게 한다.
-- 배경: AWS 계정이 확보되어 실제 Bedrock 리소스 접근이 가능해졌다. 다만 로컬 개발 단계에서는 Mock을 기본값으로 유지하고, 이미 존재하는 `LLM_PROVIDER=mock|bedrock`(`core/config.py`) 스위치로 실 Bedrock 전환이 가능하게 설계한다. 별도의 `USE_REAL_BEDROCK` 같은 boolean 플래그는 추가하지 않는다 — `LLM_PROVIDER`가 이미 같은 역할(구현 선택)을 하므로 스위치를 이중화하면 두 값이 어긋날 위험이 있다.
-- 가이드: `infrastructure/llm/protocols.py`에 `EmbeddingClient.embed(texts) -> list[list[float]]`, `ChatCompletionClient.complete(messages) -> str` Protocol. `mock_bedrock.py`는 입력 문자열 해시를 시드로 1536차원 정규화 벡터 생성(같은 입력 → 같은 벡터), 챗은 사서 페르소나 템플릿에 후보 도서를 채운 고정 문구 반환. `factory.py`가 `settings.llm_provider`로 구현 선택, `api/deps.py`에서 주입. `LLM_PROVIDER=bedrock`일 때 실제로 `boto3` `bedrock-runtime` 클라이언트를 생성하는 `BedrockClient`도 함께 구현한다(이번 Task 범위, AWS 계정 확보로 실 코드 작성 가능). 단, 기본값은 여전히 `mock`으로 두고, `.env.example`에 `LLM_PROVIDER=mock`이 기본값임을 주석으로 명시한다. **boto3 타입 스텁 판단 순서**: 먼저 스텁 없이 `uv run mypy .`를 실행해 strict 모드에서 `boto3.client(...)` 호출부에 에러(예: 반환 타입 `Any`로 인한 unreachable/no-any-return 등)가 나는지 확인한다. 에러가 있으면 `mypy-boto3-bedrock-runtime`(Task 1 조사 시점 최신 안정: `1.43.62` 기준 상한 핀)을 dev 그룹에 추가하고 재검증한다. 에러가 없으면 스텁 없이 진행하고 `.harness/DECISIONS.md`에 그 판단과 근거를 기록한다.
-- 테스트: 단위 — Mock: 동일 입력 반복 시 벡터 동일, 차원 정확히 1536, L2 노름 ≈ 1, 다른 입력은 다른 벡터. Bedrock: `boto3` 클라이언트 호출을 mocker로 대체해 요청 페이로드 조립과 응답 파싱만 검증(AWS 계정으로 실제 호출은 하지 않음 — 비용·네트워크 의존 없는 단위 테스트 유지).
-- Demo: `LLM_PROVIDER=mock`(기본값)으로 임베딩 벡터와 사서 톤 답변을 즉시 얻는다. `.env`에서 `LLM_PROVIDER=bedrock`으로 바꾸고 유효한 AWS 자격증명을 주입하면 동일한 인터페이스로 실제 Bedrock 응답을 받을 수 있음을 코드 경로로 보여준다(실제 호출은 사용자 확인 후 별도로 검증).
 
 **Task 8: Redis 비동기 대화 세션 스토어**
 - 목표: 멀티턴 대화 문맥을 TTL과 함께 비동기로 저장·조회한다.
