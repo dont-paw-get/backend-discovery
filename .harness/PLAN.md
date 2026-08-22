@@ -1,47 +1,32 @@
-# PLAN — backend-discovery (CLIAR-51-Recommendation-Agent)
+# PLAN — backend-discovery (사서 추천 에이전트 고도화 & 도서 등록 연동)
 
-브랜치명을 `CLIAR-51-API-Routers`에서 `CLIAR-51-Recommendation-Agent`로 rename했다
-(push된 적 없는 로컬 전용 브랜치라 로컬 rename만으로 충분, 원격 조치 불필요).
-PLAN.md 제목과 브랜치명을 통일했다. PostgreSQL/RDB는 완전히 제거됐고, 남은
-인프라는 Redis(`ChatSessionStore`)뿐이다.
+이전 `CLIAR-51` 티켓(Strands 사서 에이전트 구축, Tavily 도서 검색 연동, Redis 세션 관리, 스트리밍 라우터, 프론트 연동)이 모두 완료되어 `main` 및 `develop`에 머지되었습니다.
 
-이전에 검토했던 "별도 추천 에이전트 레포로 이관"은 취소됐다. backend-discovery
-자체가 Strands 기반 추천 에이전트 역할을 계속 맡는다.
+다음 세션에서는 사용자가 요청한 **"사서 답변 포맷 구조화 및 프론트엔드 [도서 등록] 버튼 연동"**을 중심으로 개선 작업을 진행합니다.
 
-## 참고 문서 (구현 전 확인)
+---
 
-- `.harness/research/2026-08-21-strands-agents-poc-design.md` — Agent/tool 모델링
-  초안(`system_prompt`로 페르소나 분리, 공용 검색은 `@tool`로 공유)
-- `.harness/research/2026-08-21-librarian-agent-model-and-latency.md` — 모델 선택
-  조사 당시 1차 추천은 Claude Haiku 4.5였으나, 이후 교육 계정에서 Haiku 4.5/
-  Sonnet 4 이상이 전 리전 차단된 것이 확인되어 **Claude 3 Haiku**로 확정했다
-  (`.harness/BACKLOG.md` 참고, `core/config.py`의 `librarian_model_id`). 속도
-  최적화 기법(①스트리밍 ②프롬프트 캐싱 ③지연시간 최적화 추론 ④검색 결과 캐싱
-  ⑤병렬 도구 실행)은 여전히 유효하나, ③은 Claude 3 Haiku 기준으로 지원 여부를
-  재확인해야 한다(조사 시점엔 3.5 Haiku만 확인됨, 3 Haiku는 별도 확인 필요).
-- `.harness/ARCHITECTURE.md` — 현재 디렉토리 구조, Redis 키 구조
+## 📋 개선 작업 계획 (Checklist)
 
-## Task 목록
+### Step 1: 사서 추천 답변 포맷 구조화 (프론트 연동 지원)
+- [ ] **목표:** 프론트엔드가 추천 답변에서 도서명/저자/추천이유를 손쉽게 파싱하여 `[내 서재에 등록하기]` 버튼을 띄울 수 있도록 시스템 프롬프트를 고도화한다.
+- [ ] **가이드:**
+  - 사서 시스템 프롬프트(`LIBRARIAN_SYSTEM_PROMPT`)에 일정한 마크다운 출력 템플릿(예: `### 📖 {제목} ({저자})` + `> **추천 사유**: ...`) 명시.
+  - 프론트엔드 정규식 파서가 도서명과 저자명을 명확히 추출할 수 있도록 포맷 고정.
+- [ ] **검증:** 단위 테스트로 프롬프트 변경 검증, 프론트엔드(`my-reading-room`)에서 도서 등록 버튼 렌더링 확인.
 
-- [x] **Task 1: Strands Agents SDK 도입 및 기본 에이전트 팩토리** (`create_librarian_agent`, Claude 3 Haiku)
-- [x] **Task 2: Tavily 도서 웹 검색 도구 구현** (`BookSearchTool`, Redis 캐시, 월간 사용량 상한)
-- [x] **Task 3: ChatSessionStore 연동 및 배선** (`LibrarianService`, 멀티턴 대화 히스토리 전달/기록)
-- [x] **Task 4: POST /chat 라우터 + 스트리밍 응답 + CORS 설정 + API 계약** (`docs/api/openapi.yaml`)
-- [x] **Task 5: 프롬프트 캐싱 적용** (`BedrockModel` `CacheConfig(strategy="auto")` 및 `cache_tools="default"`)
-- [x] **Task 6: 통합 테스트 + Docker Compose 정리** (`tests/integration/test_chat_integration.py`, `docker-compose.yml`)
+### Step 2: Tavily 검색 질의 최적화 (국내 도서 메타데이터 정확도 향상)
+- [ ] **목표:** 실시간 웹 검색 시 국내 출간 도서 및 주요 서점(교보, 알라딘, 예스24) 정보를 우선적으로 찾도록 도구 설명 및 검색 가이드 보강.
+- [ ] **검증:** 다양한 장르/테마 질의("비 오는 날 소설", "쉽게 읽는 인문학" 등)로 검색 정확도 확인.
 
-## 운영 규칙 (계속 적용)
+### Step 3: 종합 E2E 검증 및 문서 동기화
+- [ ] 프론트엔드에서 대화 → 도서 추천 → [내 서재에 등록하기] 클릭까지의 전체 사용자 경험 검증.
+- [ ] `docs/api/openapi.yaml` 및 하네스 문서 최신화.
 
-- Task 완료마다 커밋을 분리하고 `[CLIAR-51]` 태그를 붙인다.
-- Task 완료 보고에는 사용자가 직접 확인 가능한 방법을 포함한다.
-- push/merge는 사용자의 명시적 승인이 있을 때만 수행하며, push 전 변경 파일 목록과
-  diff 요약을 먼저 제시한다.
-- **Bedrock/Tavily 실제 API 호출이 필요한 테스트(비용 발생 가능)는 별도 승인 후에만
-  진행한다.** 특히 Tavily는 무료 티어 크레딧 소진 위험이 있으므로, 실제 호출이
-  필요한 테스트는 최소 횟수로 제한하고 사전에 알린다.
+---
 
-## 함께 갱신할 산출물 (AGENTS.md 동기화 정책)
+## 운영 규칙
 
-- Task 4 완료 시 → `docs/api/openapi.yaml`에 `/chat` 계약 반영 (완료)
-- 각 Task 완료 시 → `PLAN.md`에서 항목 제거 + `STATE.md` 단계 한 줄 갱신 (완료)
-- 세션 종료 시 → `.harness/HANDOFF.md` 인수인계 append
+- 작업 브랜치는 `develop`에서 분기한다.
+- Task 완료마다 커밋을 분리하고 티켓 태그를 붙인다.
+- 작업 완료 후 `PLAN.md`에서 항목을 제거하고 `STATE.md`에 반영한다.

@@ -142,16 +142,14 @@
    (Strands 설계, 모델/속도)를 그 레포 세션에 전달해 참고하게 한다.
 
 
-## 2026-08-22 — CLIAR-51 추천 에이전트 Task 1~6 전체 구현 완료 및 프론트엔드 연동 지원
-- 브랜치: `CLIAR-51-Recommendation-Agent`
-- pre-commit `ruff-check` 훅에 `--force-exclude` 옵션을 추가하여 staged된 archive 디렉토리가 정상 스킵되도록 조치 (`fc6056a`).
-- 이전에 완료된 pgvector/RDB 폐기 및 `archive/` 이동 작업, PostgreSQL 의존성 제거를 별도 커밋(`73f9438`)으로 분리.
-- Task 1(Strands Agent 팩토리)과 Task 2(Tavily 도서 검색 도구 및 Redis 캐시/사용량 제한기) 커밋(`951f14d`).
-- Task 3(ChatSessionStore 멀티턴 대화 세션 연동 및 도구 배선, `LibrarianService`), Task 4(FastAPI `/chat` 및 `/api/v1/chat` 라우터, 일반 JSON/스트리밍 응답 지원, 프론트엔드 연동용 CORSMiddleware 등록, OpenAPI 계약 반영) 구현 및 커밋(`c064923`).
-- Task 5(Bedrock `CacheConfig(strategy="auto")` 자동 프롬프트 캐싱 및 `cache_tools="default"` 적용) 및 Task 6(Redis Testcontainers 멀티턴 대화 통합 테스트 `test_chat_integration.py` 작성, `docker-compose.yml` 및 `Dockerfile` 정리) 완료.
-- 전체 정적 분석(ruff, mypy strict) 및 단위 테스트 22건 100% 통과.
+## 2026-08-23 — CLIAR-51 PR 머지 완료, 브랜치 정리 및 다음 개선 계획 수립
+- `CLIAR-51` PR(#4)이 머지 완료되어 `main`과 `develop` 브랜치에 정상 반영됨.
+- `session_id: null` 유연 처리(Pydantic 422 픽스) 및 Claude 3 Haiku용 Bedrock 설정 최적화 커밋(`eaa87e2`) 완료.
+- 프론트엔드(`my-reading-room`)와의 실시간 스트리밍 대화 연동 테스트 성공 확인.
+- 머지 완료된 로컬 및 원격 피처 브랜치(CLIAR-20, CLIAR-21, CLIAR-40, CLIAR-51) 정리 완료.
+- `.harness/PLAN.md`에 다음 작업(사서 답변 출력 포맷 구조화 및 프론트엔드 도서 등록 버튼 연동 등) 계획 수립 완료.
 
 ### 다음 세션이 할 일
-1. 프론트엔드 연동 테스트 결과 피드백 확인 및 필요 시 질의/답변 튜닝.
-2. CLIAR-51 작업 완료 후 `develop` 브랜치로 PR 생성 및 머지 진행 (사용자 승인 시).
-3. 머지 완료 후 로컬/원격 `CLIAR-51-Recommendation-Agent` 브랜치 정리.
+1. `develop` 브랜치 최신 pull 확인 (`git checkout develop && git pull origin develop`).
+2. `.harness/PLAN.md`에 수립된 Step 1(사서 추천 답변 포맷 구조화 및 마크다운 템플릿 튜닝)부터 새 티켓 브랜치를 분기하여 착수.
+3. 프론트엔드에서 추천된 도서 목록이 깔끔하게 파싱되어 `[내 서재에 등록하기]` 버튼이 동작하는지 연동 확인.
