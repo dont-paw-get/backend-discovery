@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     """환경 변수 기반 설정. 필드는 .env.example과 1:1로 대응한다.
 
     Bedrock 모델 ID는 용도별로 분리한다(단일 필드로 전체를 통일하지 않음). 지금은
-    사서 에이전트 하나만 있어 `librarian_model_id`뿐이지만, 나중에 특정 기능만
+    추천 에이전트 하나만 있어 `librarian_model_id`뿐이지만, 나중에 특정 기능만
     다른 모델(예: Claude 3.5 Sonnet)로 바꿀 때 해당 필드만 환경변수로 교체하면
     되도록 확장 지점을 미리 둔다.
     """
@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     aws_region: str | None = None
     chat_history_max_turns: int = 20
     chat_session_ttl_seconds: int = 3600
-    # 사서 에이전트(추천 에이전트) 전용 모델. 기본값 Claude 3 Haiku
+    # 추천 에이전트 전용 모델. 기본값 Claude 3 Haiku
     # (`anthropic.claude-3-haiku-20240307-v1:0`) — 교육 계정에서 실제 호출 가능
     # 확인된 모델. 특정 기능만 더 강한 모델(Claude 3.5 Sonnet 등)로 바꾸려면
     # `LIBRARIAN_MODEL_ID` 환경변수만 교체한다(다른 용도의 모델 설정에 영향 없음).

@@ -1,7 +1,5 @@
 """대화(Chat) API 요청 및 응답 Pydantic 스키마."""
 
-import uuid
-
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -10,9 +8,9 @@ class ChatRequest(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    session_id: str = Field(
-        default_factory=lambda: str(uuid.uuid4()),
-        description="대화 세션 ID. 미입력 시 새 세션 UUID가 자동 발급된다.",
+    session_id: str | None = Field(
+        default=None,
+        description="대화 세션 ID. 미입력 또는 null 시 새 세션 UUID가 자동 발급된다.",
         examples=["sess-1234-abcd"],
     )
     message: str = Field(
@@ -40,5 +38,5 @@ class ChatResponse(BaseModel):
     )
     message: str = Field(
         ...,
-        description="사서 에이전트의 추천 답변.",
+        description="추천 에이전트의 답변.",
     )

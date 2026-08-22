@@ -1,4 +1,4 @@
-"""사서 에이전트와 대화 세션을 조율하는 애플리케이션 서비스.
+"""추천 에이전트와 대화 세션을 조율하는 애플리케이션 서비스.
 
 세션 히스토리를 로드하여 Strands 에이전트에 전달하고, 질의 처리 후 사용자 턴과
 어시스턴트 턴을 ChatSessionStore에 기록한다.
@@ -34,7 +34,7 @@ def extract_text_from_message(message: Any) -> str:
 
 
 class LibrarianService:
-    """사서 에이전트 대화 및 세션 관리를 총괄하는 서비스."""
+    """추천 에이전트 대화 및 세션 관리를 총괄하는 서비스."""
 
     def __init__(
         self,

@@ -11,8 +11,8 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 
 ### 담당 기능
 1. **추천 에이전트 (Strands Agents SDK)** — 자연어 질의에 웹 검색 도구(Tavily)로
-   후보 도서를 찾고, 사서(Librarian) 페르소나로 추천 답변을 생성한다. 페르소나별로
-   에이전트를 분리할 수 있는 구조를 지향한다(현재는 사서 하나, 향후 확장 가능).
+   후보 도서를 찾고, 추천 에이전트 페르소나로 추천 답변을 생성한다. 페르소나별로
+   에이전트를 분리할 수 있는 구조를 지향한다(현재는 추천 에이전트 하나, 향후 확장 가능).
    설계 근거: `.harness/research/2026-08-21-strands-agents-poc-design.md`,
    모델·속도 최적화: `.harness/research/2026-08-21-librarian-agent-model-and-latency.md`.
 2. **대화 세션 관리** — `ChatSessionStore`(Redis)가 멀티턴 대화 히스토리를
@@ -41,7 +41,7 @@ asyncpg, Alembic, testcontainers(postgres). RDB로 남는 데이터가 없어 �
 
 ## 시스템 구성
 ```
-클라이언트 ──▶ (사서 에이전트 API, 설계 중) ─┐
+클라이언트 ──▶ (추천 에이전트 API, 설계 중) ─┐
                                           ▼
                     FastAPI (backend-discovery, "추천 에이전트")
                                           │

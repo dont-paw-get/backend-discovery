@@ -140,3 +140,18 @@
    판단 필요 — 방향 전환 자체가 새 티켓일 수 있음, 사용자 지시 필요).
 4. 사서 에이전트 새 레포 구현이 시작되면 이 레포의 `.harness/research/` 두 문서
    (Strands 설계, 모델/속도)를 그 레포 세션에 전달해 참고하게 한다.
+
+
+## 2026-08-22 — CLIAR-51 추천 에이전트 Task 1~6 전체 구현 완료 및 프론트엔드 연동 지원
+- 브랜치: `CLIAR-51-Recommendation-Agent`
+- pre-commit `ruff-check` 훅에 `--force-exclude` 옵션을 추가하여 staged된 archive 디렉토리가 정상 스킵되도록 조치 (`fc6056a`).
+- 이전에 완료된 pgvector/RDB 폐기 및 `archive/` 이동 작업, PostgreSQL 의존성 제거를 별도 커밋(`73f9438`)으로 분리.
+- Task 1(Strands Agent 팩토리)과 Task 2(Tavily 도서 검색 도구 및 Redis 캐시/사용량 제한기) 커밋(`951f14d`).
+- Task 3(ChatSessionStore 멀티턴 대화 세션 연동 및 도구 배선, `LibrarianService`), Task 4(FastAPI `/chat` 및 `/api/v1/chat` 라우터, 일반 JSON/스트리밍 응답 지원, 프론트엔드 연동용 CORSMiddleware 등록, OpenAPI 계약 반영) 구현 및 커밋(`c064923`).
+- Task 5(Bedrock `CacheConfig(strategy="auto")` 자동 프롬프트 캐싱 및 `cache_tools="default"` 적용) 및 Task 6(Redis Testcontainers 멀티턴 대화 통합 테스트 `test_chat_integration.py` 작성, `docker-compose.yml` 및 `Dockerfile` 정리) 완료.
+- 전체 정적 분석(ruff, mypy strict) 및 단위 테스트 22건 100% 통과.
+
+### 다음 세션이 할 일
+1. 프론트엔드 연동 테스트 결과 피드백 확인 및 필요 시 질의/답변 튜닝.
+2. CLIAR-51 작업 완료 후 `develop` 브랜치로 PR 생성 및 머지 진행 (사용자 승인 시).
+3. 머지 완료 후 로컬/원격 `CLIAR-51-Recommendation-Agent` 브랜치 정리.

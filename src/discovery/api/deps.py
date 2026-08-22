@@ -53,7 +53,7 @@ def get_librarian_service(
     session_store: ChatSessionStore = Depends(get_chat_session_store),
     book_search_tool: BookSearchTool = Depends(get_book_search_tool),
 ) -> LibrarianService:
-    """사서 에이전트 서비스."""
+    """추천 에이전트 서비스."""
     settings = get_settings()
     return LibrarianService(
         session_store=session_store,

@@ -22,7 +22,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="DPYB Discovery API",
-        description="도서 탐색 및 사서 AI 추천 에이전트 서비스",
+        description="도서 탐색 및 AI 추천 에이전트 서비스",
         version="0.2.0",
         lifespan=lifespan,
     )
@@ -38,6 +38,7 @@ def create_app() -> FastAPI:
     )
 
     @app.get("/health", tags=["Health"])
+    @app.get("/api/v1/health", tags=["Health"])
     async def health() -> dict[str, str]:
         return {"status": "ok"}
 

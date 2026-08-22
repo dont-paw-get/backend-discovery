@@ -1,10 +1,11 @@
-"""사서 에이전트 팩토리(create_librarian_agent)의 생성 결과를 검증한다.
+"""추천 에이전트 팩토리(create_librarian_agent)의 생성 결과를 검증한다.
 
 Bedrock 실제 호출은 발생시키지 않는다: BedrockModel 생성 자체를 mocker로 대체해
 boto3 클라이언트를 만들지 않게 한다(AWS 자격증명 unset 상태에서도 통과해야 한다).
 """
 
 from pytest_mock import MockerFixture
+from strands.models.model import CacheConfig
 
 from discovery.domain.librarian.agent import LIBRARIAN_SYSTEM_PROMPT, create_librarian_agent
 
@@ -12,12 +13,17 @@ from discovery.domain.librarian.agent import LIBRARIAN_SYSTEM_PROMPT, create_lib
 CLAUDE_3_HAIKU_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
 
 
-def test_create_librarian_agent_uses_configured_model_id(mocker: MockerFixture) -> None:
+def test_create_librarian_agent_uses_configured_model_id(
+    mocker: MockerFixture,
+) -> None:
     bedrock_model_cls = mocker.patch("discovery.domain.librarian.agent.BedrockModel")
 
     create_librarian_agent(model_id=CLAUDE_3_HAIKU_MODEL_ID)
 
-    bedrock_model_cls.assert_called_once_with(model_id=CLAUDE_3_HAIKU_MODEL_ID, region_name=None)
+    bedrock_model_cls.assert_called_once_with(
+        model_id=CLAUDE_3_HAIKU_MODEL_ID,
+        region_name=None,
+    )
 
 
 def test_create_librarian_agent_passes_region_name(mocker: MockerFixture) -> None:
@@ -26,7 +32,25 @@ def test_create_librarian_agent_passes_region_name(mocker: MockerFixture) -> Non
     create_librarian_agent(model_id=CLAUDE_3_HAIKU_MODEL_ID, region_name="us-east-1")
 
     bedrock_model_cls.assert_called_once_with(
-        model_id=CLAUDE_3_HAIKU_MODEL_ID, region_name="us-east-1"
+        model_id=CLAUDE_3_HAIKU_MODEL_ID,
+        region_name="us-east-1",
+    )
+
+
+def test_create_librarian_agent_with_prompt_caching(mocker: MockerFixture) -> None:
+    bedrock_model_cls = mocker.patch("discovery.domain.librarian.agent.BedrockModel")
+
+    create_librarian_agent(
+        model_id=CLAUDE_3_HAIKU_MODEL_ID,
+        region_name="us-east-1",
+        enable_prompt_caching=True,
+    )
+
+    bedrock_model_cls.assert_called_once_with(
+        model_id=CLAUDE_3_HAIKU_MODEL_ID,
+        region_name="us-east-1",
+        cache_config=CacheConfig(strategy="auto"),
+        cache_tools="default",
     )
 
 

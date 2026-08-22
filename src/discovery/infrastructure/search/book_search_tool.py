@@ -1,4 +1,4 @@
-"""Tavily 기반 도서 웹 검색 도구. Strands `@tool`로 감싸 사서 에이전트에 연결한다.
+"""Tavily 기반 도서 웹 검색 도구. Strands `@tool`로 감싸 추천 에이전트에 연결한다.
 
 비용 방어 4가지(.harness/PLAN.md Task 2):
 1. `search_depth`는 항상 "basic"으로 고정한다(호출부에 노출하지 않음. advanced는

@@ -1,4 +1,4 @@
-"""사서 추천 에이전트 대화 API 라우터."""
+"""추천 에이전트 대화 API 라우터."""
 
 import uuid
 from typing import Any
@@ -18,16 +18,16 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
     response_model=ChatResponse,
     responses={
         200: {
-            "description": "사서 에이전트 답변 (일반 JSON 또는 stream=True 시 스트리밍 텍스트)",
+            "description": "추천 에이전트 답변 (일반 JSON 또는 stream=True 시 스트리밍 텍스트)",
             "content": {
                 "application/json": {},
                 "text/plain": {},
             },
         }
     },
-    summary="사서 에이전트 도서 추천 대화",
+    summary="추천 에이전트 도서 추천 대화",
     description=(
-        "자연어 질문으로 사서 에이전트에게 도서 추천을 요청한다. "
+        "자연어 질문으로 추천 에이전트에게 도서 추천을 요청한다. "
         "이전 세션 ID를 전달하면 문맥을 유지한다."
     ),
 )

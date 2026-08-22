@@ -22,9 +22,8 @@ Schema·계약 테스트를 함께 갱신한다.
 폐기되었다. 해당 계약과 ADR(`0001-internal-sync-contract.md`)은
 `archive/vector-search-poc/docs/api/`로 이동했다 (`.harness/DECISIONS.md` 참고).
 
-`openapi.yaml`은 현재 `paths: {}`로 비어 있다. 사서 에이전트(대화·큐레이션 RAG)는
-별도 레포로 이관되어 그 레포가 자신의 API 계약을 별도로 소유한다. backend-discovery에
-남는 계약이 정해지면(`.harness/PLAN.md`, ERD 재검토 결과에 따라) 이 문서를 다시
+`openapi.yaml`은 현재 `paths: {}`로 비어 있다. 추천 에이전트(대화 기반 도서 추천)의
+API 계약이 정해지면(`.harness/PLAN.md` 참고) 이 문서를 다시
 채운다.
 
 ## 스펙 검증 방법

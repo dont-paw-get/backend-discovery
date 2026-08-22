@@ -66,6 +66,30 @@ async def test_chat_generates_session_id_if_empty() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_accepts_null_session_id() -> None:
+    mock_service = MagicMock()
+    mock_service.chat = AsyncMock(return_value="답변입니다.")
+
+    app.dependency_overrides[get_librarian_service] = lambda: mock_service
+
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={"session_id": None, "message": "질문"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["session_id"]) > 0
+        assert data["message"] == "답변입니다."
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_chat_streaming_response() -> None:
     async def fake_stream_chat(
         session_id: str, message: str

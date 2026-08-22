@@ -1,4 +1,4 @@
-"""사서(Librarian) 페르소나 에이전트. Strands Agents SDK 기반.
+"""추천 에이전트(Librarian 페르소나). Strands Agents SDK 기반.
 
 CLIAR-51 Task 1(스모크 테스트) 범위: 도구 없이 system_prompt만 가진 최소 에이전트를
 만들어 Strands SDK 도입이 정상 동작하는지 확인한다. 웹 검색 도구(Tavily) 연동은
@@ -13,6 +13,7 @@ from typing import Any
 
 from strands import Agent
 from strands.models import BedrockModel
+from strands.models.model import CacheConfig
 
 LIBRARIAN_SYSTEM_PROMPT = (
     "당신은 다정하고 신뢰감 있는 도서관 사서입니다. "
@@ -28,8 +29,9 @@ def create_librarian_agent(
     tools: list[Any] | None = None,
     messages: list[dict[str, Any]] | None = None,
     system_prompt: str = LIBRARIAN_SYSTEM_PROMPT,
+    enable_prompt_caching: bool = False,
 ) -> Agent:
-    """사서 페르소나 에이전트를 생성한다.
+    """추천 에이전트를 생성한다.
 
     Args:
         model_id: Bedrock 모델 ID (core/config.py의 Settings.librarian_model_id).
@@ -38,8 +40,17 @@ def create_librarian_agent(
         messages: 이전 대화 히스토리 (ChatSessionStore에서 불러온 내역을
             Strands 형식으로 변환한 것).
         system_prompt: 시스템 프롬프트.
+        enable_prompt_caching: Bedrock 자동 프롬프트 캐싱 활성화 여부 (지원 모델만 사용).
     """
-    model = BedrockModel(model_id=model_id, region_name=region_name)
+    model_kwargs: dict[str, Any] = {
+        "model_id": model_id,
+        "region_name": region_name,
+    }
+    if enable_prompt_caching:
+        model_kwargs["cache_config"] = CacheConfig(strategy="auto")
+        model_kwargs["cache_tools"] = "default"
+
+    model = BedrockModel(**model_kwargs)
     kwargs: dict[str, Any] = {
         "model": model,
         "system_prompt": system_prompt,
