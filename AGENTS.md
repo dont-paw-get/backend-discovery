@@ -61,30 +61,31 @@ API wire 계약과 계약 결정은 `.harness`가 아니라 `docs/api/openapi.ya
 
 **목표:** 서비스별 DB 소유권과 로컬·테스트·운영에서 사용할 DB 엔진을 고정한다.
 
-- 로컬 개발 환경의 PostgreSQL은 Docker(또는 Docker Compose)로 실행한다. 운영 접속 정보는 환경 변수(`.env`)나 비밀값으로 주입하고 코드나 설정 파일에 기본값을 하드코딩하지 않는다.
+- 현재 RDB 없음. `ChatSessionStore`(Redis)만 사용한다. 로컬 개발 환경의 Redis는
+  Docker(또는 Docker Compose)로 실행한다. 운영 접속 정보는 환경 변수(`.env`)나
+  비밀값으로 주입하고 코드나 설정 파일에 기본값을 하드코딩하지 않는다.
 
 ## 하네스: 테스트 및 정적 분석 실행 정책
 
 - 이 저장소는 루트에서 단일 Python 패키지로 관리된다. 모든 명령은 가상환경이 활성화된 상태에서 저장소 루트를 기준으로 실행한다.
 - 구현·수정 후 **기본 검증**은 **린트/타입 체크(`ruff`, `mypy` 등) 통과 후, 단위 테스트만 실행**한다 (`pytest -m "not integration"`).
-- **TDD로 통합 테스트를 작성·수정하는 작업** 중에는 해당 통합 테스트를 반드시 실행한다 (예: `pytest tests/integration/test_book_repository.py`).
+- **TDD로 통합 테스트를 작성·수정하는 작업** 중에는 해당 통합 테스트를 반드시 실행한다.
 - **통합 테스트 전체 스위트**(`pytest -m integration`)와 **전체 검증**(`pytest`)은 사용자가 명시적으로 요청했거나 CI에서 실행한다.
-- **CI 전체 검증(Check):** CI 파이프라인은 정적 분석(Linter/Type Checker)과 `test`, `integration`을 모두 실행해 파이썬의 동적 타이핑으로 인한 런타임 에러와 DB 연동 검증이 누락되지 않게 한다.
-- 단위 테스트: Domain 로직, DB 의존성이 없는 Application 로직(pytest-mock 사용) 등 실제 인프라를 사용하지 않는 테스트.
-- 통합 테스트: PostgreSQL Testcontainers 기반, 실제 DB 세션과 FastAPI 라우팅을 통과하는 테스트.
+- **CI 전체 검증(Check):** CI 파이프라인은 정적 분석(Linter/Type Checker)과 `test`, `integration`을 모두 실행해 파이썬의 동적 타이핑으로 인한 런타임 에러와 Redis 연동 검증이 누락되지 않게 한다.
+- 단위 테스트: Domain/Application 로직(pytest-mock 사용) 등 실제 인프라를 사용하지 않는 테스트.
+- 통합 테스트: Redis Testcontainers 기반, 실제 Redis와 FastAPI 라우팅을 통과하는 테스트.
 
 ## 하네스: 통합 테스트 구조
 
-**목표:** PostgreSQL 실제 동작 검증은 유지하면서 통합 테스트 기동 비용을 줄이고, 비동기 환경의 안정성을 확보한다.
+**목표:** Redis 실제 동작 검증은 유지하면서 통합 테스트 기동 비용을 줄이고, 비동기 환경의 안정성을 확보한다.
 
 | 분리 기준 | Pytest Fixture/설정 | 용도 |
 | --- | --- | --- |
-| `Repository 계층 테스트` | `db_session` (Testcontainers) | SQLAlchemy 세션, 마이그레이션(Alembic)만 동작 (API 라우팅 제외) |
 | `E2E / API 계층 테스트` | `client` (httpx.AsyncClient) | 앱 전체 기동 검증, 의존성 주입(DI) 오버라이드, API 스택 전체 |
+| `Redis 연동 테스트` | 개별 테스트 파일 내 Testcontainers 픽스처 (예: `redis_container`) | 실제 Redis 컨테이너로 `ChatSessionStore` 등 동작 검증 |
 
-- **비동기 테스트:** FastAPI와 SQLAlchemy Async 엔진을 사용하는 경우, 모든 I/O 바운드 테스트는 `pytest-asyncio` 마커(`@pytest.mark.asyncio`)를 사용하고, API 테스트에는 `TestClient` 대신 비동기 요청이 가능한 `httpx.AsyncClient`를 사용한다.
-- **DB 초기화:** Testcontainers 기동 시 DB 스키마는 `Base.metadata.create_all()`이 아닌 `alembic upgrade head`를 실행하여 실제 마이그레이션 스크립트의 정합성까지 검증한다. (Session scope 픽스처 활용)
-- **데이터 격리:** 테스트별 데이터 격리는 매 테스트마다 트랜잭션을 롤백하는 Function scope DB 세션 픽스처를 사용하여 보장한다. (Nested Transaction / Savepoint 활용)
+- **비동기 테스트:** FastAPI와 Redis 비동기 클라이언트(redis.asyncio)를 사용하는 경우, 모든 I/O 바운드 테스트는 `pytest-asyncio` 마커(`@pytest.mark.asyncio`)를 사용하고, API 테스트에는 `TestClient` 대신 비동기 요청이 가능한 `httpx.AsyncClient`를 사용한다.
+- **데이터 격리:** Redis를 쓰는 통합 테스트는 테스트가 끝나면 사용한 키를 정리(`flushall` 또는 개별 삭제)해 격리를 보장한다.
 
 ## 하네스: 테스트 작성 원칙 (결과 검증 우선)
 

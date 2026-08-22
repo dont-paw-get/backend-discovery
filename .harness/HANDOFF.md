@@ -74,3 +74,69 @@
 3. CLIAR-40 이후 범위(기존 계획의 Step 3, API 라우터 Task 9~13)는 아직 새 티켓 번호가
    없다. 사용자가 새 티켓을 알려주면 `develop`에서 새 브랜치를 분기하고 `PLAN.md`를 그
    범위로 갱신한다.
+
+
+
+## 2026-08-21 — 방향 전환: 벡터DB/RAG 폐기, 사서 에이전트 별도 레포 이관 착수
+- CLIAR-51 Task 9(계약 확정)까지 커밋(`269ef7d`)한 상태에서 Task 10(`/internal/sync-book`)
+  구현(SyncService, 라우터, 단위/E2E 테스트)까지 마쳤으나 미커밋 상태였다. Docker 미기동으로
+  통합 테스트는 실행하지 못한 채 대기 중이었다.
+- 이 시점에 사용자가 새로운 조사(CLIAR-51과 무관, 코드 변경 없음)를 요청: (1) S3 Vectors
+  전환 검토, (2) Strands Agents SDK 도입 설계(PoC). 두 조사 결과를 `.harness/research/`에
+  각각 문서로 남겼다. S3 Vectors는 비권장(규모/쿼리빈도/하이브리드검색 요구사항 모두
+  불일치) 결론, Strands는 선택지만 제시(판단은 사용자가 팀 논의 후 결정하도록 함).
+- 조사 직후 사용자가 큰 방향 전환을 확정: 벡터DB(pgvector) 기반 자체 벡터 인덱스와 검색을
+  backend-discovery에서 전부 폐기. 사서 페르소나·큐레이션·RAG 대화 기능은 별도 레포
+  ("사서 에이전트 서버")로 이관해 웹 검색 도구 + 장기 메모리 기반 Strands Agents SDK로
+  재설계. `ChatSessionStore`(Redis)는 backend-discovery에 유지하고 사서 에이전트 레포가
+  API로 사용(Redis 직접 공유 안 함). 근거는 `.harness/DECISIONS.md` 최상단 참고.
+  - **중요한 정정**: 처음에 "RAG 카탈로그 검색 기능 폐기"로 기록했으나, 사용자가 이후
+    "자연어 질의 기반 도서 추천 기능 자체는 없어지는 게 아니라 웹 검색 도구를 쓰는
+    에이전트로 재구현되는 것"이라고 정정했다. DECISIONS.md, archive README, STATE.md
+    표현을 모두 이에 맞춰 수정했다. 다음 세션에서 이 뉘앙스를 다시 혼동하지 않을 것.
+- 폐기 대상 코드는 **삭제하지 않고** `archive/vector-search-poc/`로 이동(원래 경로 구조
+  유지): `domain/book/`, `infrastructure/persistence/book_repository.py`,
+  `infrastructure/llm/`(protocols/mock_bedrock/bedrock_client/factory 전체),
+  `api/schemas/book.py`, alembic 마이그레이션 2건(pgvector 확장, books 테이블), CLIAR-51
+  Task 10 코드 전부(`application/sync_service.py`, `api/v1/routers/internal.py`,
+  `api/schemas/sync.py`), `docs/api/openapi.yaml`(이전 버전 3개 엔드포인트 전체),
+  `docs/api/decisions/0001-internal-sync-contract.md`. `archive/vector-search-poc/README.md`에
+  폐기 사유·원 티켓·이관 예정을 기록했다.
+- `docs/api/openapi.yaml`은 `paths: {}`인 최소 스켈레톤으로 재작성. `alembic/env.py`에서
+  `Book` 모델 import 제거(현재 `Base.metadata`에 등록된 모델 없음). `main.py`/`api/deps.py`에서
+  벡터/LLM/sync 관련 함수·라우터 등록 제거. `pyproject.toml`에 `archive/`를 ruff/mypy 검사
+  대상에서 제외(`extend-exclude`, `exclude`) 추가. `uv run ruff check . && uv run mypy .`,
+  `uv run pytest -m "not integration"`(1 passed, health만 남음) 통과 확인.
+- `.harness/BACKLOG.md`의 CSV 배치 적재 항목 제거(벡터DB 폐기로 전제 자체가 사라짐).
+  `.harness/STATE.md`: CLIAR-40 Task 5~7·CLIAR-51 Task 9~10은 "완료 후 폐기"로, Task 8만
+  유효 완료로 표시, 방향 전환 자체를 별도 행으로 추가. `.harness/PLAN.md`: CLIAR-51 Task
+  11~13 취소 명시, 전체를 새 구조로 재작성(보류 항목 + 사서 에이전트 레포 참고 안내).
+- **7·8번(의존성 실제 제거, PostgreSQL 완전 제거, ERD)은 실행하지 않고 분석만 제시**했다.
+  이유: 8번 조사 결과 "지금 RDB 테이블이 필요한 게 전혀 없다"는 결론이 나왔고, 이는
+  PostgreSQL 자체를 이 레포에서 없앨 수 있다는 뜻인데, 그러면 "backend-discovery 레포
+  자체의 존속 여부"라는 더 근본적인 질문이 생겨서 사용자가 여기서 멈추고 그 결정을 먼저
+  하겠다고 했다. **다음 세션은 이 결정(레포 존속 여부)을 사용자에게 먼저 물어야 한다.**
+- 이어서 사용자가 "웹 검색 기반 추천 에이전트에 어떤 모델을 쓸지, 속도를 어떻게
+  최적화할지" 조사를 요청(사서 에이전트 레포 구현 참고용, backend-discovery 코드 변경
+  없음). 결과를 `.harness/research/2026-08-21-librarian-agent-model-and-latency.md`에
+  기록: 모델은 1차 Claude Haiku 4.5(agent 성능 최적화, tool use 검증됨), 대안 Nova Lite로
+  A/B(단, 참고한 실측 비교는 Claude 3 Haiku 기준이라 4.5와 직접 비교 자료는 아직 없음
+  — 구현 시 실측 필요). 속도 최적화는 우선순위 순으로 ①스트리밍 응답(Strands
+  `stream_async` + FastAPI `StreamingResponse`) ②프롬프트 캐싱(고정된 system
+  prompt/도구 정의) ③Bedrock Latency-Optimized Inference(리전/모델 가용성 구현 시
+  재확인 필요 — 조사 시점엔 Claude 3.5 Haiku만 확인됨, 4.5 지원 여부 미확인)
+  ④웹 검색 결과 캐싱(반복 질문 대응, `ChatSessionStore`와는 별개 저장소로 설계할 것)
+  ⑤Strands native async 병렬 도구 실행.
+- 커밋은 하지 않았다. git 변경사항(archive 이동 다수, pyproject.toml/main.py/deps.py/
+  alembic/env.py 수정, .harness/* 문서 다수, docs/api/* 재작성)이 모두 미커밋 상태다.
+
+### 다음 세션이 할 일
+1. **가장 먼저: backend-discovery 레포 자체의 존속 여부를 사용자에게 확인한다.**
+   `ChatSessionStore`만 남는 상태에서 이 레포를 계속 유지할지, 통합/폐기할지 등.
+2. 레포 존속이 결정되면 `.harness/PLAN.md`의 "보류 중" 항목(PostgreSQL 관련 의존성·
+   코드 제거, `ChatSessionStore` 최종 소유권 재확인)을 순서대로 처리한다.
+3. 이번 세션에서 만든 미커밋 변경사항을 커밋할지 사용자에게 확인한다(Task 단위 분리,
+   `[CLIAR-51]` 태그 규칙 적용 여부는 이 변경이 CLIAR-51 범위인지 별도 티켓인지부터
+   판단 필요 — 방향 전환 자체가 새 티켓일 수 있음, 사용자 지시 필요).
+4. 사서 에이전트 새 레포 구현이 시작되면 이 레포의 `.harness/research/` 두 문서
+   (Strands 설계, 모델/속도)를 그 레포 세션에 전달해 참고하게 한다.

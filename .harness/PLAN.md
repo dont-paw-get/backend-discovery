@@ -1,49 +1,85 @@
-# PLAN — backend-discovery (CLIAR-51-API-Routers)
+# PLAN — backend-discovery (CLIAR-51-Recommendation-Agent)
 
-## CLIAR-51. API 라우터 구현
+브랜치명을 `CLIAR-51-API-Routers`에서 `CLIAR-51-Recommendation-Agent`로 rename했다
+(push된 적 없는 로컬 전용 브랜치라 로컬 rename만으로 충분, 원격 조치 불필요).
+PLAN.md 제목과 브랜치명을 통일했다. PostgreSQL/RDB는 완전히 제거됐고, 남은
+인프라는 Redis(`ChatSessionStore`)뿐이다.
 
-(Step 3, Task 9~13 진행 중)
+이전에 검토했던 "별도 사서 에이전트 레포로 이관"은 취소됐다. backend-discovery
+자체가 Strands 기반 추천 에이전트 역할을 계속 맡는다.
 
----
+## 참고 문서 (구현 전 확인)
 
-## Task 상세
+- `.harness/research/2026-08-21-strands-agents-poc-design.md` — Agent/tool 모델링
+  초안(`system_prompt`로 페르소나 분리, 공용 검색은 `@tool`로 공유)
+- `.harness/research/2026-08-21-librarian-agent-model-and-latency.md` — 모델 선택
+  조사 당시 1차 추천은 Claude Haiku 4.5였으나, 이후 교육 계정에서 Haiku 4.5/
+  Sonnet 4 이상이 전 리전 차단된 것이 확인되어 **Claude 3 Haiku**로 확정했다
+  (`.harness/BACKLOG.md` 참고, `core/config.py`의 `librarian_model_id`). 속도
+  최적화 기법(①스트리밍 ②프롬프트 캐싱 ③지연시간 최적화 추론 ④검색 결과 캐싱
+  ⑤병렬 도구 실행)은 여전히 유효하나, ③은 Claude 3 Haiku 기준으로 지원 여부를
+  재확인해야 한다(조사 시점엔 3.5 Haiku만 확인됨, 3 Haiku는 별도 확인 필요).
+- `.harness/ARCHITECTURE.md` — 현재 디렉토리 구조, Redis 키 구조
 
-### CLIAR-51 — API 라우터 구현
-(원래 계획의 Step 3에 해당. CLIAR-40 핵심 코드 구현 완료 후 별도 티켓으로 분리 확정.)
+## Task 목록
 
-**Task 10: `POST /internal/sync-book`**
-- 목표: Basic API가 보낸 도서 데이터를 임베딩해 읽기 모델에 멱등 반영한다. 단건·실시간·테스트용이며 대량 적재 수단이 아니다(CSV 배치는 별도 티켓, `.harness/BACKLOG.md` 참고).
-- 가이드: `SyncService.sync(payload)`가 임베딩 대상 텍스트(제목+저자+설명+category)를 조립해 `EmbeddingClient`로 벡터를 얻고 `BookRepository.upsert` 호출(`search_vector`도 같은 upsert에서 갱신). 커밋은 서비스 계층. 라우터에 `verify_internal_token` 의존성 부착. 스키마는 openapi.yaml과 1:1.
-- 테스트: 단위 — mocker로 임베딩/리포지토리 대체, 반환 결과와 조립된 임베딩 입력 텍스트 검증. E2E — 토큰 없으면 401, 유효 요청 200 + DB 1행, 재전송 시에도 1행(멱등).
-- Demo: curl 한 번으로 도서를 동기화하고, 두 번 호출해도 중복 없이 갱신되는 것을 DB에서 확인한다.
+### Task 3: `ChatSessionStore` 연동
 
-**Task 11: `GET /curations/time-based`**
-- 목표: 요청 시각을 테마로 매핑해 큐레이션 목록을 반환한다.
-- 가이드: `domain/curation/time_rules.py`에 순수 함수 `resolve_theme(now) -> Theme`(새벽/아침/오후/저녁/심야 구간 룰). `datetime.now()` 내부 호출 금지, 라우터 의존성 `get_now`로 주입. `CurationService`가 테마에 맞는 키워드로 `search_vector` 기반 검색(또는 하이브리드 검색)을 호출 후 목록용 DTO 반환. 쿼리에 하드코딩 조건·비결정적 함수 금지.
-- 테스트: 단위 — 경계 시각(구간 시작/끝, 자정 넘김) 파라미터라이즈. E2E — `get_now` 오버라이드로 시각 고정해 테마·목록 검증.
-- Demo: 시각을 주입해 오전/심야 각각 다른 테마와 도서 목록이 나온다.
+- 목표: 에이전트가 이전 대화 턴을 불러와 문맥을 유지하고, 답변 후 히스토리에 기록한다.
+- 가이드: `ChatSessionStore.get_history(session_id)`로 이전 턴을 불러와 에이전트
+  호출 시 컨텍스트로 전달. 응답 후 사용자·어시스턴트 턴을 `append_turn`으로 기록.
+  Strands 자체 세션 관리 기능(있다면)과 우리 `ChatSessionStore`가 중복/충돌하지
+  않는지 구현 전에 Strands 문서로 확인. `create_librarian_agent`에
+  `BookSearchTool.as_tool()`을 `tools=[...]`로 연결하는 배선도 이 Task에서 한다
+  (Task 2에서 도구 자체는 완성됐으나 아직 에이전트에 연결되지 않음).
+- 테스트: 단위 — mocker로 `ChatSessionStore`/에이전트 대체, 히스토리 전달·기록
+  순서 검증. 통합 — 같은 `session_id`로 2회 호출 시 두 번째 호출에 첫 턴이 포함되는지.
+- Demo: 같은 세션으로 "추천해줘" → "더 가벼운 거 있어?"를 물으면 두 번째 응답이
+  첫 질문 문맥을 반영한다.
 
-**Task 12: `POST /chat` — RAG 파이프라인 조립**
-- 목표: 자연어 질의에 사서 페르소나로 도서를 추천한다.
-- 가이드: `ChatService.answer(session_id, message)` — ① Redis 히스토리 로드 ② 질의 임베딩 ③ pgvector 유사도 검색(top-k, 옵션 필터) ④ 검색 결과 + 히스토리로 사서 페르소나 프롬프트 조립 ⑤ `ChatCompletionClient.complete` ⑥ 사용자·어시스턴트 턴 Redis append ⑦ 답변 + 근거 도서 목록 반환. DB 세션 안에서 Pydantic 파싱을 마친 뒤 프롬프트 조립.
-- 테스트: 단위 — mocker로 임베딩·검색·LLM·세션 스토어 대체, 반환 DTO(답변, 근거 도서, session_id)와 히스토리 append 부작용 검증. E2E — 같은 `session_id` 2회 호출 시 두 번째 프롬프트에 이전 턴 포함 확인.
-- Demo: "비 오는 날 읽을 따뜻한 소설 추천해줘"에 사서 톤 답변과 근거 도서 목록이 오고, 후속 질문에서 문맥이 유지된다.
+### Task 4: `POST /chat` 라우터 + 스트리밍 응답 + API 계약
 
-**Task 13: 최종 배선과 계약 정합성 검증**
-- 목표: 흩어진 라우터·의존성을 앱에 통합하고 코드와 계약이 일치함을 보증한다.
-- 가이드: `api/v1/routers/`를 `create_app()`에 등록(`/chat`, `/curations`는 공개 prefix, `/internal`은 별도 prefix + 토큰 의존성). 예외 핸들러로 도메인 예외 → HTTP 상태 매핑. FastAPI 생성 스키마와 `docs/api/openapi.yaml` 비교 계약 테스트 추가. orphan 코드 없는지 확인.
-- 테스트: `uv run ruff check . && uv run mypy . && uv run pytest -m "not integration"` 통과 후, 계약 테스트 포함 `pytest` 전체 통과(사용자 요청 시).
-- Demo: `docker compose up` + 서버 기동으로 3개 엔드포인트가 실제 DB·Redis·Mock LLM을 통해 end-to-end 동작하고, `/docs`가 `docs/api/openapi.yaml`과 일치한다.
+- 목표: HTTP로 에이전트를 호출할 수 있게 배선하고, 첫 토큰 지연을 최소화한다.
+- 가이드: `stream_async` + FastAPI `StreamingResponse`로 스트리밍 응답 구조를
+  처음부터 반영(`.harness/research/2026-08-21-librarian-agent-model-and-latency.md`
+  우선순위 1번). `docs/api/openapi.yaml`에 `/chat` 계약을 다시 채운다(현재
+  `paths: {}`).
+- 테스트: 단위 — 라우터 mocking. E2E — 스트리밍 응답이 청크 단위로 오는지 확인.
+- Demo: curl로 스트리밍 응답을 청크 단위로 받는 걸 확인, 프론트 연결 테스트.
 
----
+### Task 5: 프롬프트 캐싱 + 지연시간 최적화 추론 적용 검토
+
+- 목표: 반복되는 system_prompt/도구 정의 부분을 캐싱하고, Bedrock 지연시간
+  최적화 옵션 적용 가능 여부를 확인한다.
+- 가이드: Bedrock Prompt Caching을 사서 페르소나 system_prompt + 도구 스펙에
+  적용. `performanceConfig.latency="optimized"`가 Claude 3 Haiku(현재 확정 모델,
+  `.harness/BACKLOG.md` 참고)에서 지원되는지 구현 시점에 재확인(조사 시점엔 3.5
+  Haiku만 확인됨, 3 Haiku는 별도 확인 필요).
+- 테스트: 실측 응답 시간 비교(적용 전/후).
+- Demo: 캐싱 적용 전/후 응답 시간을 실측해 비교 수치 제시.
+
+### Task 6: E2E 테스트 + Docker Compose 정리
+
+- 목표: 전체 파이프라인이 실제로 동작하는지 확인하고 로컬 개발 환경을 정리한다.
+- 가이드: `docker compose up`으로 `redis` + `app`만 뜨는 상태에서 `/chat` E2E 테스트.
+  `.env.example`의 `TAVILY_API_KEY`, `TAVILY_CACHE_TTL_SECONDS`,
+  `TAVILY_MONTHLY_CREDIT_LIMIT`(Task 2에서 이미 추가됨)에 실제 발급받은 키를 채워
+  로컬에서 실제로 동작하는지 확인한다.
+- 테스트: `uv run ruff check . && uv run mypy . && uv run pytest`
+- Demo: 처음부터 끝까지(질문 → 웹 검색 → 답변 → 세션 기록) 실제로 동작.
+
+## 운영 규칙 (계속 적용)
+
+- Task 완료마다 커밋을 분리하고 `[CLIAR-51]` 태그를 붙인다.
+- Task 완료 보고에는 사용자가 직접 확인 가능한 방법을 포함한다.
+- push/merge는 사용자의 명시적 승인이 있을 때만 수행하며, push 전 변경 파일 목록과
+  diff 요약을 먼저 제시한다.
+- **Bedrock/Tavily 실제 API 호출이 필요한 테스트(비용 발생 가능)는 별도 승인 후에만
+  진행한다.** 특히 Tavily는 무료 티어 크레딧 소진 위험이 있으므로, 실제 호출이
+  필요한 테스트는 최소 횟수로 제한하고 사전에 알린다.
 
 ## 함께 갱신할 산출물 (AGENTS.md 동기화 정책)
-- Task 9 완료 시 → `docs/api/openapi.yaml` 확정 + `docs/api/decisions/0001-internal-sync-contract.md` ADR 작성
+
+- Task 4 완료 시 → `docs/api/openapi.yaml`에 `/chat` 계약 반영
 - 각 Task 완료 시 → `PLAN.md`에서 항목 제거 + `STATE.md` 단계 한 줄 갱신
 - 세션 종료 시 → `.harness/HANDOFF.md` 인수인계 append
-
-## 운영 규칙 (CLIAR-51)
-- Task 완료마다 커밋을 분리하고 `[CLIAR-51]` 태그를 붙인다.
-- Task 완료 보고에는 사용자가 직접 확인 가능한 방법(curl, psql, `/docs` Swagger UI 등)을 포함한다.
-- push/merge는 사용자의 명시적 승인이 있을 때만 수행하며, push 전 변경 파일 목록과 diff 요약을 먼저 제시한다.
-- Bedrock 실제 API 호출이 필요한 테스트(비용 발생 가능)는 별도 승인 후에만 진행한다.

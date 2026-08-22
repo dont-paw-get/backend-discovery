@@ -17,14 +17,15 @@ Schema·계약 테스트를 함께 갱신한다.
 
 ## 현재 상태
 
-`openapi.yaml`의 3개 엔드포인트(`POST /chat`, `GET /curations/time-based`,
-`POST /internal/sync-book`) 계약이 확정되었다(CLIAR-51 Task 9). 요청/응답 스키마,
-에러 응답(400/401/404/422/503), `X-Internal-Token` 보안 스키마가 정의되어 있다.
-`/internal/sync-book`의 범위(실시간 단건 갱신 전용, 대량 적재 수단 아님)는
-`decisions/0001-internal-sync-contract.md`를 참고한다.
+2026-08-21 방향 전환으로 벡터DB(pgvector) 기반 RAG 챗봇·큐레이션 계약
+(`POST /chat`, `GET /curations/time-based`, `POST /internal/sync-book`)이
+폐기되었다. 해당 계약과 ADR(`0001-internal-sync-contract.md`)은
+`archive/vector-search-poc/docs/api/`로 이동했다 (`.harness/DECISIONS.md` 참고).
 
-라우터 구현은 `.harness/PLAN.md`의 Task 10~13에서 순차 진행 중이다. 코드 구현이
-계약과 어긋나지 않는지는 Task 13의 계약 테스트로 검증한다.
+`openapi.yaml`은 현재 `paths: {}`로 비어 있다. 사서 에이전트(대화·큐레이션 RAG)는
+별도 레포로 이관되어 그 레포가 자신의 API 계약을 별도로 소유한다. backend-discovery에
+남는 계약이 정해지면(`.harness/PLAN.md`, ERD 재검토 결과에 따라) 이 문서를 다시
+채운다.
 
 ## 스펙 검증 방법
 
