@@ -2,10 +2,15 @@
 
 from datetime import UTC, datetime
 
-from fastapi import Request
+from fastapi import Depends, Request
+from tavily import AsyncTavilyClient
 
+from discovery.application.librarian_service import LibrarianService
 from discovery.core.config import get_settings
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
+from discovery.infrastructure.search.book_search_tool import BookSearchTool
+from discovery.infrastructure.search.result_cache import SearchResultCache
+from discovery.infrastructure.search.usage_limiter import SearchUsageLimiter
 
 
 def get_now() -> datetime:
@@ -23,4 +28,35 @@ def get_chat_session_store(request: Request) -> ChatSessionStore:
         request.app.state.redis,
         max_turns=settings.chat_history_max_turns,
         ttl_seconds=settings.chat_session_ttl_seconds,
+    )
+
+
+def get_book_search_tool(request: Request) -> BookSearchTool:
+    """Tavily 도서 웹 검색 도구."""
+    settings = get_settings()
+    cache = SearchResultCache(
+        request.app.state.redis, ttl_seconds=settings.tavily_cache_ttl_seconds
+    )
+    usage_limiter = SearchUsageLimiter(
+        request.app.state.redis, monthly_limit=settings.tavily_monthly_credit_limit
+    )
+    tavily_client = AsyncTavilyClient(api_key=settings.tavily_api_key)
+    return BookSearchTool(
+        tavily_client=tavily_client,
+        cache=cache,
+        usage_limiter=usage_limiter,
+        now=get_now,
+    )
+
+
+def get_librarian_service(
+    session_store: ChatSessionStore = Depends(get_chat_session_store),
+    book_search_tool: BookSearchTool = Depends(get_book_search_tool),
+) -> LibrarianService:
+    """사서 에이전트 서비스."""
+    settings = get_settings()
+    return LibrarianService(
+        session_store=session_store,
+        book_search_tool=book_search_tool,
+        settings=settings,
     )

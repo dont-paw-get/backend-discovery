@@ -9,21 +9,43 @@ Task 2에서 추가한다.
 (.harness/research/2026-08-21-strands-agents-poc-design.md 참고).
 """
 
+from typing import Any
+
 from strands import Agent
 from strands.models import BedrockModel
 
 LIBRARIAN_SYSTEM_PROMPT = (
     "당신은 다정하고 신뢰감 있는 도서관 사서입니다. "
-    "사용자의 질문에 친절한 말투로 도서를 추천하고, 추천 이유를 함께 설명하세요."
+    "사용자의 질문이나 관심사에 맞는 도서를 추천하고, 추천 이유를 친절하게 설명하세요. "
+    "도서 정보가 필요하거나 추천 후보를 찾을 때는 search_books 도구를 적극 활용하세요."
 )
 
 
-def create_librarian_agent(*, model_id: str, region_name: str | None = None) -> Agent:
-    """사서 페르소나 에이전트를 생성한다. 도구는 아직 연결하지 않는다(Task 2에서 추가).
+def create_librarian_agent(
+    *,
+    model_id: str,
+    region_name: str | None = None,
+    tools: list[Any] | None = None,
+    messages: list[dict[str, Any]] | None = None,
+    system_prompt: str = LIBRARIAN_SYSTEM_PROMPT,
+) -> Agent:
+    """사서 페르소나 에이전트를 생성한다.
 
     Args:
         model_id: Bedrock 모델 ID (core/config.py의 Settings.librarian_model_id).
         region_name: AWS 리전. None이면 boto3 기본 설정(환경 변수/프로파일)을 따른다.
+        tools: 에이전트에 등록할 도구 목록 (예: BookSearchTool.as_tool()).
+        messages: 이전 대화 히스토리 (ChatSessionStore에서 불러온 내역을
+            Strands 형식으로 변환한 것).
+        system_prompt: 시스템 프롬프트.
     """
     model = BedrockModel(model_id=model_id, region_name=region_name)
-    return Agent(model=model, system_prompt=LIBRARIAN_SYSTEM_PROMPT)
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "system_prompt": system_prompt,
+    }
+    if tools is not None:
+        kwargs["tools"] = tools
+    if messages is not None:
+        kwargs["messages"] = messages
+    return Agent(**kwargs)

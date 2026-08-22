@@ -48,3 +48,21 @@ def test_create_librarian_agent_returns_agent_instance(mocker: MockerFixture) ->
     result = create_librarian_agent(model_id=CLAUDE_3_HAIKU_MODEL_ID)
 
     assert result is mocker.sentinel.agent
+
+
+def test_create_librarian_agent_passes_tools_and_messages(mocker: MockerFixture) -> None:
+    mocker.patch("discovery.domain.librarian.agent.BedrockModel")
+    agent_cls = mocker.patch("discovery.domain.librarian.agent.Agent")
+
+    mock_tool = mocker.MagicMock()
+    mock_messages = [{"role": "user", "content": [{"text": "hello"}]}]
+
+    create_librarian_agent(
+        model_id=CLAUDE_3_HAIKU_MODEL_ID,
+        tools=[mock_tool],
+        messages=mock_messages,
+    )
+
+    _, kwargs = agent_cls.call_args
+    assert kwargs["tools"] == [mock_tool]
+    assert kwargs["messages"] == mock_messages

@@ -23,30 +23,6 @@ PLAN.md 제목과 브랜치명을 통일했다. PostgreSQL/RDB는 완전히 제�
 
 ## Task 목록
 
-### Task 3: `ChatSessionStore` 연동
-
-- 목표: 에이전트가 이전 대화 턴을 불러와 문맥을 유지하고, 답변 후 히스토리에 기록한다.
-- 가이드: `ChatSessionStore.get_history(session_id)`로 이전 턴을 불러와 에이전트
-  호출 시 컨텍스트로 전달. 응답 후 사용자·어시스턴트 턴을 `append_turn`으로 기록.
-  Strands 자체 세션 관리 기능(있다면)과 우리 `ChatSessionStore`가 중복/충돌하지
-  않는지 구현 전에 Strands 문서로 확인. `create_librarian_agent`에
-  `BookSearchTool.as_tool()`을 `tools=[...]`로 연결하는 배선도 이 Task에서 한다
-  (Task 2에서 도구 자체는 완성됐으나 아직 에이전트에 연결되지 않음).
-- 테스트: 단위 — mocker로 `ChatSessionStore`/에이전트 대체, 히스토리 전달·기록
-  순서 검증. 통합 — 같은 `session_id`로 2회 호출 시 두 번째 호출에 첫 턴이 포함되는지.
-- Demo: 같은 세션으로 "추천해줘" → "더 가벼운 거 있어?"를 물으면 두 번째 응답이
-  첫 질문 문맥을 반영한다.
-
-### Task 4: `POST /chat` 라우터 + 스트리밍 응답 + API 계약
-
-- 목표: HTTP로 에이전트를 호출할 수 있게 배선하고, 첫 토큰 지연을 최소화한다.
-- 가이드: `stream_async` + FastAPI `StreamingResponse`로 스트리밍 응답 구조를
-  처음부터 반영(`.harness/research/2026-08-21-librarian-agent-model-and-latency.md`
-  우선순위 1번). `docs/api/openapi.yaml`에 `/chat` 계약을 다시 채운다(현재
-  `paths: {}`).
-- 테스트: 단위 — 라우터 mocking. E2E — 스트리밍 응답이 청크 단위로 오는지 확인.
-- Demo: curl로 스트리밍 응답을 청크 단위로 받는 걸 확인, 프론트 연결 테스트.
-
 ### Task 5: 프롬프트 캐싱 + 지연시간 최적화 추론 적용 검토
 
 - 목표: 반복되는 system_prompt/도구 정의 부분을 캐싱하고, Bedrock 지연시간
