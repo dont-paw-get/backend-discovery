@@ -1,0 +1,86 @@
+[project]
+name = "discovery"
+version = "0.1.0"
+description = "DPYB(Don't Paw Get Your Book) AI · Discovery 마이크로서비스"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115.0,<0.116.0",
+    "uvicorn[standard]>=0.32.0,<0.33.0",
+    "redis>=5.1.1,<5.2.0",
+    "pydantic>=2.9.2,<2.10.0",
+    "pydantic-settings>=2.5.2,<2.6.0",
+    "boto3>=1.43.74,<1.44.0",
+    "strands-agents>=1.26.0,<1.27.0",
+    "tavily-python>=0.7.27",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.7.0,<0.8.0",
+    "mypy>=1.11.2,<1.12.0",
+    "pytest>=8.3.3,<8.4.0",
+    "pytest-asyncio>=0.24.0,<0.25.0",
+    "pytest-mock>=3.14.0,<3.15.0",
+    "testcontainers[redis]>=4.8.1,<4.9.0",
+    "httpx>=0.27.2,<0.28.0",
+    "pre-commit>=4.0.1,<4.1.0",
+    "mypy-boto3-bedrock-runtime>=1.43.62,<1.44.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/discovery"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: Redis 등 실제 인프라(Testcontainers)를 사용하는 통합 테스트",
+]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+# archive/는 폐기된 PoC 코드 보관용이며 정적 분석·테스트 대상이 아니다
+# (.harness/DECISIONS.md 2026-08-21 방향 전환 참고).
+extend-exclude = ["archive"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI Depends()/Header()/Query() 등은 인자 기본값으로 호출하는 것이 표준 패턴이며
+# 일반적인 mutable default 문제(B008)와 무관하다. 매 호출부에 noqa를 붙이지 않기 위해
+# 이 호출들을 면제 목록에 등록한다.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Header",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Cookie",
+    "fastapi.Security",
+]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = "^archive/"
+
+[[tool.mypy.overrides]]
+module = "testcontainers.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "boto3.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tavily.*"
+ignore_missing_imports = true

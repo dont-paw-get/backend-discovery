@@ -1,0 +1,85 @@
+openapi: 3.1.0
+info:
+  title: DPYB Discovery API
+  description: >
+    DPYB(Don't Paw Get Your Book)의 backend-discovery 서비스 wire 계약.
+    이 파일이 API 계약의 단일 소유 산출물이다. `.harness/*`는 이 내용을 복제하지 않고 참조만 한다.
+
+    Strands Agents SDK 및 Tavily 실시간 웹 검색 기반의 AI 도서 추천 에이전트 서비스 계약을 정의한다.
+  version: 0.2.0
+
+servers:
+  - url: http://localhost:8000
+    description: Local development
+
+paths:
+  /api/v1/chat:
+    post:
+      summary: 추천 에이전트 도서 추천 대화
+      description: >
+        자연어 질문으로 추천 에이전트에게 도서 추천을 요청한다.
+        이전 `session_id`를 넘기면 멀티턴 대화 문맥을 유지한다.
+        `stream=true`인 경우 스트리밍 응답(text/plain)을 반환하며, 응답 헤더 `X-Session-Id`에 세션 ID가 포함된다.
+      operationId: chatWithLibrarian
+      tags:
+        - Chat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: 추천 에이전트 답변 (JSON 또는 스트리밍 텍스트)
+          headers:
+            X-Session-Id:
+              schema:
+                type: string
+              description: 대화 세션 ID (스트리밍 및 JSON 공통 제공)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatResponse'
+            text/plain:
+              schema:
+                type: string
+                description: 스트리밍 텍스트 청크 스트림
+        '422':
+          description: 요청 유효성 검증 실패 (빈 메시지 등)
+
+components:
+  schemas:
+    ChatRequest:
+      type: object
+      required:
+        - message
+      properties:
+        session_id:
+          type: string
+          description: 대화 세션 ID (미입력 시 서버에서 UUID 생성)
+          example: sess-1234-abcd
+        message:
+          type: string
+          minLength: 1
+          maxLength: 1000
+          description: 사용자 질문 또는 도서 추천 요청 메시지
+          example: 비 오는 날 읽기 좋은 잔잔한 일본 소설 추천해줘.
+        stream:
+          type: boolean
+          default: false
+          description: 스트리밍 응답 여부
+
+    ChatResponse:
+      type: object
+      required:
+        - session_id
+        - message
+      properties:
+        session_id:
+          type: string
+          description: 대화 세션 ID
+          example: sess-1234-abcd
+        message:
+          type: string
+          description: 추천 에이전트의 추천 답변
