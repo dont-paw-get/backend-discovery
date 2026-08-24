@@ -162,3 +162,29 @@
 1. 프론트엔드(`my-reading-room`)에서 변경된 사서 응답 포맷 기반 파싱 및 도서 등록 바로가기 버튼 / 필드 자동완성 연동 확인.
 2. 커밋/push/PR 생성 요청 시 진행 (`[CLIAR-67]` 태그 사용).
 
+
+## 2026-08-24 — CLIAR-86 오케스트레이터 에이전트 구축 및 프론트엔드 실연동 완료
+- 브랜치: `CLIAR-86-Orchestrator-Agent` (`CLIAR-67-Librarian-Recommendation-Format` 헤드 `7c3bd1b`에서 분기).
+- `CLIAR-67` 브랜치는 원격 `origin/CLIAR-67-Librarian-Recommendation-Format`으로 푸시 완료.
+- Strands Agents SDK의 Agent-as-a-Tool 패턴을 적용하여 오케스트레이터가 최상위 진입점으로서 (1) 도서 추천 에이전트(로컬 도구), (2) 사서 에이전트(HTTP 원격 도구)로 라우팅하는 아키텍처를 완성했다:
+  - Task 1: `domain/orchestrator/agent.py`(`create_orchestrator_agent`), `application/orchestrator_service.py`(`OrchestratorService`), `core/config.py`의 `orchestrator_model_id` 분리.
+  - Task 2: `domain/orchestrator/tools/recommend_tool.py`(`RecommendBooksTool`) 로컬 도구 장착 (세션 중복 조회 방지).
+  - Task 3: `domain/orchestrator/tools/librarian_tool.py`(`ConsultLibrarianTool`) 사서 에이전트 HTTP 스텁 도구 및 fallback 처리 (`librarian_agent_url` 설정 추가).
+  - Task 4: `api/deps.py` 및 `api/v1/routers/chat.py`를 오케스트레이터로 교체 및 `docs/api/openapi.yaml`, `.harness/ARCHITECTURE.md` 동기화.
+  - Task 5: 단위 테스트 47건(`pytest -m "not integration"`) 및 Redis Testcontainers 통합 테스트(`test_chat_integration.py`) 통과 완료.
+- **실제 연동 이슈 해결 및 안전장치 추가**:
+  - AWS Bedrock MFA 세션 인증 안내(`scripts/aws_mfa_login.sh`).
+  - 추천 에이전트/오케스트레이터에 요청 권수(1권/N권) 엄격 준수 규칙 명시.
+  - Strands `stream_async`의 다양한 이벤트(`contentBlockDelta`, `delta`)를 포괄하는 `extract_chunk_from_event` 구현.
+  - 상위 오케스트레이터 모델(Haiku)이 서두 멘트만 생성하고 도구 결과를 본문에 생략하는 현상을 방지하기 위해, `extract_fallback_text`를 통해 `toolResult` 마크다운(`### 📖 ...`)을 본문에 자동 결합하는 결정론적 안전장치 구축.
+  - 프론트엔드(`my-reading-room`)와의 실시간 스트리밍 대화 및 도서 추천 카드/등록 버튼 정상 렌더링 확인 완료.
+
+### 다음 세션이 할 일
+1. `CLIAR-86` 브랜치 커밋 및 원격 push 완료.
+2. 엔지니어링 고도화 착수:
+   - 1단계: `recommend_books` 도구 시그니처에 `count: int = 1` 파라미터 구조화 적용.
+   - 2단계: 직결 스트리밍 파이프라인(Direct Streaming Pipeline) 구축으로 응답 레이턴시 2~3초대로 단축.
+   - 3단계: Pydantic Structured Output을 통한 JSON 응답 고도화.
+
+
+
