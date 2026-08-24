@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-discovery-config
+  labels:
+    app.kubernetes.io/name: backend-discovery
+# 민감하지 않은 설정값만 여기에 둡니다.
+# Redis 접속정보, API 키 등 비밀값은 Secret 에 둡니다.
+data:
+  LLM_PROVIDER: "bedrock"
+  AWS_REGION: "ap-northeast-2"
+  CHAT_HISTORY_MAX_TURNS: "20"
+  CHAT_SESSION_TTL_SECONDS: "3600"
+  LIBRARIAN_MODEL_ID: "anthropic.claude-3-haiku-20240307-v1:0"
+  ORCHESTRATOR_MODEL_ID: "anthropic.claude-3-haiku-20240307-v1:0"
+  TAVILY_CACHE_TTL_SECONDS: "86400"
+  TAVILY_MONTHLY_CREDIT_LIMIT: "900"
+  # 사서 에이전트(backend-librarian) 서비스 URL. 클러스터 내부 서비스면
+  # http://<service-name>.<namespace>.svc.cluster.local:<port> 형태로 채웁니다.
+  # LIBRARIAN_AGENT_URL: ""
