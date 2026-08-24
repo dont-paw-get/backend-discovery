@@ -29,18 +29,6 @@ HTTP 호출 도구)에게 위임하는 **Agent-as-a-Tool** 구조를 구현한�
 
 ## Task 목록
 
-### Task 2: 추천 에이전트를 로컬 도구로 장착
-
-- 목표: 오케스트레이터가 추천 요청을 판단하면 기존 추천 에이전트를 호출한다.
-- 가이드: `recommend_books_tool` — `@tool(name="recommend_books")`로 감싸고 내부에서
-  기존 `LibrarianService`(또는 `create_librarian_agent` + `BookSearchTool`)를
-  직접 호출. 세션 히스토리는 오케스트레이터 레벨에서 한 번만 관리하고, 추천
-  에이전트 호출 시 별도로 `ChatSessionStore`를 재조회하지 않도록 배선(중복 조회
-  방지).
-- 테스트: 단위 — "책 추천해줘" 류 프롬프트에서 오케스트레이터가 이 도구를
-  호출하는지 mocker로 검증(Bedrock 실제 호출 없이, 도구 함수 자체의 위임 동작만
-  분리 검증).
-
 ### Task 3: 사서 에이전트 HTTP 스텁 도구
 
 - 목표: `backend-librarian` 연동 인터페이스를 먼저 확정하고, 서비스가 없을 때도
