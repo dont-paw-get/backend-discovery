@@ -80,10 +80,10 @@ class BookSearchTool:
 
         @tool(name="search_books")
         async def search_books_tool(query: str) -> list[dict[str, Any]]:
-            """자연어 질의로 도서 후보를 웹에서 검색한다.
+            """도서 추천에 필요한 국내 출간 도서 정보(제목, 저자, 줄거리 등)를 웹에서 검색한다.
 
             Args:
-                query: 도서 추천을 위한 검색 질의(예: "비 오는 날 읽기 좋은 따뜻한 소설").
+                query: 도서 검색을 위한 질의 (예: "비 오는 날 읽기 좋은 소설", "불편한 편의점").
             """
             results: list[dict[str, Any]] = await self.search_books(query)
             return results
