@@ -29,25 +29,6 @@ HTTP 호출 도구)에게 위임하는 **Agent-as-a-Tool** 구조를 구현한�
 
 ## Task 목록
 
-### Task 3: 사서 에이전트 HTTP 스텁 도구
-
-- 목표: `backend-librarian` 연동 인터페이스를 먼저 확정하고, 서비스가 없을 때도
-  안전하게 동작하게 한다.
-- 가이드:
-  - `core/config.py`에 `librarian_agent_url: str | None = None` 추가(.env.example
-    갱신 포함).
-  - `consult_librarian_tool` — `@tool(name="consult_librarian")`. httpx로
-    `POST {librarian_agent_url}/chat` 호출(요청/응답 형태는 이 레포의 기존
-    `ChatRequest`/`ChatResponse`와 동일한 최소 계약으로 가정: `message`,
-    `session_id` → `message`). URL이 `None`이거나 호출 실패(타임아웃/연결 오류/
-    5xx)면 예외를 전파하지 않고 고정 문자열("사서 에이전트 준비 중입니다")을
-    반환한다(`BookSearchTool.search_books`의 graceful 폴백 패턴과 동일).
-  - 오케스트레이터 시스템 프롬프트에 "이 도구가 준비 중 응답을 반환하면 사용자에게
-    현재 이용 불가함을 안내하고 대안(예: 추천 에이전트 이용)을 제시하라"는 지시
-    포함.
-- 테스트: 단위 — httpx 클라이언트를 mocker로 대체해 (1) URL 미설정 시 스텁 응답,
-  (2) 연결 실패 시 스텁 응답, (3) 정상 응답 시 그대로 반환하는 3가지 경로 검증.
-
 ### Task 4: 라우터 배선 + API 계약 확인
 
 - 목표: `/api/v1/chat`이 오케스트레이터를 호출하도록 교체한다.
