@@ -36,12 +36,12 @@ class RecommendBooksTool:
 
         @tool(name="recommend_books")
         async def recommend_books_tool(query: str) -> str:
-            """사용자의 상황, 관심사, 장르 또는 요청에 맞는 도서를 웹 검색 기반으로 추천하고
+            """사용자의 상황, 관심사, 장르, 요청 권수에 맞는 도서를 웹 검색 기반으로 추천하고
             상세히 안내합니다.
 
             Args:
                 query: 도서 추천을 위한 구체적인 검색어 또는 사용자의 요구사항
-                    (예: '비 오는 날 읽기 좋은 소설', 'SF 입문작').
+                    (예: '비 오는 날 읽기 좋은 힐링 소설 2권', 'SF 입문작').
             """
             return await self.recommend(query)
 
