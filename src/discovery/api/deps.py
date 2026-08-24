@@ -6,7 +6,10 @@ from fastapi import Depends, Request
 from tavily import AsyncTavilyClient
 
 from discovery.application.librarian_service import LibrarianService
+from discovery.application.orchestrator_service import OrchestratorService
 from discovery.core.config import get_settings
+from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianTool
+from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksTool
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
 from discovery.infrastructure.search.book_search_tool import BookSearchTool
 from discovery.infrastructure.search.result_cache import SearchResultCache
@@ -49,11 +52,43 @@ def get_book_search_tool(request: Request) -> BookSearchTool:
     )
 
 
+def get_recommend_books_tool(
+    book_search_tool: BookSearchTool = Depends(get_book_search_tool),
+) -> RecommendBooksTool:
+    """도서 추천 에이전트 로컬 도구."""
+    settings = get_settings()
+    return RecommendBooksTool(
+        book_search_tool=book_search_tool,
+        settings=settings,
+    )
+
+
+def get_consult_librarian_tool() -> ConsultLibrarianTool:
+    """사서 에이전트 HTTP 스텁/원격 호출 도구."""
+    settings = get_settings()
+    return ConsultLibrarianTool(settings=settings)
+
+
+def get_orchestrator_service(
+    session_store: ChatSessionStore = Depends(get_chat_session_store),
+    recommend_tool: RecommendBooksTool = Depends(get_recommend_books_tool),
+    librarian_tool: ConsultLibrarianTool = Depends(get_consult_librarian_tool),
+) -> OrchestratorService:
+    """오케스트레이터 에이전트 서비스."""
+    settings = get_settings()
+    tools = [recommend_tool.as_tool(), librarian_tool.as_tool()]
+    return OrchestratorService(
+        session_store=session_store,
+        settings=settings,
+        tools=tools,
+    )
+
+
 def get_librarian_service(
     session_store: ChatSessionStore = Depends(get_chat_session_store),
     book_search_tool: BookSearchTool = Depends(get_book_search_tool),
 ) -> LibrarianService:
-    """추천 에이전트 서비스."""
+    """추천 에이전트 서비스 (기존 호환 및 단독 사용)."""
     settings = get_settings()
     return LibrarianService(
         session_store=session_store,

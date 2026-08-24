@@ -29,20 +29,6 @@ HTTP 호출 도구)에게 위임하는 **Agent-as-a-Tool** 구조를 구현한�
 
 ## Task 목록
 
-### Task 4: 라우터 배선 + API 계약 확인
-
-- 목표: `/api/v1/chat`이 오케스트레이터를 호출하도록 교체한다.
-- 가이드: `api/deps.py`의 `get_librarian_service` 의존성을
-  `get_orchestrator_service`로 교체(또는 병행 — 기존 `LibrarianService` 의존성은
-  Task 2의 로컬 도구 내부에서 여전히 쓰이므로 완전히 제거하지 않음). 라우터
-  (`api/v1/routers/chat.py`)가 `OrchestratorService.chat`/`stream_chat`을 호출하도록
-  변경. `ChatRequest`/`ChatResponse` 스키마가 실제로 안 바뀌는지 확인하고, 바뀌지
-  않으면 `docs/api/openapi.yaml` 수정은 필요 없음(내부 구현 교체는 계약 변경이
-  아니므로). 스키마가 조금이라도 바뀌면 그때 `docs/api/openapi.yaml`을 먼저
-  수정한다.
-- 테스트: 단위 — 라우터 mocking(기존 `test_chat_router.py` 패턴 재사용, 대상만
-  `OrchestratorService`로 교체). E2E — 스트리밍 응답 정상 동작 재확인.
-
 ### Task 5: E2E 검증
 
 - 목표: 전체 위임 흐름이 실제로 동작하는지 확인한다.

@@ -1,6 +1,6 @@
 """/chat API 라우터 단위 테스트.
 
-FastAPI 의존성 주입 오버라이드를 통해 LibrarianService를 Mock으로 대체하고,
+FastAPI 의존성 주입 오버라이드를 통해 OrchestratorService를 Mock으로 대체하고,
 JSON 응답, 스트리밍 응답, 유효성 검사(Pydantic)를 검증한다.
 """
 
@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from discovery.api.deps import get_librarian_service
+from discovery.api.deps import get_orchestrator_service
 from discovery.main import app
 
 
@@ -19,7 +19,7 @@ async def test_chat_json_response() -> None:
     mock_service = MagicMock()
     mock_service.chat = AsyncMock(return_value="추천해드리는 도서는 '어린 왕자'입니다.")
 
-    app.dependency_overrides[get_librarian_service] = lambda: mock_service
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
         async with AsyncClient(
@@ -46,7 +46,7 @@ async def test_chat_generates_session_id_if_empty() -> None:
     mock_service = MagicMock()
     mock_service.chat = AsyncMock(return_value="답변입니다.")
 
-    app.dependency_overrides[get_librarian_service] = lambda: mock_service
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
         async with AsyncClient(
@@ -70,7 +70,7 @@ async def test_chat_accepts_null_session_id() -> None:
     mock_service = MagicMock()
     mock_service.chat = AsyncMock(return_value="답변입니다.")
 
-    app.dependency_overrides[get_librarian_service] = lambda: mock_service
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
         async with AsyncClient(
@@ -101,7 +101,7 @@ async def test_chat_streaming_response() -> None:
     mock_service = MagicMock()
     mock_service.stream_chat = fake_stream_chat
 
-    app.dependency_overrides[get_librarian_service] = lambda: mock_service
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
         async with AsyncClient(
@@ -122,7 +122,7 @@ async def test_chat_streaming_response() -> None:
 @pytest.mark.asyncio
 async def test_chat_validation_error_on_empty_message() -> None:
     mock_service = MagicMock()
-    app.dependency_overrides[get_librarian_service] = lambda: mock_service
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
         async with AsyncClient(
