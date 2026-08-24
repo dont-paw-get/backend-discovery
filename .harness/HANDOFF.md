@@ -149,7 +149,16 @@
 - 머지 완료된 로컬 및 원격 피처 브랜치(CLIAR-20, CLIAR-21, CLIAR-40, CLIAR-51) 정리 완료.
 - `.harness/PLAN.md`에 다음 작업(사서 답변 출력 포맷 구조화 및 프론트엔드 도서 등록 버튼 연동 등) 계획 수립 완료.
 
+
+## 2026-08-23 — CLIAR-67 프론트엔드 도서 등록 연동 지원 (사서 추천 포맷 구조화 및 검색 최적화)
+- 브랜치: `CLIAR-67-Librarian-Recommendation-Format` (`develop`에서 분기).
+- 프론트엔드(`my-reading-room`)에서 추천 도서를 파싱하여 도서 등록 화면 이동 및 필드 자동완성을 수행할 수 있도록 백엔드 추천 에이전트 포맷과 검색 가이드를 고도화했다.
+  - Task 1: `domain/librarian/agent.py`의 `LIBRARIAN_SYSTEM_PROMPT`에 `### 📖 {도서 제목}`, `- **저자**: {저자명}`, `- **추천 이유**: {추천 이유}` 형식의 마크다운 템플릿을 명시.
+  - Task 2: `infrastructure/search/book_search_tool.py`의 `search_books` 도구 docstring 및 검색 가이드 최적화.
+  - Task 3: `tests/unit/test_librarian_agent.py`에 마크다운 템플릿 검증 테스트 추가, 전체 정적 분석(`ruff`, `mypy`) 및 단위 테스트 25건 통과 완료.
+- 커밋·push는 사용자 요청 대기 중.
+
 ### 다음 세션이 할 일
-1. `develop` 브랜치 최신 pull 확인 (`git checkout develop && git pull origin develop`).
-2. `.harness/PLAN.md`에 수립된 Step 1(사서 추천 답변 포맷 구조화 및 마크다운 템플릿 튜닝)부터 새 티켓 브랜치를 분기하여 착수.
-3. 프론트엔드에서 추천된 도서 목록이 깔끔하게 파싱되어 `[내 서재에 등록하기]` 버튼이 동작하는지 연동 확인.
+1. 프론트엔드(`my-reading-room`)에서 변경된 사서 응답 포맷 기반 파싱 및 도서 등록 바로가기 버튼 / 필드 자동완성 연동 확인.
+2. 커밋/push/PR 생성 요청 시 진행 (`[CLIAR-67]` 태그 사용).
+
