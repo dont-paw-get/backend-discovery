@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     # 확인된 모델. 특정 기능만 더 강한 모델(Claude 3.5 Sonnet 등)로 바꾸려면
     # `LIBRARIAN_MODEL_ID` 환경변수만 교체한다(다른 용도의 모델 설정에 영향 없음).
     librarian_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    orchestrator_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    librarian_agent_url: str | None = None
     tavily_api_key: str
     tavily_cache_ttl_seconds: int = 86400
     tavily_monthly_credit_limit: int = 900

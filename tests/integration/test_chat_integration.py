@@ -63,7 +63,7 @@ async def test_multi_turn_chat_with_redis(
     )
 
     mock_create_agent = mocker.patch(
-        "discovery.application.librarian_service.create_librarian_agent",
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
         return_value=mock_agent,
     )
 

@@ -5,8 +5,8 @@ info:
     DPYB(Don't Paw Get Your Book)의 backend-discovery 서비스 wire 계약.
     이 파일이 API 계약의 단일 소유 산출물이다. `.harness/*`는 이 내용을 복제하지 않고 참조만 한다.
 
-    Strands Agents SDK 및 Tavily 실시간 웹 검색 기반의 AI 도서 추천 에이전트 서비스 계약을 정의한다.
-  version: 0.2.0
+    Strands Agents SDK 기반 오케스트레이터 및 실시간 웹 검색 도서 추천 에이전트 서비스 계약을 정의한다.
+  version: 0.3.0
 
 servers:
   - url: http://localhost:8000
@@ -15,12 +15,12 @@ servers:
 paths:
   /api/v1/chat:
     post:
-      summary: 추천 에이전트 도서 추천 대화
+      summary: 오케스트레이터 대화 (도서 추천 및 사서 상담)
       description: >
-        자연어 질문으로 추천 에이전트에게 도서 추천을 요청한다.
-        이전 `session_id`를 넘기면 멀티턴 대화 문맥을 유지한다.
+        자연어 질문으로 오케스트레이터에게 대화를 요청한다.
+        의도에 따라 도서 추천 에이전트 또는 사서 에이전트로 라우팅되며, 이전 `session_id`를 넘기면 멀티턴 대화 문맥을 유지한다.
         `stream=true`인 경우 스트리밍 응답(text/plain)을 반환하며, 응답 헤더 `X-Session-Id`에 세션 ID가 포함된다.
-      operationId: chatWithLibrarian
+      operationId: chatWithOrchestrator
       tags:
         - Chat
       requestBody:

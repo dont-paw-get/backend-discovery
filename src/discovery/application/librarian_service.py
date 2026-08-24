@@ -33,6 +33,30 @@ def extract_text_from_message(message: Any) -> str:
     return ""
 
 
+def extract_chunk_from_event(event: Any) -> str:
+    """Strands stream 이벤트에서 텍스트 청크를 안전하게 추출한다."""
+    if not isinstance(event, dict):
+        return ""
+
+    # 1. TextStreamEvent: {"data": "..."}
+    if "data" in event and isinstance(event["data"], str):
+        return event["data"]
+
+    # 2. contentBlockDelta: {"contentBlockDelta": {"delta": {"text": "..."}}}
+    if "contentBlockDelta" in event and isinstance(event["contentBlockDelta"], dict):
+        delta = event["contentBlockDelta"].get("delta", {})
+        if isinstance(delta, dict) and "text" in delta and isinstance(delta["text"], str):
+            return delta["text"]
+
+    # 3. delta text: {"delta": {"text": "..."}}
+    if "delta" in event and isinstance(event["delta"], dict):
+        text = event["delta"].get("text")
+        if isinstance(text, str):
+            return text
+
+    return ""
+
+
 class LibrarianService:
     """추천 에이전트 대화 및 세션 관리를 총괄하는 서비스."""
 
@@ -79,11 +103,10 @@ class LibrarianService:
 
         full_response: list[str] = []
         async for event in agent.stream_async(prompt=message):
-            if isinstance(event, dict) and "data" in event and isinstance(event["data"], str):
-                chunk = event["data"]
-                if chunk:
-                    full_response.append(chunk)
-                    yield chunk
+            chunk = extract_chunk_from_event(event)
+            if chunk:
+                full_response.append(chunk)
+                yield chunk
 
         response_text = "".join(full_response)
         await self._session_store.append_turn(session_id, {"role": "user", "content": message})

@@ -10,14 +10,11 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 복제하지 않고 웹 검색 도구로 실시간 조회해 추천한다.
 
 ### 담당 기능
-1. **추천 에이전트 (Strands Agents SDK)** — 자연어 질의에 웹 검색 도구(Tavily)로
-   후보 도서를 찾고, 추천 에이전트 페르소나로 추천 답변을 생성한다. 페르소나별로
-   에이전트를 분리할 수 있는 구조를 지향한다(현재는 추천 에이전트 하나, 향후 확장 가능).
-   설계 근거: `.harness/research/2026-08-21-strands-agents-poc-design.md`,
-   모델·속도 최적화: `.harness/research/2026-08-21-librarian-agent-model-and-latency.md`.
-2. **대화 세션 관리** — `ChatSessionStore`(Redis)가 멀티턴 대화 히스토리를
-   sliding TTL로 저장·조회한다. 추천 에이전트가 이 스토어를 사용한다.
-3. ~~시간대/테마 기반 큐레이션~~, ~~도서 데이터 동기화(벡터 upsert)~~ — 폐기됨.
+1. **오케스트레이터 에이전트 (Strands Agents SDK)** — 사용자 의도를 파악하여 도서 추천 에이전트(로컬 도구) 또는 사서 에이전트(HTTP 원격 도구)로 라우팅/위임한다 (Agent-as-a-Tool 패턴).
+2. **도서 추천 에이전트 (Research Agent)** — 자연어 질의에 웹 검색 도구(Tavily)로 후보 도서를 찾고, 정형화된 마크다운 템플릿으로 추천 답변을 생성한다.
+3. **사서 에이전트 연동 (Librarian Tool)** — 별도 사서 서비스(`backend-librarian`)와 HTTP 통신하며, 서비스 미가동 시 graceful 스텁 응답을 제공한다.
+4. **대화 세션 관리** — `ChatSessionStore`(Redis)가 멀티턴 대화 히스토리를 sliding TTL로 저장·조회한다.
+5. ~~시간대/테마 기반 큐레이션~~, ~~도서 데이터 동기화(벡터 upsert)~~ — 폐기됨.
    상세는 `.harness/DECISIONS.md`, `archive/vector-search-poc/README.md` 참고.
 
 ## 기술 스택
@@ -27,9 +24,9 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 | 웹 프레임워크 | FastAPI (async) |
 | 검증/직렬화 | Pydantic V2 (`ConfigDict(from_attributes=True)`) |
 | 캐시/세션 | Redis 7 (redis.asyncio) — 대화 세션 관리 |
-| 에이전트 | Strands Agents SDK (설계 중, `.harness/PLAN.md` 참고) |
+| 에이전트 | Strands Agents SDK (Orchestrator + Agent-as-a-Tool) |
 | 웹 검색 도구 | Tavily API (`search_depth="basic"` 고정, 무료 티어 월 1,000 크레딧 비용 방어) |
-| LLM | AWS Bedrock via boto3, Claude Haiku 4.5 (모델 선택 근거는 `.harness/research/` 참고) |
+| LLM | AWS Bedrock via boto3, Claude 3 Haiku (`anthropic.claude-3-haiku-20240307-v1:0`) |
 | 패키지 관리 | uv (`pyproject.toml` + `uv.lock`) |
 | 정적 분석 | ruff, mypy |
 | 테스트 | pytest, pytest-asyncio, pytest-mock, testcontainers(redis), httpx |
@@ -41,14 +38,17 @@ asyncpg, Alembic, testcontainers(postgres). RDB로 남는 데이터가 없어 �
 
 ## 시스템 구성
 ```
-클라이언트 ──▶ (추천 에이전트 API, 설계 중) ─┐
-                                          ▼
-                    FastAPI (backend-discovery, "추천 에이전트")
-                                          │
-                  ┌───────────────────────┼───────────────────┐
-                  ▼                       ▼                   ▼
-              Redis                 AWS Bedrock              Tavily
-          (대화 세션 관리)          (LLM 추론)          (도서 후보 실시간 검색)
+클라이언트 ──▶ POST /api/v1/chat ────────┐
+                                         ▼
+                     FastAPI (backend-discovery, "오케스트레이터")
+                                         │
+        ┌────────────────────────────────┼──────────────────────────────┐
+        ▼                                ▼                              ▼
+    Redis                     Agent-as-a-Tool (로컬)            Agent-as-a-Tool (HTTP)
+(대화 세션 관리)               도서 추천 에이전트                  사서 에이전트 스텁
+                                         │                     (backend-librarian)
+                                         ▼
+                                Tavily 웹 검색
 ```
 
 ## 패키지 구조 / 컨벤션
