@@ -20,8 +20,9 @@ COPY src ./src
 
 RUN uv sync --frozen --no-dev
 
-ENV UV_NO_SYNC=1
-
 EXPOSE 8000
 
-CMD ["uv", "run", "--no-dev", "uvicorn", "discovery.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# uv run 은 실행 시점에 캐시 디렉토리(/.cache/uv)를 만들려고 시도하는데,
+# readOnlyRootFilesystem 환경에서는 이게 실패한다. 빌드 시 만들어진
+# .venv 의 uvicorn 을 직접 실행해 런타임에 uv 를 거치지 않도록 한다.
+CMD ["/app/.venv/bin/uvicorn", "discovery.main:app", "--host", "0.0.0.0", "--port", "8000"]
