@@ -12,10 +12,26 @@ from pytest_mock import MockerFixture
 
 from discovery.application.librarian_service import (
     LibrarianService,
+    extract_chunk_from_event,
     extract_text_from_message,
     format_history_for_strands,
 )
 from discovery.core.config import Settings
+
+
+def test_extract_chunk_from_event() -> None:
+    # 1. TextStreamEvent data
+    assert extract_chunk_from_event({"data": "안녕"}) == "안녕"
+    # 2. contentBlockDelta
+    assert (
+        extract_chunk_from_event({"contentBlockDelta": {"delta": {"text": "하세요"}}})
+        == "하세요"
+    )
+    # 3. delta text
+    assert extract_chunk_from_event({"delta": {"text": "!"}}) == "!"
+    # 4. non-text events
+    assert extract_chunk_from_event({"other": 123}) == ""
+    assert extract_chunk_from_event(None) == ""
 
 
 def test_format_history_for_strands() -> None:

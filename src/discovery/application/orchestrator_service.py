@@ -10,12 +10,46 @@ from typing import Any
 from strands import Agent
 
 from discovery.application.librarian_service import (
+    extract_chunk_from_event,
     extract_text_from_message,
     format_history_for_strands,
 )
 from discovery.core.config import Settings
 from discovery.domain.orchestrator.agent import create_orchestrator_agent
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
+
+
+def extract_fallback_text(agent: Agent) -> str:
+    """오케스트레이터가 도구 실행 후 텍스트를 생성하지 않았을 때 toolResult 텍스트를 추출한다."""
+    messages = getattr(agent, "messages", [])
+    if not isinstance(messages, list):
+        return ""
+
+    for msg in reversed(messages):
+        if not isinstance(msg, dict):
+            continue
+        content = msg.get("content", [])
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if "toolResult" in block and isinstance(block["toolResult"], dict):
+                tr_content = block["toolResult"].get("content", [])
+                if isinstance(tr_content, list):
+                    texts = [
+                        item.get("text", "")
+                        for item in tr_content
+                        if isinstance(item, dict)
+                        and "text" in item
+                        and isinstance(item["text"], str)
+                    ]
+                    combined = "".join(texts).strip()
+                    if combined:
+                        return combined
+                elif isinstance(tr_content, str) and tr_content.strip():
+                    return tr_content.strip()
+    return ""
 
 
 class OrchestratorService:
@@ -47,6 +81,15 @@ class OrchestratorService:
 
         result = await agent.invoke_async(prompt=message)
         response_text = extract_text_from_message(result.message)
+        tool_result = extract_fallback_text(agent)
+
+        if tool_result and "### 📖" not in response_text:
+            if response_text.strip():
+                response_text = f"{response_text.strip()}\n\n{tool_result}"
+            else:
+                response_text = tool_result
+        elif not response_text.strip() and tool_result:
+            response_text = tool_result
 
         await self._session_store.append_turn(session_id, {"role": "user", "content": message})
         await self._session_store.append_turn(
@@ -63,13 +106,25 @@ class OrchestratorService:
 
         full_response: list[str] = []
         async for event in agent.stream_async(prompt=message):
-            if isinstance(event, dict) and "data" in event and isinstance(event["data"], str):
-                chunk = event["data"]
-                if chunk:
-                    full_response.append(chunk)
-                    yield chunk
+            chunk = extract_chunk_from_event(event)
+            if chunk:
+                full_response.append(chunk)
+                yield chunk
 
         response_text = "".join(full_response)
+        tool_result = extract_fallback_text(agent)
+
+        if tool_result and "### 📖" not in response_text:
+            append_chunk = f"\n\n{tool_result}" if response_text.strip() else tool_result
+            yield append_chunk
+            if response_text.strip():
+                response_text = f"{response_text.strip()}\n\n{tool_result}"
+            else:
+                response_text = tool_result
+        elif not response_text.strip() and tool_result:
+            yield tool_result
+            response_text = tool_result
+
         await self._session_store.append_turn(session_id, {"role": "user", "content": message})
         await self._session_store.append_turn(
             session_id, {"role": "assistant", "content": response_text}
