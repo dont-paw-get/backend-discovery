@@ -15,3 +15,4 @@
 - [ ] 대화 세션 요약 압축 — 토큰 한도 초과 시 오래된 턴 요약 전략
 - [ ] CI 워크플로우에 ruff/mypy/pytest(unit+integration) 추가
 - [ ] 관측성: 구조적 로깅, 요청 추적 ID, RAG 검색 품질 지표 수집
+- [ ] Agents-as-Tools 리팩터링, 사서 연동, ArgoCD 배포 확정 후 `docs/api/openapi.yaml`을 최신 상태로 갱신하고 프론트 담당자에게 공유. 프론트가 axios 클라이언트를 서버별로 작성할 수 있게 엔드포인트/스키마/인증 헤더/CORS 설정을 명확히 문서화.
