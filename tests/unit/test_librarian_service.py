@@ -24,8 +24,7 @@ def test_extract_chunk_from_event() -> None:
     assert extract_chunk_from_event({"data": "안녕"}) == "안녕"
     # 2. contentBlockDelta
     assert (
-        extract_chunk_from_event({"contentBlockDelta": {"delta": {"text": "하세요"}}})
-        == "하세요"
+        extract_chunk_from_event({"contentBlockDelta": {"delta": {"text": "하세요"}}}) == "하세요"
     )
     # 3. delta text
     assert extract_chunk_from_event({"delta": {"text": "!"}}) == "!"

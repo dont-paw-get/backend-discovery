@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from fastapi import Depends, Request
 from tavily import AsyncTavilyClient
 
+from discovery.application.genre_classifier_service import GenreClassifierService
 from discovery.application.librarian_service import LibrarianService
 from discovery.application.orchestrator_service import OrchestratorService
 from discovery.core.config import get_settings
@@ -95,3 +96,9 @@ def get_librarian_service(
         book_search_tool=book_search_tool,
         settings=settings,
     )
+
+
+def get_genre_classifier_service() -> GenreClassifierService:
+    """도서 표준 장르 분류 서비스."""
+    settings = get_settings()
+    return GenreClassifierService(settings=settings)

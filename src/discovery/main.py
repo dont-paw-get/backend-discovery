@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from discovery.api.v1.routers.chat import router as chat_router
+from discovery.api.v1.routers.genre import router as genre_router
 from discovery.core.config import get_settings
 from discovery.infrastructure.cache.redis_client import create_redis_client
 
@@ -23,7 +24,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="DPYB Discovery API",
         description="도서 탐색 및 AI 추천 에이전트 서비스",
-        version="0.2.0",
+        version="0.4.0",
         lifespan=lifespan,
     )
 
@@ -43,6 +44,7 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(chat_router, prefix="/api/v1")
+    app.include_router(genre_router, prefix="/api/v1")
 
     return app
 

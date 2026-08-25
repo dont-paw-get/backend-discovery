@@ -98,4 +98,3 @@ def test_librarian_system_prompt_contains_structured_markdown_template() -> None
     assert "- **추천 이유**:" in LIBRARIAN_SYSTEM_PROMPT
     assert "search_books" in LIBRARIAN_SYSTEM_PROMPT
     assert "권수" in LIBRARIAN_SYSTEM_PROMPT
-

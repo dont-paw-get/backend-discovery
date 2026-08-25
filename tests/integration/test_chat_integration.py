@@ -58,9 +58,7 @@ async def test_multi_turn_chat_with_redis(
     }
 
     mock_agent = MagicMock()
-    mock_agent.invoke_async = AsyncMock(
-        side_effect=[mock_agent_result_1, mock_agent_result_2]
-    )
+    mock_agent.invoke_async = AsyncMock(side_effect=[mock_agent_result_1, mock_agent_result_2])
 
     mock_create_agent = mocker.patch(
         "discovery.application.orchestrator_service.create_orchestrator_agent",
@@ -76,9 +74,7 @@ async def test_multi_turn_chat_with_redis(
 
     session_id = "test-e2e-session-1"
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Turn 1
         resp1 = await client.post(
             "/api/v1/chat",

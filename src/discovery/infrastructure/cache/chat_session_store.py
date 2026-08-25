@@ -41,9 +41,7 @@ class ChatSessionStore:
     async def get_history(self, session_id: str) -> list[dict[str, str]]:
         """세션의 전체(최대 max_turns개) 히스토리를 오래된 것부터 순서대로 반환한다."""
         key = _session_key(session_id)
-        raw_turns = await cast(
-            "Awaitable[list[str]]", self._redis.lrange(key, 0, -1)
-        )
+        raw_turns = await cast("Awaitable[list[str]]", self._redis.lrange(key, 0, -1))
         return [json.loads(raw_turn) for raw_turn in raw_turns]
 
     async def clear(self, session_id: str) -> None:
