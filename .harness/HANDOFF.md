@@ -207,3 +207,8 @@
    - `recommend_books` 도구 파라미터 구조화 (`count: int = 1`).
    - 직결 스트리밍 파이프라인(레이턴시 단축).
    - Pydantic Structured Output 적용.
+
+- **후속 Enum 동기화 (`genre_type`)**:
+  - `backend-book`의 16개 표준 `genre_type` Enum(`SCIENCE_FICTION`, `LITERARY_FICTION`, `POETRY_DRAMA`, `BUSINESS_ECONOMICS`, `ARTS`, `COMPUTER_IT`, `NONE` 등)과 `StandardGenre` 스키마 및 반환값을 100% 일치시킴.
+  - 미식별 및 예외 시 `NONE` (`confidence: 0.0`)으로 graceful fallback 처리.
+  - 관련 단위 테스트 98건 전체 통과 확인.

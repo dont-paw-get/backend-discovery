@@ -38,25 +38,42 @@ def test_build_classification_prompt_empty_optional_fields() -> None:
 @pytest.mark.parametrize(
     ("input_str", "expected"),
     [
-        ("SF", StandardGenre.SF),
+        ("SCIENCE_FICTION", StandardGenre.SCIENCE_FICTION),
+        ("SF", StandardGenre.SCIENCE_FICTION),
+        ("공상과학", StandardGenre.SCIENCE_FICTION),
+        ("FANTASY", StandardGenre.FANTASY),
         ("판타지", StandardGenre.FANTASY),
+        ("ROMANCE", StandardGenre.ROMANCE),
         ("로맨스", StandardGenre.ROMANCE),
+        ("MYSTERY_THRILLER", StandardGenre.MYSTERY_THRILLER),
         ("미스터리/스릴러", StandardGenre.MYSTERY_THRILLER),
         ("추리소설", StandardGenre.MYSTERY_THRILLER),
-        ("순수소설/일반소설", StandardGenre.GENERAL_FICTION),
-        ("한국소설", StandardGenre.GENERAL_FICTION),
+        ("LITERARY_FICTION", StandardGenre.LITERARY_FICTION),
+        ("순수소설/일반소설", StandardGenre.LITERARY_FICTION),
+        ("한국소설", StandardGenre.LITERARY_FICTION),
+        ("ESSAY", StandardGenre.ESSAY),
         ("에세이", StandardGenre.ESSAY),
-        ("시/희곡", StandardGenre.POETRY_PLAY),
+        ("POETRY_DRAMA", StandardGenre.POETRY_DRAMA),
+        ("시/희곡", StandardGenre.POETRY_DRAMA),
+        ("HUMANITIES", StandardGenre.HUMANITIES),
         ("인문학", StandardGenre.HUMANITIES),
+        ("HISTORY", StandardGenre.HISTORY),
         ("역사", StandardGenre.HISTORY),
-        ("경제/경영", StandardGenre.BUSINESS_ECONOMY),
+        ("BUSINESS_ECONOMICS", StandardGenre.BUSINESS_ECONOMICS),
+        ("경제/경영", StandardGenre.BUSINESS_ECONOMICS),
+        ("SELF_HELP", StandardGenre.SELF_HELP),
         ("자기계발", StandardGenre.SELF_HELP),
+        ("SCIENCE", StandardGenre.SCIENCE),
         ("과학", StandardGenre.SCIENCE),
-        ("예술", StandardGenre.ART),
+        ("ARTS", StandardGenre.ARTS),
+        ("예술", StandardGenre.ARTS),
+        ("RELIGION", StandardGenre.RELIGION),
         ("종교", StandardGenre.RELIGION),
-        ("컴퓨터/IT", StandardGenre.IT_COMPUTER),
-        ("프로그래밍 언어", StandardGenre.IT_COMPUTER),
-        ("기타", StandardGenre.ETC),
+        ("COMPUTER_IT", StandardGenre.COMPUTER_IT),
+        ("컴퓨터/IT", StandardGenre.COMPUTER_IT),
+        ("프로그래밍 언어", StandardGenre.COMPUTER_IT),
+        ("NONE", StandardGenre.NONE),
+        ("기타", StandardGenre.NONE),
         ("알수없는장르XYZ", None),
     ],
 )
@@ -67,9 +84,9 @@ def test_match_standard_genre(input_str: str, expected: StandardGenre | None) ->
 
 def test_parse_classification_response_valid_json() -> None:
     """정상 JSON 문자열이 BookClassificationResponse로 올바르게 파싱되는지 검증한다."""
-    raw_text = '{"genre": "컴퓨터/IT", "confidence": 0.95}'
+    raw_text = '{"genre": "COMPUTER_IT", "confidence": 0.95}'
     response = parse_classification_response(raw_text)
-    assert response.genre == StandardGenre.IT_COMPUTER
+    assert response.genre == StandardGenre.COMPUTER_IT
     assert response.confidence == 0.95
 
 
@@ -77,20 +94,20 @@ def test_parse_classification_response_with_markdown_codeblock() -> None:
     """마크다운 코드블록으로 감싸진 JSON 문자열도 정상 파싱되는지 검증한다."""
     raw_text = """```json
     {
-        "genre": "SF",
+        "genre": "SCIENCE_FICTION",
         "confidence": 0.88
     }
     ```"""
     response = parse_classification_response(raw_text)
-    assert response.genre == StandardGenre.SF
+    assert response.genre == StandardGenre.SCIENCE_FICTION
     assert response.confidence == 0.88
 
 
 def test_parse_classification_response_unknown_genre() -> None:
-    """표준 장르에 없는 미식별 문자열인 경우 '기타' fallback 및 신뢰도 0.0을 반환한다."""
+    """표준 장르에 없는 미식별 문자열인 경우 'NONE' fallback 및 신뢰도 0.0을 반환한다."""
     raw_text = '{"genre": "미확인_외계_xyz_123", "confidence": 0.99}'
     response = parse_classification_response(raw_text)
-    assert response.genre == StandardGenre.ETC
+    assert response.genre == StandardGenre.NONE
     assert response.confidence == 0.0
 
 
@@ -103,9 +120,9 @@ def test_parse_classification_response_invalid_json_fallback() -> None:
 
 
 def test_parse_classification_response_empty() -> None:
-    """빈 응답일 경우 안전하게 '기타'와 0.0 신뢰도를 반환한다."""
+    """빈 응답일 경우 안전하게 'NONE'과 0.0 신뢰도를 반환한다."""
     response = parse_classification_response("")
-    assert response.genre == StandardGenre.ETC
+    assert response.genre == StandardGenre.NONE
     assert response.confidence == 0.0
 
 
@@ -141,7 +158,7 @@ async def test_genre_classifier_service_mock_mode(mock_settings: Settings) -> No
         raw_category="국내도서 > IT > 프로그래밍",
     )
     res1 = await service.classify_genre(req1)
-    assert res1.genre == StandardGenre.IT_COMPUTER
+    assert res1.genre == StandardGenre.COMPUTER_IT
     assert res1.confidence == 1.0
 
     # 2. 제목 기반 분류
@@ -152,10 +169,10 @@ async def test_genre_classifier_service_mock_mode(mock_settings: Settings) -> No
     res2 = await service.classify_genre(req2)
     assert res2.genre == StandardGenre.HISTORY
 
-    # 3. 매칭 없는 경우 ETC
+    # 3. 매칭 없는 경우 NONE
     req3 = BookClassificationRequest(title="xyz 123 abc")
     res3 = await service.classify_genre(req3)
-    assert res3.genre == StandardGenre.ETC
+    assert res3.genre == StandardGenre.NONE
 
 
 @pytest.mark.asyncio
@@ -165,7 +182,7 @@ async def test_genre_classifier_service_bedrock_mode(
     """Bedrock 모드에서 Strands Agent 호출 및 결과 파싱이 정상 동작하는지 검증한다."""
     mock_agent_instance = MagicMock()
     mock_agent_result = MagicMock()
-    mock_agent_result.message = {"content": [{"text": '{"genre": "과학", "confidence": 0.92}'}]}
+    mock_agent_result.message = {"content": [{"text": '{"genre": "SCIENCE", "confidence": 0.92}'}]}
     mock_agent_instance.invoke_async = AsyncMock(return_value=mock_agent_result)
 
     mocker.patch(
@@ -192,7 +209,7 @@ async def test_genre_classifier_service_bedrock_mode(
 async def test_genre_classifier_service_exception_fallback(
     bedrock_settings: Settings, mocker: MockerFixture
 ) -> None:
-    """Bedrock 호출 중 예외가 발생해도 500 에러 대신 '기타'와 0.0 신뢰도를 반환하는지 검증한다."""
+    """Bedrock 호출 중 예외가 발생해도 500 에러 대신 'NONE'과 0.0 신뢰도를 반환하는지 검증한다."""
     mocker.patch(
         "discovery.application.genre_classifier_service.Agent",
         side_effect=RuntimeError("AWS Connection Failed"),
@@ -202,5 +219,5 @@ async def test_genre_classifier_service_exception_fallback(
     req = BookClassificationRequest(title="코스모스")
     res = await service.classify_genre(req)
 
-    assert res.genre == StandardGenre.ETC
+    assert res.genre == StandardGenre.NONE
     assert res.confidence == 0.0

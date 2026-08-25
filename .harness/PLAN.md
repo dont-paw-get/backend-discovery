@@ -1,6 +1,6 @@
 # PLAN — backend-discovery
 
-현재 진행 중인 활성 계획 없음 (CLIAR-103 도서 장르 분류 API 신설 완료).
+현재 진행 중인 활성 계획 없음 (CLIAR-103 도서 장르 분류 API 신설 및 backend-book genre_type 동기화 완료).
 
 ## [대기/후속 제안] 에이전트 엔지니어링 및 성능 최적화
 

@@ -66,7 +66,7 @@ class GenreClassifierService:
                 return BookClassificationResponse(genre=matched, confidence=1.0)
 
         # 매칭되지 않을 경우 기본값 ETC
-        return BookClassificationResponse(genre=StandardGenre.ETC, confidence=1.0)
+        return BookClassificationResponse(genre=StandardGenre.NONE, confidence=1.0)
 
     async def classify_genre(
         self, request: BookClassificationRequest
@@ -97,5 +97,5 @@ class GenreClassifierService:
 
         except Exception as exc:
             logger.error("LLM 장르 분류 중 오류 발생: %s", exc, exc_info=True)
-            # 안전 fallback: 오류 발생 시에도 500 에러 대신 '기타' 장르 반환
-            return BookClassificationResponse(genre=StandardGenre.ETC, confidence=0.0)
+            # 안전 fallback: 오류 발생 시에도 500 에러 대신 'NONE' 장르 반환
+            return BookClassificationResponse(genre=StandardGenre.NONE, confidence=0.0)
