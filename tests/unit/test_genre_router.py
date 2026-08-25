@@ -51,7 +51,7 @@ async def test_classify_genre_success(app: FastAPI, client: AsyncClient) -> None
     assert response.status_code == 200
 
     data = response.json()
-    assert data["genre"] == StandardGenre.IT_COMPUTER.value
+    assert data["genre"] == StandardGenre.COMPUTER_IT.value
     assert data["confidence"] == 1.0
 
 
@@ -64,7 +64,7 @@ async def test_classify_genre_custom_mock_service(app: FastAPI, client: AsyncCli
             self, request: BookClassificationRequest
         ) -> BookClassificationResponse:
             return BookClassificationResponse(
-                genre=StandardGenre.SF,
+                genre=StandardGenre.SCIENCE_FICTION,
                 confidence=0.97,
             )
 
@@ -79,7 +79,7 @@ async def test_classify_genre_custom_mock_service(app: FastAPI, client: AsyncCli
     assert response.status_code == 200
 
     data = response.json()
-    assert data["genre"] == "SF"
+    assert data["genre"] == "SCIENCE_FICTION"
     assert data["confidence"] == 0.97
 
 

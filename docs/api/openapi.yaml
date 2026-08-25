@@ -111,25 +111,25 @@ components:
 
     StandardGenre:
       type: string
-      description: ERD 도서 카테고리 표준 규격 Enum
+      description: ERD/backend-book 도서 카테고리 표준 규격 Enum (genre_type)
       enum:
-        - SF
-        - 판타지
-        - 로맨스
-        - 미스터리/스릴러
-        - 순수소설/일반소설
-        - 에세이
-        - 시/희곡
-        - 인문학
-        - 역사
-        - 경제/경영
-        - 자기계발
-        - 과학
-        - 예술
-        - 종교
-        - 컴퓨터/IT
-        - 기타
-      example: 컴퓨터/IT
+        - NONE
+        - SCIENCE_FICTION
+        - FANTASY
+        - ROMANCE
+        - MYSTERY_THRILLER
+        - LITERARY_FICTION
+        - ESSAY
+        - POETRY_DRAMA
+        - HUMANITIES
+        - HISTORY
+        - BUSINESS_ECONOMICS
+        - SELF_HELP
+        - SCIENCE
+        - ARTS
+        - RELIGION
+        - COMPUTER_IT
+      example: COMPUTER_IT
 
     BookClassificationRequest:
       type: object
