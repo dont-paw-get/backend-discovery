@@ -95,6 +95,9 @@ def test_create_librarian_agent_passes_tools_and_messages(mocker: MockerFixture)
 def test_librarian_system_prompt_contains_structured_markdown_template() -> None:
     assert "### 📖" in LIBRARIAN_SYSTEM_PROMPT
     assert "- **저자**:" in LIBRARIAN_SYSTEM_PROMPT
+    assert "({페이지수}쪽)" in LIBRARIAN_SYSTEM_PROMPT
     assert "- **추천 이유**:" in LIBRARIAN_SYSTEM_PROMPT
     assert "search_books" in LIBRARIAN_SYSTEM_PROMPT
     assert "권수" in LIBRARIAN_SYSTEM_PROMPT
+    assert "쪽수" in LIBRARIAN_SYSTEM_PROMPT
+    assert "과잉 사과 금지" in LIBRARIAN_SYSTEM_PROMPT
