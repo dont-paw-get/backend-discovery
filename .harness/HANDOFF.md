@@ -188,3 +188,22 @@
 
 
 
+
+
+## 2026-08-25 — CLIAR-103 도서 표준 장르 분류 API 신설 완료
+- 브랜치: `CLIAR-103-Book-Genre-Classification` (`develop`에서 분기).
+- OCR 및 외부 도서 메타데이터(제목, 저자, 비정형 원본 카테고리)를 DPYB 서비스의 ERD 16개 표준 장르 규격으로 분류하는 경량 REST API(`POST /api/v1/classify-genre`)를 구현했다:
+  - Task 1: `docs/api/openapi.yaml` 계약 버전 0.4.0으로 갱신, `StandardGenre` (16개 Enum) 및 `BookClassificationRequest`/`BookClassificationResponse` Pydantic 모델 정의.
+  - Task 2: 16개 표준 장르 분류 프롬프트(`GENRE_CLASSIFIER_SYSTEM_PROMPT`), 도메인 파서(`parse_classification_response`), 완화 키워드 매처(`match_standard_genre`), `GenreClassifierService` 구현 및 `genre_classifier_model_id` 환경변수 분리.
+  - Task 3: `api/v1/routers/genre.py` 라우터 구현, `api/deps.py` 의존성 주입 배선, `main.py`에 라우터 등록.
+  - Task 4: 도메인·서비스 단위 테스트 30건 및 API 라우터 단위 테스트 4건 (총 34건 신규 추가), 전체 정적 분석(`ruff`, `mypy`) 및 단위 테스트 81건 통과 완료.
+  - Task 5: `docs/api/decisions/0002-book-genre-classification.md` (ADR 0002) 작성, `.harness/STATE.md`, `.harness/ARCHITECTURE.md`, `.harness/DECISIONS.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+- 커밋·push는 사용자 승인 대기 중 (`[CLIAR-103]` 태그 사용).
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 커밋 생성 및 원격 push (`git push -u origin CLIAR-103-Book-Genre-Classification`).
+2. PR 생성 (base 브랜치: `develop`).
+3. 후속 과제 논의:
+   - `recommend_books` 도구 파라미터 구조화 (`count: int = 1`).
+   - 직결 스트리밍 파이프라인(레이턴시 단축).
+   - Pydantic Structured Output 적용.

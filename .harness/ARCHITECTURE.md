@@ -5,16 +5,15 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 
 2026-08-21 방향 전환(`.harness/DECISIONS.md` 참고)으로 역할이 재정의됐다:
 자체 벡터DB(pgvector) 기반 카탈로그 읽기 모델은 폐기됐고, 이 서비스는
-**Strands Agents SDK 기반 "추천 에이전트"** 역할로 이어간다. 도서 원본 데이터의
-소유권은 여전히 Basic API 서버에 있으며, 이 서비스는 그 데이터를 자체 DB에
-복제하지 않고 웹 검색 도구로 실시간 조회해 추천한다.
+**Strands Agents SDK 기반 오케스트레이터 및 실시간 웹 검색 도서 추천 / 장르 분류 서비스**로 동작한다.
 
 ### 담당 기능
 1. **오케스트레이터 에이전트 (Strands Agents SDK)** — 사용자 의도를 파악하여 도서 추천 에이전트(로컬 도구) 또는 사서 에이전트(HTTP 원격 도구)로 라우팅/위임한다 (Agent-as-a-Tool 패턴).
 2. **도서 추천 에이전트 (Research Agent)** — 자연어 질의에 웹 검색 도구(Tavily)로 후보 도서를 찾고, 정형화된 마크다운 템플릿으로 추천 답변을 생성한다.
 3. **사서 에이전트 연동 (Librarian Tool)** — 별도 사서 서비스(`backend-librarian`)와 HTTP 통신하며, 서비스 미가동 시 graceful 스텁 응답을 제공한다.
-4. **대화 세션 관리** — `ChatSessionStore`(Redis)가 멀티턴 대화 히스토리를 sliding TTL로 저장·조회한다.
-5. ~~시간대/테마 기반 큐레이션~~, ~~도서 데이터 동기화(벡터 upsert)~~ — 폐기됨.
+4. **도서 표준 장르 분류 (`GenreClassifierService`)** — 도서 제목, 저자, 원본 카테고리(알라딘/OCR 등) 정보를 분석하여 ERD 표준 16개 장르 체계 중 1개로 분류한다 (`POST /api/v1/classify-genre`).
+5. **대화 세션 관리** — `ChatSessionStore`(Redis)가 멀티턴 대화 히스토리를 sliding TTL로 저장·조회한다.
+6. ~~시간대/테마 기반 큐레이션~~, ~~도서 데이터 동기화(벡터 upsert)~~ — 폐기됨.
    상세는 `.harness/DECISIONS.md`, `archive/vector-search-poc/README.md` 참고.
 
 ## 기술 스택
@@ -39,16 +38,17 @@ asyncpg, Alembic, testcontainers(postgres). RDB로 남는 데이터가 없어 �
 ## 시스템 구성
 ```
 클라이언트 ──▶ POST /api/v1/chat ────────┐
+            POST /api/v1/classify-genre  │
                                          ▼
-                     FastAPI (backend-discovery, "오케스트레이터")
+                     FastAPI (backend-discovery, "오케스트레이터 및 분류기")
                                          │
-        ┌────────────────────────────────┼──────────────────────────────┐
-        ▼                                ▼                              ▼
-    Redis                     Agent-as-a-Tool (로컬)            Agent-as-a-Tool (HTTP)
-(대화 세션 관리)               도서 추천 에이전트                  사서 에이전트 스텁
+        ┌────────────────────────────────┼──────────────────────────────┬────────────────────────┐
+        ▼                                ▼                              ▼                        ▼
+    Redis                     Agent-as-a-Tool (로컬)            Agent-as-a-Tool (HTTP)    Genre Classifier
+(대화 세션 관리)               도서 추천 에이전트                  사서 에이전트 스텁       (Claude 3 Haiku)
                                          │                     (backend-librarian)
                                          ▼
-                                Tavily 웹 검색
+                                 Tavily 웹 검색
 ```
 
 ## 패키지 구조 / 컨벤션
@@ -63,29 +63,27 @@ asyncpg, Alembic, testcontainers(postgres). RDB로 남는 데이터가 없어 �
 - 커밋 전 `.pre-commit-config.yaml`(ruff, mypy, 커밋 메시지 `[CLIAR-XX]` 형식 검증)이 자동 실행된다.
   push/merge 승인 정책은 훅 범위가 아니라 `AGENTS.md`의 "Git 작업 정책" 섹션이 규정한다.
 
-### 현재 디렉토리 구조 (2026-08-21 정리 후)
+### 현재 디렉토리 구조
 ```
 backend-discovery/
 ├── .harness/            HANDOFF · STATE · ARCHITECTURE · DECISIONS · BACKLOG · PLAN · research/
 ├── archive/vector-search-poc/   폐기된 pgvector/RAG 코드 보관 (원래 경로 구조 유지)
-├── docs/api/            openapi.yaml(현재 paths: {}) · README.md · decisions/
+├── docs/api/            openapi.yaml · README.md · decisions/
 ├── src/discovery/
-│   ├── main.py          FastAPI 앱 팩토리, lifespan(Redis만 초기화)
+│   ├── main.py          FastAPI 앱 팩토리, lifespan(Redis만 초기화), /api/v1 라우터 배선
 │   ├── core/            config.py(pydantic-settings)
-│   ├── domain/          (현재 비어 있음, __init__.py만 — 추천 에이전트 도메인이 들어갈 자리)
-│   ├── application/     (현재 비어 있음, __init__.py만)
+│   ├── domain/          librarian/ · orchestrator/ · genre/
+│   ├── application/     librarian_service.py · orchestrator_service.py · genre_classifier_service.py
 │   ├── infrastructure/
-│   │   └── cache/       redis_client.py · chat_session_store.py
+│   │   ├── cache/       redis_client.py · chat_session_store.py
+│   │   └── search/      book_search_tool.py · result_cache.py · usage_limiter.py
 │   └── api/
-│       ├── deps.py      get_now, get_chat_session_store
-│       └── schemas/     (현재 비어 있음, __init__.py만)
-├── tests/               unit/ · integration/ · conftest.py (client 픽스처, DB 관련 픽스처 없음)
-├── docker-compose.yml(redis, app만) · .env.example · pyproject.toml · uv.lock
+│       ├── deps.py      get_now, get_chat_session_store, get_genre_classifier_service, get_orchestrator_service ...
+│       ├── schemas/     chat.py · genre.py
+│       └── v1/routers/  chat.py · genre.py
+├── tests/               unit/ · integration/ · conftest.py
+├── docker-compose.yml · .env.example · pyproject.toml · uv.lock
 ```
-
-추천 에이전트(Strands 기반) 설계가 진행되면 `domain/`, `application/`,
-`api/schemas/`, `api/v1/routers/`에 실제 코드가 채워진다. 설계 계획은
-`.harness/PLAN.md`를 참고한다.
 
 ## 데이터 모델
 - **RDB 없음.** `books` 등 벡터DB 기반 읽기 모델은 폐기되어 자체 DB에 도서
@@ -106,6 +104,5 @@ backend-discovery/
   `session_id`는 이 스토어가 생성하지 않는다. 호출자가 결정론적으로 발급해 주입한다.
 
 ## 외부 계약
-API wire 계약은 이 문서가 아니라 `docs/api/openapi.yaml`이 소유한다(현재
-`paths: {}`, 추천 에이전트 API 설계가 진행되면 채워진다).
+API wire 계약은 이 문서가 아니라 `docs/api/openapi.yaml`이 소유한다.
 계약 결정 근거는 `docs/api/decisions/`를 참조한다.
