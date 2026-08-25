@@ -33,9 +33,7 @@ async def test_orchestrator_routes_to_recommend_books_tool(mocker: MockerFixture
     )
     mock_recommend_tool.recommend = AsyncMock(  # type: ignore[method-assign]
         return_value=(
-            "### 📖 달러구트 꿈 백화점\n"
-            "- **저자**: 이미예\n"
-            "- **추천 이유**: 따뜻한 힐링 소설"
+            "### 📖 달러구트 꿈 백화점\n" "- **저자**: 이미예\n" "- **추천 이유**: 따뜻한 힐링 소설"
         )
     )
 

@@ -13,4 +13,4 @@
 | CLIAR-51 추천 에이전트 (Strands 기반) | ✅ 완료 | Task 1(strands-agents 팩토리)·Task 2(BookSearchTool Tavily 검색 도구)·Task 3(LibrarianService 세션 연동 및 도구 배선)·Task 4(POST /chat 및 /api/v1/chat 라우터, 스트리밍 응답, CORS 설정, openapi.yaml 계약)·Task 5(Bedrock 프롬프트 자동 캐싱 CacheConfig 적용)·Task 6(Redis Testcontainers 멀티턴 대화 통합 테스트 및 docker-compose 정리) 모두 완료. 단위 테스트 22건 통과, 통합 테스트 5건 작성 완료 |
 | CLIAR-67 프론트엔드 도서 등록 연동 및 검색 최적화 | ✅ 완료 | Task 1(사서 시스템 프롬프트에 `### 📖 {도서 제목}`, `- **저자**:`, `- **추천 이유**:` 마크다운 템플릿 명시 및 단위 테스트 추가), Task 2(BookSearchTool 도구 설명 및 검색 가이드 최적화), Task 3(정적 분석 및 단위 테스트 25건 전체 통과) 완료 |
 | CLIAR-86 오케스트레이터 에이전트 구축 | ✅ 완료 | Task 1(OrchestratorService 뼈대), Task 2(RecommendBooksTool 로컬 도구), Task 3(ConsultLibrarianTool HTTP 스텁 도구 및 fallback), Task 4(/api/v1/chat 라우터 배선 및 openapi.yaml 계약 동기화), Task 5(E2E 라우팅 및 통합 테스트, 도구 결과 마크다운 자동 결합 안전장치 추가, 단위 47건·통합 1건 통과) 모두 완료 |
-
+| CLIAR-103 도서 장르 분류 API 신설 | ✅ 완료 | ERD 16개 표준 장르 체계 매핑 API(`POST /api/v1/classify-genre`) 신설. Task 1(openapi.yaml 0.4.0 및 Pydantic 스키마), Task 2(분류 프롬프트·파서·`GenreClassifierService`), Task 3(FastAPI 라우터·DI 배선), Task 4(단위·라우터 테스트 34건 추가, 전체 81건 통과), Task 5(하네스 문서 동기화) 완료 |

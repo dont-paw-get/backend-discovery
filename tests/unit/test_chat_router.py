@@ -22,9 +22,7 @@ async def test_chat_json_response() -> None:
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": "sess-test-1", "message": "동화책 추천해줘"},
@@ -49,9 +47,7 @@ async def test_chat_generates_session_id_if_empty() -> None:
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/chat",
                 json={"message": "질문"},
@@ -73,9 +69,7 @@ async def test_chat_accepts_null_session_id() -> None:
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": None, "message": "질문"},
@@ -91,9 +85,7 @@ async def test_chat_accepts_null_session_id() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_streaming_response() -> None:
-    async def fake_stream_chat(
-        session_id: str, message: str
-    ) -> AsyncGenerator[str, None]:
+    async def fake_stream_chat(session_id: str, message: str) -> AsyncGenerator[str, None]:
         chunks = ["사서 ", "추천 ", "도서입니다."]
         for chunk in chunks:
             yield chunk
@@ -104,9 +96,7 @@ async def test_chat_streaming_response() -> None:
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": "sess-stream-1", "message": "질문", "stream": True},
@@ -125,9 +115,7 @@ async def test_chat_validation_error_on_empty_message() -> None:
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": "sess-1", "message": ""},

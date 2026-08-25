@@ -97,9 +97,7 @@ class OrchestratorService:
         )
         return response_text
 
-    async def stream_chat(
-        self, session_id: str, message: str
-    ) -> AsyncGenerator[str, None]:
+    async def stream_chat(self, session_id: str, message: str) -> AsyncGenerator[str, None]:
         """스트리밍 대화 응답을 청크 단위로 yield하고, 완료 후 세션 히스토리를 갱신한다."""
         history = await self._session_store.get_history(session_id)
         agent = self._build_agent(history)
