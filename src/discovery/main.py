@@ -43,7 +43,6 @@ def create_app() -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(chat_router, prefix="/api/v1")
-    app.include_router(chat_router)
 
     return app
 
