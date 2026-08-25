@@ -2,6 +2,11 @@
 
 세션 히스토리를 로드하여 Strands 오케스트레이터 에이전트에 전달하고, 질의 처리 후
 사용자 턴과 어시스턴트 턴을 ChatSessionStore에 기록한다.
+
+- 도구 실행 결과(toolResult)는 RecommendBooksTool 내부에서 결정론적으로 권수가 잘린 상태로 반환된다.
+- 향후 과제(직결 스트리밍 파이프라인): 오케스트레이터의 2차 생성 지연을 줄이기 위해
+  하위 추천 에이전트의 토큰 스트림을 직접 클라이언트로 중계하며, N+1번째 `### 📖` 감지 시
+  조기 중단(Early Stop)하는 증분 방식으로 전환한다.
 """
 
 from collections.abc import AsyncGenerator
