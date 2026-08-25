@@ -212,3 +212,82 @@
   - `backend-book`의 16개 표준 `genre_type` Enum(`SCIENCE_FICTION`, `LITERARY_FICTION`, `POETRY_DRAMA`, `BUSINESS_ECONOMICS`, `ARTS`, `COMPUTER_IT`, `NONE` 등)과 `StandardGenre` 스키마 및 반환값을 100% 일치시킴.
   - 미식별 및 예외 시 `NONE` (`confidence: 0.0`)으로 graceful fallback 처리.
   - 관련 단위 테스트 98건 전체 통과 확인.
+
+
+## 2026-08-25 — CLIAR-111 사서 에이전트 연동 계획 초안 작성 후 구조 재논의로 보류
+- 브랜치 `CLIAR-111-Librarian-Agent-Integration`을 `origin/develop`에서 생성했다.
+  (주의: `git switch -c ... origin/develop`로 만들어 upstream이 `origin/develop`을
+  추적한다. 나중에 push할 때 `git push -u origin CLIAR-111-Librarian-Agent-Integration`으로
+  추적 대상을 바로잡을 것.) CLIAR-103 작업은 `origin/develop`에 이미 머지 반영됨을 확인했다.
+- 작업명 제안: 단순 "사서 엔드포인트 연결"보다 범위를 담는
+  **"사서 에이전트 실연동 및 페르소나 라우팅"**을 제안했다(대안: "사서 에이전트 HTTP 연동 및
+  사서 전환(switch_to) 처리"). 실제 범위가 URL 연결이 아니라 `librarian_id` 선택과
+  `switch_to` 전환 처리라서.
+- 사용자가 `backend-librarian` 확정 계약과 README를 공유했다. 이를 근거로 `.harness/PLAN.md`에
+  CLIAR-111 계획 초안(선결 질문 Q1~Q6 + Task 1~7 + 리스크)을 작성했다. 코드를 읽어 확인한
+  현재 격차: ① `ConsultLibrarianTool`이 `librarian_id`를 안 보냄 ② `switch_to` 미처리(세션별
+  현재 사서 저장소 없음) ③ `as_tool()`이 `session_id`를 전달하지 않아 사서 측 멀티턴 문맥이
+  매 턴 초기화됨(실질 누락) ④ `latitude`/`longitude` 미지원으로 stork 날씨 큐레이션이 항상
+  서울 기본값 ⑤ 타임아웃 10초는 사서(Sonnet 3.5 + 날씨 도구)에 부족 가능. 부수 발견: 사서와
+  discovery 모두 로컬 8000 포트를 쓴다(충돌), 사서 대화 메모리가 인메모리라 재시작·다중
+  인스턴스에서 사서 측 문맥 유실.
+- 사용자가 "오케스트레이터가 에이전트 둘을 도구처럼 쓰는 게 아니라 그냥 멀티툴 에이전트
+  하나처럼 보인다"는 문제를 제기하며, 매 턴 "사서 판단 → 추천 검색 → 사서 재포장" 고정 3단
+  파이프라인 안을 제시했다. 이에 대해 코드 근거로 냉정한 피드백을 제시했다(구현 변경 없음,
+  분석만):
+  - 전제 정정: `RecommendBooksTool.recommend()`는 함수가 아니라 `create_librarian_agent`로
+    독립 Agent를 만들어 `invoke_async`를 돌린다(자체 프롬프트 + Tavily 도구). 사서도 README상
+    완결된 에이전트다. 즉 지금도 구조적으로는 Agents-as-Tools다.
+  - 애매함의 실제 원인 4가지: ① `ORCHESTRATOR_SYSTEM_PROMPT` 규칙 2·3이 마크다운 유지·권수
+    엄수 등 실행 세부까지 지시(위임이 아니라 마이크로매니징) ② `extract_fallback_text`가
+    `toolResult`를 결정론적으로 잘라 붙여 상위의 조합 역할을 무력화(체감의 최대 원인)
+    ③ 하위 추천 에이전트가 stateless 단발 호출이라 함수처럼 보임 ④ 어떤 에이전트를 왜
+    골랐는지 관측 로그가 없어 두 겹 판단이 보이지 않음.
+  - 고정 3단 파이프라인의 문제: 순서를 고정하면 Workflow/Chain이 되어 LLM 오케스트레이터가
+    오히려 불필요해진다. 턴당 LLM 왕복 3회(Sonnet 3.5×2 + Haiku)로 레이턴시·비용이 백로그의
+    "2~3초대 단축" 목표와 충돌. 사서는 `/api/v1/chat`(완성된 사용자용 답변) 하나뿐이라 1·3단계에
+    필요한 구조화 판단/재포장 엔드포인트가 없어 팀원 레포 변경에 종속. 3단계 자유 재포장은
+    프론트 도서 등록이 의존하는 CLIAR-67 마크다운(`### 📖` 등)을 깨뜨릴 위험. 사서를 내부
+    판단기로 쓰면 사서 인메모리 세션 오염과 `switch_to` 의미 붕괴, cat의 전 장르 추천 능력과
+    추천 결정 중복 문제도 발생.
+  - 권장안(이 레포 안에서 대부분 해결, 팀원 의존 없음): 오케스트레이터 프롬프트에서 실행
+    세부 지시 제거 → 권수는 `recommend_books(query, count=1)` 시그니처로 내림 /
+    `extract_fallback_text` 강제 결합 제거 또는 pass-through로 전환 / 하위 추천 에이전트에
+    세션 히스토리 주입 + 부실 결과 시 자체 재검색 루프 허용 / 다단 조합은 강제가 아니라
+    프롬프트 예시로 "허용"(Strands는 한 턴에 도구 다회 호출 가능하므로 필요할 때만 2단) /
+    선택 근거·도구 호출 횟수를 로그·디버그 메타로 노출 / 역할 경계는 데이터 기준 분리
+    (사서=상황 해석·페르소나·큐레이션 방향, 추천=실존 도서 검증·등록용 마크다운 생성).
+  - 순차 조합 데모가 꼭 필요하면 팀원에게 요청할 것은 구조화 판단 엔드포인트 1개
+    (예: `POST /api/v1/assess` → `{mood, genres[], needs_recommendation, persona_note}`)이고,
+    재포장(3단계)은 사서로 돌려보내지 말고 discovery가 맡아 왕복 3회→2회로 줄이고 마크다운
+    계약을 우리가 지키는 방식을 제안했다.
+- 사용자가 사서 담당 팀원의 아이디어도 합쳐 구조를 다시 논의하겠다며 이 세션을 종료했다.
+  `PLAN.md`의 CLIAR-111 초안은 "보류" 표기로 남겼다. 코드 변경·커밋은 하지 않았다
+  (미커밋 변경은 `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서뿐).
+
+### 다음 세션이 할 일
+1. 팀원과 합의된 멀티 에이전트 조율 방식을 먼저 확정한다(위임 복구 권장안 / `assess`
+   엔드포인트 신설 포함 2단 조합 / 그 외 팀원 제안). 확정 후 `PLAN.md`의 Q1~Q6·Task를
+   재작성하고 결정 근거를 `.harness/DECISIONS.md` 최상단에 기록한다.
+2. 구조가 어떻게 정해지든 남는 확정 작업(계약 연결): `librarian_id` 전달, `switch_to`
+   기반 세션 라우팅, `as_tool()`의 `session_id` 미전달 수정, 타임아웃 상향, 로컬 포트 정리.
+3. 사서 응답 샘플을 받아 CLIAR-67 마크다운 포맷 준수 여부를 확인한다(프론트 도서 등록
+   버튼 파손 여부 판단에 필요).
+
+
+## 2026-08-25 — CLIAR-91 추천 에이전트 엔지니어링 고도화 완료
+- 브랜치: `CLIAR-91-Agent-Engineering-Optimization` (`develop` 최신 헤드에서 분기).
+- 최상위 오케스트레이터 에이전트의 Agents-as-Tools 아키텍처 하에서, 도서 추천 로컬 서브 에이전트(`recommend_books`) 및 추천 시스템 전반을 소프트웨어 엔지니어링 관점(결정론적 아키텍처)으로 고도화했다:
+  - Task 1: `domain/librarian/post_processor.py`에 순수 함수 `truncate_books_by_count(markdown, count)` 구현 (헤더 `### 📖` 분할, 서두 Preamble 보존, 비정형/미달/음수 시 원본 무손실 반환). `RecommendBooksTool`에 `count: int = 1` 파라미터 구조화, docstring `Args:` 스키마 명시, clamp(1~5) 적용, 프롬프트 생성량 유도 및 반환 지점 후처리 상한 강제 결합 완료.
+  - Task 2: `infrastructure/search/book_search_tool.py` docstring에 출판사/쪽수 검색 힌트 반영. `domain/librarian/agent.py`의 `LIBRARIAN_SYSTEM_PROMPT`에 `- **저자**: {저자명} ({페이지수}쪽)` 템플릿 및 쪽수 미확인 시 유연 처리 규칙 추가 (프론트엔드 300쪽 fallback 현상 해소).
+  - Task 3: 사서 및 오케스트레이터 시스템 프롬프트에 불필요한 과잉 사과("죄송합니다...") 금지 지침 및 전문적이고 신뢰감 있는 사실 기반 톤앤매너 규칙 추가.
+  - Task 4: 스트리밍 및 오케스트레이션 파이프라인 안정성 점검 완료 및 향후 직결 스트리밍 파이프라인 전환 설계 메모 정리.
+  - Task 5: 단위 테스트 106건(`pytest -m "not integration"`) 및 Redis Testcontainers 통합 테스트 15건(`pytest -m "integration"`), 정적 분석(`ruff`, `mypy`) 100% 통과 완료.
+- 커밋·push는 사용자 승인 대기 중 (`[CLIAR-91]` 태그 사용).
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 커밋 생성 및 원격 push (`git push -u origin CLIAR-91-Agent-Engineering-Optimization`).
+2. PR 생성 (base 브랜치: `develop`).
+3. 후속 과제 진행:
+   - CLIAR-111 사서 에이전트 실연동 및 페르소나 라우팅 재개.
+   - 직결 스트리밍 파이프라인(Direct Streaming Pipeline) 구축 (레이턴시 단축 및 증분 Early Stop).

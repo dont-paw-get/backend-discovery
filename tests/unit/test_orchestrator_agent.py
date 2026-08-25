@@ -101,7 +101,6 @@ def test_create_orchestrator_agent_passes_tools_and_messages(
 def test_orchestrator_system_prompt_contains_rules() -> None:
     assert "recommend_books" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "consult_librarian" in ORCHESTRATOR_SYSTEM_PROMPT
-    assert "### 📖" in ORCHESTRATOR_SYSTEM_PROMPT
-    assert "- **저자**:" in ORCHESTRATOR_SYSTEM_PROMPT
-    assert "- **추천 이유**:" in ORCHESTRATOR_SYSTEM_PROMPT
-    assert "수량" in ORCHESTRATOR_SYSTEM_PROMPT or "권수" in ORCHESTRATOR_SYSTEM_PROMPT
+    assert "위임" in ORCHESTRATOR_SYSTEM_PROMPT
+    assert "count" in ORCHESTRATOR_SYSTEM_PROMPT or "권수" in ORCHESTRATOR_SYSTEM_PROMPT
+    assert "과잉 사과 금지" in ORCHESTRATOR_SYSTEM_PROMPT

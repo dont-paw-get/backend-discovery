@@ -9,7 +9,7 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 
 ### 담당 기능
 1. **오케스트레이터 에이전트 (Strands Agents SDK)** — 사용자 의도를 파악하여 도서 추천 에이전트(로컬 도구) 또는 사서 에이전트(HTTP 원격 도구)로 라우팅/위임한다 (Agent-as-a-Tool 패턴).
-2. **도서 추천 에이전트 (Research Agent)** — 자연어 질의에 웹 검색 도구(Tavily)로 후보 도서를 찾고, 정형화된 마크다운 템플릿으로 추천 답변을 생성한다.
+2. **도서 추천 에이전트 (Research Agent)** — 자연어 질의에 웹 검색 도구(Tavily)로 후보 도서 및 실제 쪽수(페이지수)를 찾고, `truncate_books_by_count` 순수 함수를 통해 요청된 `count`개로 결정론적으로 상한을 강제한 정형 마크다운 포맷(`### 📖`, `- **저자**: 저자 (OO쪽)`, `- **추천 이유**:`)으로 응답을 생성한다.
 3. **사서 에이전트 연동 (Librarian Tool)** — 별도 사서 서비스(`backend-librarian`)와 HTTP 통신하며, 서비스 미가동 시 graceful 스텁 응답을 제공한다.
 4. **도서 표준 장르 분류 (`GenreClassifierService`)** — 도서 제목, 저자, 원본 카테고리(알라딘/OCR 등) 정보를 분석하여 ERD 표준 16개 장르 체계 중 1개로 분류한다 (`POST /api/v1/classify-genre`).
 5. **대화 세션 관리** — `ChatSessionStore`(Redis)가 멀티턴 대화 히스토리를 sliding TTL로 저장·조회한다.
@@ -72,7 +72,7 @@ backend-discovery/
 ├── src/discovery/
 │   ├── main.py          FastAPI 앱 팩토리, lifespan(Redis만 초기화), /api/v1 라우터 배선
 │   ├── core/            config.py(pydantic-settings)
-│   ├── domain/          librarian/ · orchestrator/ · genre/
+│   ├── domain/          librarian/(agent.py, post_processor.py) · orchestrator/ · genre/
 │   ├── application/     librarian_service.py · orchestrator_service.py · genre_classifier_service.py
 │   ├── infrastructure/
 │   │   ├── cache/       redis_client.py · chat_session_store.py
