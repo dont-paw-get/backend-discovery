@@ -6,7 +6,7 @@ info:
     이 파일이 API 계약의 단일 소유 산출물이다. `.harness/*`는 이 내용을 복제하지 않고 참조만 한다.
 
     Strands Agents SDK 기반 오케스트레이터 및 실시간 웹 검색 도서 추천 에이전트 서비스 계약을 정의한다.
-  version: 0.3.0
+  version: 0.4.0
 
 servers:
   - url: http://localhost:8000
@@ -48,6 +48,31 @@ paths:
         '422':
           description: 요청 유효성 검증 실패 (빈 메시지 등)
 
+  /api/v1/classify-genre:
+    post:
+      summary: 도서 표준 장르 분류
+      description: >
+        도서 제목, 저자, 원본 카테고리(알라딘/OCR 등) 정보를 기반으로
+        DB(ERD) 표준 16개 장르 체계 중 가장 적합한 장르 1개와 신뢰도를 분류하여 반환한다.
+      operationId: classifyBookGenre
+      tags:
+        - Genre
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookClassificationRequest'
+      responses:
+        '200':
+          description: 분류된 표준 장르 정보
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookClassificationResponse'
+        '422':
+          description: 요청 유효성 검증 실패 (제목 누락 등)
+
 components:
   schemas:
     ChatRequest:
@@ -83,3 +108,61 @@ components:
         message:
           type: string
           description: 추천 에이전트의 추천 답변
+
+    StandardGenre:
+      type: string
+      description: ERD 도서 카테고리 표준 규격 Enum
+      enum:
+        - SF
+        - 판타지
+        - 로맨스
+        - 미스터리/스릴러
+        - 순수소설/일반소설
+        - 에세이
+        - 시/희곡
+        - 인문학
+        - 역사
+        - 경제/경영
+        - 자기계발
+        - 과학
+        - 예술
+        - 종교
+        - 컴퓨터/IT
+        - 기타
+      example: 컴퓨터/IT
+
+    BookClassificationRequest:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          description: 도서 제목
+          example: 파이썬 코딩의 기술
+        author:
+          type: string
+          default: ""
+          description: 저자명
+          example: 브렛 슬라킨
+        raw_category:
+          type: string
+          default: ""
+          description: 알라딘/OCR 원본 카테고리 문자열
+          example: 국내도서 > 컴퓨터/모바일 > 프로그래밍 언어 > 파이썬
+
+    BookClassificationResponse:
+      type: object
+      required:
+        - genre
+        - confidence
+      properties:
+        genre:
+          $ref: '#/components/schemas/StandardGenre'
+        confidence:
+          type: number
+          format: float
+          default: 1.0
+          description: 분류 신뢰도 (0.0 ~ 1.0)
+          example: 0.95
+
