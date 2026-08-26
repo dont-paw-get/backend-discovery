@@ -291,3 +291,20 @@
 3. 후속 과제 진행:
    - CLIAR-111 사서 에이전트 실연동 및 페르소나 라우팅 재개.
    - 직결 스트리밍 파이프라인(Direct Streaming Pipeline) 구축 (레이턴시 단축 및 증분 Early Stop).
+
+
+## 2026-08-26 — CLIAR-114 추천 에이전트 해외 도서 한국어 번역 지침 추가 및 프롬프트 정돈 완료
+- 브랜치: `CLIAR-114-librarian-translation-guideline` (`develop` 최신 헤드에서 분기).
+- 추천 에이전트(`src/discovery/domain/librarian/agent.py`의 `LIBRARIAN_SYSTEM_PROMPT`)가 해외 원서 추천 시 도서 제목·권차·저자명을 표준 한국어로 번역하도록 시스템 프롬프트 지침을 보강하고, 전체 규칙을 총 7개로 압축 정돈했다:
+  - Task 1: `LIBRARIAN_SYSTEM_PROMPT`에서 기존 6번(사과 방지)과 7번(인사말)을 `6. 톤앤매너`로 압축 통합하고, 3번/7번에 역자/번역가가 아닌 원작자(글/그림 작가, 예: 아오야마 고쇼) 표기 지침과 `7. 해외 도서 번역` 규칙(제목, 권차, 저자명의 한국어 표준 명칭 번역)을 추가하여 총 7개 규칙 체계 확립.
+  - Task 2: `tests/unit/test_librarian_agent.py`의 단위 테스트 assert 갱신, 정적 분석(`ruff`, `mypy`) 및 단위 테스트 106건 통과 완료.
+  - Task 3: `.harness/BACKLOG.md`에 C안(비한글 패턴 감지 + Haiku 단발 호출 후처리 fallback 검토) 기술 부채 등록, `.harness/DECISIONS.md`, `.harness/STATE.md`, `.harness/PLAN.md` 하네스 산출물 동기화 완료.
+- 커밋·push는 사용자 승인 대기 중 (`[CLIAR-114]` 태그 사용).
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 커밋 생성 및 원격 push (`git push -u origin CLIAR-114-librarian-translation-guideline`).
+2. PR 생성 (base 브랜치: `develop`).
+3. 후속 과제 진행:
+   - CLIAR-111 사서 에이전트 실연동 및 페르소나 라우팅.
+   - 직결 스트리밍 파이프라인(Direct Streaming Pipeline) 구축.
+
