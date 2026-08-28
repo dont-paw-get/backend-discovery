@@ -23,6 +23,7 @@ def test_create_librarian_agent_uses_configured_model_id(
     bedrock_model_cls.assert_called_once_with(
         model_id=CLAUDE_3_HAIKU_MODEL_ID,
         region_name=None,
+        max_tokens=2048,
     )
 
 
@@ -34,6 +35,7 @@ def test_create_librarian_agent_passes_region_name(mocker: MockerFixture) -> Non
     bedrock_model_cls.assert_called_once_with(
         model_id=CLAUDE_3_HAIKU_MODEL_ID,
         region_name="us-east-1",
+        max_tokens=2048,
     )
 
 
@@ -49,6 +51,7 @@ def test_create_librarian_agent_with_prompt_caching(mocker: MockerFixture) -> No
     bedrock_model_cls.assert_called_once_with(
         model_id=CLAUDE_3_HAIKU_MODEL_ID,
         region_name="us-east-1",
+        max_tokens=2048,
         cache_config=CacheConfig(strategy="auto"),
         cache_tools="default",
     )
@@ -104,3 +107,14 @@ def test_librarian_system_prompt_contains_structured_markdown_template() -> None
     assert "해외 도서 번역" in LIBRARIAN_SYSTEM_PROMPT
     assert "한국어 표준 명칭" in LIBRARIAN_SYSTEM_PROMPT
     assert "원작자" in LIBRARIAN_SYSTEM_PROMPT
+
+
+def test_get_librarian_system_prompt_by_librarian_id() -> None:
+    from discovery.domain.librarian.agent import get_librarian_system_prompt
+
+    cat_prompt = get_librarian_system_prompt("cat")
+    assert "블루" in cat_prompt
+
+    stork_prompt = get_librarian_system_prompt("stork")
+    assert "슈빌" in stork_prompt
+    assert "고양이 말투는 사용하지 않습니다" in stork_prompt

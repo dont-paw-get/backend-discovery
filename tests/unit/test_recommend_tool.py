@@ -52,6 +52,7 @@ async def test_recommend_tool_calls_create_librarian_agent(mocker: MockerFixture
     mock_create_librarian.assert_called_once_with(
         model_id="anthropic.claude-3-haiku-20240307-v1:0",
         region_name="us-east-1",
+        librarian_id=None,
         tools=[mock_search_as_tool],
     )
     expected_prompt = "SF 소설 추천해줘\n\n[요청] 반드시 1권의 도서만 추천해주세요."
@@ -75,14 +76,14 @@ async def test_recommend_tool_as_tool_execution(mocker: MockerFixture) -> None:
 
     tool_func = tool_instance.as_tool()
 
-    # Strands @tool로 데코레이트된 함수 실행 검증 (기본값 count=1 및 명시적 count=2)
+    # Strands @tool로 데코레이트된 함수 실행 검증 (기본값 count=2 및 명시적 count=3)
     result_default = await tool_func(query="인문학 책 추천")
     assert result_default == "추천 도서입니다."
-    tool_instance.recommend.assert_awaited_with(query="인문학 책 추천", count=1)
+    tool_instance.recommend.assert_awaited_with(query="인문학 책 추천", count=2, librarian_id=None)
 
-    result_custom = await tool_func(query="소설 2권 추천", count=2)
+    result_custom = await tool_func(query="소설 3권 추천", count=3)
     assert result_custom == "추천 도서입니다."
-    tool_instance.recommend.assert_awaited_with(query="소설 2권 추천", count=2)
+    tool_instance.recommend.assert_awaited_with(query="소설 3권 추천", count=3, librarian_id=None)
 
 
 @pytest.mark.asyncio

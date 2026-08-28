@@ -1,5 +1,6 @@
 """오케스트레이터 대화 API 라우터."""
 
+import urllib.parse
 import uuid
 from typing import Any
 
@@ -39,11 +40,41 @@ async def chat(
     session_id = request_body.session_id.strip() if request_body.session_id else str(uuid.uuid4())
 
     if request_body.stream:
+        signals, switch_to = await service.get_initial_meta(
+            session_id=session_id,
+            message=request_body.message,
+            librarian_id=request_body.librarian_id,
+            latitude=request_body.latitude,
+            longitude=request_body.longitude,
+        )
+        headers = {"X-Session-Id": session_id}
+        if signals is not None:
+            headers["X-Signals"] = urllib.parse.quote(signals.model_dump_json())
+        if switch_to is not None:
+            headers["X-Switch-To"] = urllib.parse.quote(switch_to.model_dump_json())
+
         return StreamingResponse(
-            service.stream_chat(session_id=session_id, message=request_body.message),
+            service.stream_chat(
+                session_id=session_id,
+                message=request_body.message,
+                librarian_id=request_body.librarian_id,
+                latitude=request_body.latitude,
+                longitude=request_body.longitude,
+            ),
             media_type="text/plain; charset=utf-8",
-            headers={"X-Session-Id": session_id},
+            headers=headers,
         )
 
-    answer = await service.chat(session_id=session_id, message=request_body.message)
-    return ChatResponse(session_id=session_id, message=answer)
+    answer, switch_to, signals = await service.chat(
+        session_id=session_id,
+        message=request_body.message,
+        librarian_id=request_body.librarian_id,
+        latitude=request_body.latitude,
+        longitude=request_body.longitude,
+    )
+    return ChatResponse(
+        session_id=session_id,
+        message=answer,
+        switch_to=switch_to,
+        signals=signals,
+    )

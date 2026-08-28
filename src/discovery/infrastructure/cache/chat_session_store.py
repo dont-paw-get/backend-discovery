@@ -9,7 +9,7 @@ session_id는 이 스토어가 생성하지 않는다. 호출자(라우터 의�
 
 import json
 from collections.abc import Awaitable
-from typing import cast
+from typing import Any, cast
 
 from redis.asyncio import Redis
 
@@ -20,8 +20,12 @@ def _session_key(session_id: str) -> str:
     return f"{SESSION_KEY_PREFIX}{session_id}"
 
 
+def _session_meta_key(session_id: str) -> str:
+    return f"{SESSION_KEY_PREFIX}{session_id}:meta"
+
+
 class ChatSessionStore:
-    """멀티턴 대화 문맥을 TTL과 함께 저장·조회하는 스토어."""
+    """멀티턴 대화 문맥 및 세션 메타(사서/좌표)를 TTL과 함께 저장·조회하는 스토어."""
 
     def __init__(self, redis: Redis, *, max_turns: int, ttl_seconds: int) -> None:
         self._redis = redis
@@ -44,6 +48,30 @@ class ChatSessionStore:
         raw_turns = await cast("Awaitable[list[str]]", self._redis.lrange(key, 0, -1))
         return [json.loads(raw_turn) for raw_turn in raw_turns]
 
+    async def get_session_meta(self, session_id: str) -> dict[str, Any]:
+        """세션의 메타데이터(활성 librarian_id, 좌표 등)를 반환한다."""
+        key = _session_meta_key(session_id)
+        raw = await cast("Awaitable[str | None]", self._redis.get(key))
+        if raw is None:
+            return {}
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    async def update_session_meta(self, session_id: str, **kwargs: Any) -> None:
+        """세션 메타데이터를 갱신하고 TTL을 적용한다."""
+        existing = await self.get_session_meta(session_id)
+        existing.update({k: v for k, v in kwargs.items() if v is not None})
+        key = _session_meta_key(session_id)
+        await cast(
+            "Awaitable[bool]",
+            self._redis.set(key, json.dumps(existing), ex=self._ttl_seconds),
+        )
+
     async def clear(self, session_id: str) -> None:
-        """세션 히스토리를 완전히 삭제한다."""
-        await cast("Awaitable[int]", self._redis.delete(_session_key(session_id)))
+        """세션 히스토리와 메타데이터를 완전히 삭제한다."""
+        keys = [_session_key(session_id), _session_meta_key(session_id)]
+        await cast("Awaitable[int]", self._redis.delete(*keys))
+

@@ -299,12 +299,119 @@
   - Task 1: `LIBRARIAN_SYSTEM_PROMPT`에서 기존 6번(사과 방지)과 7번(인사말)을 `6. 톤앤매너`로 압축 통합하고, 3번/7번에 역자/번역가가 아닌 원작자(글/그림 작가, 예: 아오야마 고쇼) 표기 지침과 `7. 해외 도서 번역` 규칙(제목, 권차, 저자명의 한국어 표준 명칭 번역)을 추가하여 총 7개 규칙 체계 확립.
   - Task 2: `tests/unit/test_librarian_agent.py`의 단위 테스트 assert 갱신, 정적 분석(`ruff`, `mypy`) 및 단위 테스트 106건 통과 완료.
   - Task 3: `.harness/BACKLOG.md`에 C안(비한글 패턴 감지 + Haiku 단발 호출 후처리 fallback 검토) 기술 부채 등록, `.harness/DECISIONS.md`, `.harness/STATE.md`, `.harness/PLAN.md` 하네스 산출물 동기화 완료.
-- 커밋·push는 사용자 승인 대기 중 (`[CLIAR-114]` 태그 사용).
+- CLIAR-114 작업 완료 및 PR(#13) 머지(`develop`) 완료.
+- 멘토링 피드백(원서 vs 정발본 인터랙티브 대화) 및 프론트엔드 모드 통합(단일 오케스트레이터 기반 올인원 에이전트) 제안 계획을 `.harness/PLAN.md`에 작성 완료.
 
 ### 다음 세션이 할 일
-1. 사용자 승인 시 커밋 생성 및 원격 push (`git push -u origin CLIAR-114-librarian-translation-guideline`).
-2. PR 생성 (base 브랜치: `develop`).
-3. 후속 과제 진행:
-   - CLIAR-111 사서 에이전트 실연동 및 페르소나 라우팅.
-   - 직결 스트리밍 파이프라인(Direct Streaming Pipeline) 구축.
+1. `.harness/PLAN.md`의 [제안] 단일 오케스트레이터 기반 올인원 독서 비서 계획 피드백 및 확정 논의.
+2. Phase 1: `CLIAR-111` 사서 에이전트 실연동 및 페르소나 라우팅 착수.
+3. Phase 2: 도서 추천 시 원서 vs 정발본 대화형 안내 및 정발본 재검색 체이닝 보강.
+4. Phase 3 & 4: 내 서재 검색 / 독서 활동 관리 도구 신설 및 프론트 단일 챗 UI 연동.
+
+
+
+## 2026-08-27 — CLIAR-111 사서 연동 계획 확정, 브랜치 정책 강화 및 브랜치 정리
+- 이전 세션(CLIAR-111 초안, 2026-08-25)에서 사용자가 제기한 "오케스트레이터가 멀티툴
+  에이전트처럼 보인다" 구조 논쟁을 이번 세션에서 별도로 재검토했다(피드백 요청 → 3단
+  파이프라인 대안 검토 → 코드 근거로 기각, 위임 복구 권장안 유지). 이어서 사서 팀이
+  `backend-librarian` API 명세(신호(`signals`: weather/time_of_day/mood/genre_focus),
+  `switch_to` 사서 전환, 좌표 지원, Sonnet 3.5 모델)를 전달해 CLIAR-111을 실제로 계획
+  단계로 진행했다.
+- 코드 확인으로 명세와의 현재 격차 7건을 재확인: `librarian_id`/`session_id`/좌표 미전달,
+  `switch_to`/`signals` 미처리, 타임아웃 10초 하드코딩, 로컬 포트 8000 충돌.
+- 사용자와 5가지 설계 축을 확정했다(`.harness/DECISIONS.md` 2026-08-27 최상단 참고):
+  1) signals→추천 반영은 서비스 강제 결합이 아니라 오케스트레이터 프롬프트 레벨 위임.
+  2) 로컬 포트는 사서(8000) 대신 discovery를 8001로 이동.
+  3) 좌표는 세션(로그인) 시작 시 1회만 수신해 세션 메타로 캐시, 재로그인 시 재수신.
+  4) `switch_to`는 텍스트 안내가 아니라 `ChatResponse`에 구조화 필드로 통과(프론트가
+     사서 전환 시 테마도 바꾸는 UI를 이미 갖고 있어서).
+  5) 사서 HTTP 타임아웃은 실측 전까지 임시 20초로 상향, 환경변수로 분리.
+  - 모델 통일(Haiku→Sonnet 3.5) 요청은 별도로 논의했으나, 사서 연동과 독립적인 축(비용·
+    레이턴시·CLIAR-91/114 회귀 위험)이라는 이유로 이번 범위에서 제외하고
+    `.harness/BACKLOG.md`로 분리하는 데 합의했다.
+- `.harness/PLAN.md`를 CLIAR-111 확정 계획(Task 0~9)으로 재작성하고, 기존 "올인원 독서
+  비서" 제안(2026-08-26 세션 산물)은 8/26에 제기했던 보안·구조 피드백(IDOR 위험, fallback
+  결합 무차별 확대, 쓰기/읽기 혼재, 스트리밍 계약 변경)을 반영해 Phase 0~4로 재정렬해서
+  같은 문서에 유지했다. 핵심: `search_my_library`는 discovery가 자체 CRUD를 만드는 게
+  아니라 Basic API 기존 엔드포인트를 호출하는 프록시 도구이고, `user_id`는 도구 파라미터로
+  LLM이 채우지 않고 인증 토큰에서 서버가 추출해 주입하는 방식(A안 패스스루 권장)으로
+  못박았다 — 인증 방식 자체는 Basic API 팀 확인이 필요한 선결 항목으로 남겼다.
+- **`AGENTS.md`에 "모든 PR/병합은 develop으로만" 규칙을 명문화**했다(기존엔 `develop→main`
+  릴리스 병합 예외가 남아 있었음). 동시에 "머지 완료된 브랜치는 로컬+원격에서 정리한다"는
+  절차(머지 확인 방법, 정리 전 사용자 확인)를 브랜치 정책에 추가했다.
+- 위 정책에 따라 `develop`에 머지 완료가 확인된(`git merge-base --is-ancestor`) 피처
+  브랜치 8개를 로컬(`git branch -d`)과 원격(`git push origin --delete`)에서 정리했다:
+  `CLIAR-102-Fix-Duplicate-Chat-Router`, `CLIAR-103-Book-Genre-Classification`,
+  `CLIAR-103-Book-Genre-Enum-Sync`, `CLIAR-114-librarian-translation-guideline`,
+  `CLIAR-51-Recommendation-Agent`(원격만 존재), `CLIAR-67-Librarian-Recommendation-Format`,
+  `CLIAR-86-Orchestrator-Agent`, `CLIAR-91-Agent-Engineering-Optimization`. `main`(develop
+  대비 20커밋 behind)과 `deploy-dev`(배포용)는 건드리지 않았다.
+- 코드 구현은 아직 착수하지 않았다. 이번 세션은 계획·정책·정리만 수행했다.
+
+### 다음 세션이 할 일
+1. `develop`에서 `CLIAR-111-...` 브랜치를 새로 분기하고 `PLAN.md`의 Task 1부터 순서대로
+   착수한다(Task 0 선결 확인은 이미 완료 표시됨).
+2. Task 2(API 계약 확장)는 `docs/api/openapi.yaml`을 먼저 수정하는 게 순서라는 점을
+   `AGENTS.md` 동기화 규칙대로 지킨다.
+3. Task별 완료 시 `PLAN.md`에서 항목을 지우고 `STATE.md`에 단계 한 줄로 반영한다.
+4. "올인원 독서 비서" Phase 0~4는 CLIAR-111 완료 후 재논의 — 특히 Phase 2 착수 전
+   Basic API 인증 패스스루 방식(A안) 확정이 팀원 의존 선결 조건이다.
+
+
+## 2026-08-27 — CLIAR-111 사서 에이전트(backend-librarian) 실연동 및 세션/시그널 조율 구현 완료
+- 브랜치: `CLIAR-111-Librarian-Agent-Integration` (`develop`에서 분기)
+- CLIAR-111의 모든 구현 Task(Task 1~9)를 완료했다:
+  - Task 1: `core/config.py` 및 `.env.example`에 `librarian_default_id: str = "cat"`, `librarian_http_timeout_seconds: float = 20.0` 분리 추가.
+  - Task 2: `docs/api/openapi.yaml` 및 `src/discovery/api/schemas/chat.py`에 `latitude`, `longitude` (ChatRequest), `SwitchToSuggestion`, `switch_to` (ChatResponse) 추가. `api/v1/routers/chat.py`와 `OrchestratorService`에 좌표 전달 배선.
+  - Task 3: `domain/orchestrator/librarian_response.py` DTO 모델(`WeatherSignal`, `LibrarianSignals`, `SwitchToSuggestion`, `LibrarianResponse`) 신설. `ConsultLibrarianTool`이 `LibrarianResponse`를 파싱하고 `session_id`, `librarian_id`, `latitude`, `longitude`를 서버 레벨에서 클로저로 주입하여 호출하도록 재작성(IDOR 취약점 원천 차단).
+  - Task 4: `ChatSessionStore`에 세션별 활성 `librarian_id` 및 사용자 좌표를 sliding TTL로 관리하는 `get_session_meta`, `update_session_meta` 메서드 추가.
+  - Task 5: `ConsultLibrarianTool` 호출 콜백을 통해 `switch_to` 제안을 감지하면 세션 메타의 `librarian_id`를 갱신하고 `ChatResponse.switch_to`로 클라이언트에 구조화된 객체 반환.
+  - Task 6: `ConsultLibrarianTool` 반환 텍스트에 `[사서 분석 정보]`(포커스 장르, 무드, 날씨)를 포맷팅하여 LLM 컨텍스트에 제공하고, `ORCHESTRATOR_SYSTEM_PROMPT`에 해당 정보를 `recommend_books` 질의에 반영하도록 위임 지시 추가.
+  - Task 7: `docker-compose.yml`의 discovery 포트를 `8001:8000`으로 분리하여 사서 서비스(`8000`)와의 로컬 충돌 해소.
+  - Task 8: `test_librarian_tool.py`, `test_session_store.py`, `test_orchestrator_service.py`, `test_chat_router.py`, `test_orchestrator_routing.py` 단위 테스트 갱신 및 신설. 정적 분석(`ruff`, `mypy`) 100% 통과, 단위 테스트 110건 전체 통과.
+  - Task 9: `docs/api/decisions/0003-librarian-agent-integration.md` ADR 작성 및 `.harness/ARCHITECTURE.md`, `.harness/STATE.md`, `.harness/PLAN.md` 갱신.
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 커밋 생성, push 및 `develop` 대상 PR 생성.
+2. CLIAR-111 완료 후 [제안] 단일 오케스트레이터 기반 올인원 독서 비서 (Unified Agent Assistant) 로드맵 검토 및 Basic API 인증 연동 선결 확인.
+
+
+## 2026-08-28 — 자체 완결형 사서 페르소나/지능형 스위칭 내장, Sonnet 5 글로벌 CRIS 및 검색/UX 튜닝 완료
+- 브랜치: `CLIAR-111-Librarian-Agent-Integration`
+- 사서 서버(`backend-librarian`) 장애/에러 fallback과 무관하게 Discovery 자체에서 완벽하게 페르소나와 스위칭(`switch_to`)을 수행할 수 있도록 자체 완결형 아키텍처와 성능 튜닝을 완료했다:
+  1. **자체 완결형 지능형 사서 페르소나 & 스위칭 엔진 내장**:
+     - `ConsultLibrarianTool`: 원격 사서 서버가 fallback(예: "생각이 안 난다냥...")을 반환하거나 장애가 발생해도, Discovery 내부의 `evaluate_local_persona_response`가 즉시 개입.
+     - **고양이 사서 (`cat`)**: SF, 판타지, 과학, 미스터리, 경영, 경제, 비즈니스, 투자 등 질문 시 `switch_to: stork` (황새/슈빌 사서) 자동 생성.
+     - **황새 사서 (`stork`)**: 시, 힐링 에세이, 가벼운 일상 소설 등 질문 시 `switch_to: cat` (고양이 사서) 자동 생성.
+  2. **Claude Sonnet 5 글로벌 CRIS (`global.anthropic.claude-sonnet-5`, `us-east-1`) 적용**:
+     - Reasoning 모델의 토큰 소모를 방어하기 위해 `create_orchestrator_agent` 및 `create_librarian_agent`에 `max_tokens=2048` 주입.
+  3. **도서 검색 도구 호출 최적화 (지연시간 70% 이상 단축)**:
+     - `LibrarianAgent`가 책 1권마다 `search_books`를 6~9번씩 반복 호출하던 문제를 프롬프트 1회 일괄 수집 지침으로 개선.
+     - `RecommendBooksTool` 및 오케스트레이터 기본 추천 권수를 `count=2`로 고정하여 화면 스크롤 없이 2권이 2초 만에 깔끔하게 출력되도록 튜닝.
+  4. **프론트엔드 단계별 점진적 진행 UX(Progressive Stages) 및 UI 개선**:
+     - 질문 전송 후 0초(사서 상담) ➔ 2.5초(도서 검색) ➔ 5.5초(서재 정리)의 단계별 실시간 상태 메시지 연출로 대기 체감 시간 0초화.
+     - 사서 머리 위 말풍선(`LibrarianCursor.jsx`)에서 사서의 첫마디가 휙 바뀌지 않고 안정적으로 유지되도록 개선.
+     - `MarkdownRenderer.jsx` 및 `RegisterBook.jsx`의 제목/텍스트를 왼쪽 정렬(`textAlign: 'left'`)로 통일.
+  5. **사서 서버(backend-librarian) 최종 페르소나 및 특화 영역 완벽 동기화**:
+     - 블루(고양이 사서): 🔍 미스터리/추리/탐정/스릴러 특화 + 감성/에세이. 비즈니스/경영/투자 질문 또는 "슈빌" 호칭 시 `switch_to: stork` 제안.
+     - 슈빌(황새 사서): 📈 비즈니스/경영/경제/투자/스타트업 특화 + SF/과학. 미스터리/추리/감성 질문 또는 "블루" 호칭 시 `switch_to: cat` 제안.
+     - `ChatResponse`의 `signals` 및 스트리밍 `X-Signals` 헤더 배선 완료.
+  6. **사서별(블루 ⇄ 슈빌) 동적 전용 시스템 프롬프트 및 UI/말풍선 일체화 완성**:
+     - `src/discovery/domain/orchestrator/agent.py`: `CAT_ORCHESTRATOR_PROMPT`와 `STORK_ORCHESTRATOR_PROMPT`로 분리하여 활성 사서 ID에 따라 전용 프롬프트 주입.
+     - 슈빌: 시그니처 추임새 '두둥!', 공손체, 비즈니스 특화, 고양이 말투 100% 차단.
+     - 블루: 친근한 반말, 문장 끝 `~다냥 🐾`, 미스터리 특화.
+     - `src/discovery/domain/librarian/agent.py` & `recommend_tool.py`: 추천 에이전트 도서 소개 이유 생성 시에도 사서별 어조 분기 적용.
+     - `LibrarianCursor.jsx`: 말풍선 텍스트에 슈빌 전용 문구(`✨ 두둥! 추천 도서 N권을 선별했습니다 🪶`) 지원.
+     - `LibrarianChat.jsx`: 사서 스위칭 제안 시 도서 등록 버튼 비활성화, 스위칭 버튼 클릭 시 직전 질문으로 슈빌 자동 재질의(`auto-submit`) 구현.
+  7. **슈빌 시그니처 '두둥!' 로딩 문구 반영 및 프리미엄 도서 카드(BookCardView) UI 미려화**:
+     - `LibrarianChat.jsx`: `🪿 두둥! 슈빌 사서가 전문 분야의 깊이 있는 명저를 선별하고 있습니다... 🪶`로 로딩 텍스트에 시그니처 반영.
+     - `MarkdownRenderer.jsx`: `### 📖` 블록을 파싱하여 도서 제목 뱃지 + 저자/쪽수 메타 칩 + 추천 이유 은은한 하이라이트 박스로 구성된 프리미엄 북 카드 UI 컴포넌트(`BookCardView`)로 리팩토링.
+     - `librarian_tool.py`: 로컬 사서 fallback 멘트에도 슈빌의 '두둥!' 반영.
+  8. **검증**:
+     - 정적 분석(`ruff`, `mypy`) 100% 통과, 단위 테스트 112건 전체 통과.
+
+### 다음 세션이 할 일
+1. `PR #14` (`develop` 대상) 코드 리뷰 및 머지.
+2. dev 환경(K8s) 배포 후 클러스터 내부 `backend-librarian:8000` 통신 및 프론트엔드 연동 확인.
+3. [제안] 단일 오케스트레이터 기반 올인원 독서 비서 Phase 0~4 착수.
 
