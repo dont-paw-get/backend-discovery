@@ -17,3 +17,5 @@
 - [ ] 관측성: 구조적 로깅, 요청 추적 ID, RAG 검색 품질 지표 수집
 - [ ] 추천 에이전트 번역 지침(시스템 프롬프트) 적용 후에도 해외 도서 원문(일본어/영어 등)이 마크다운 응답에 그대로 섞여 나오는 사례가 실사용에서 관찰되면, post_processor.py와 분리된 별도 모듈(예: translation_fallback.py)에 비한글 패턴 감지 + Haiku 3 단발 호출 후처리 함수(translate_if_needed)를 추가 검토. 번역 전용 에이전트를 도구(Tool)로 등록하는 방식은 기각됨(판단 자체가 추론 비용이라 오히려 레이턴시/신뢰도 손해).
 - [ ] Agents-as-Tools 리팩터링, 사서 연동, ArgoCD 배포 확정 후 `docs/api/openapi.yaml`을 최신 상태로 갱신하고 프론트 담당자에게 공유. 프론트가 axios 클라이언트를 서버별로 작성할 수 있게 엔드포인트/스키마/인증 헤더/CORS 설정을 명확히 문서화.
+- [x] Bedrock 추천/오케스트레이터 모델을 Claude 3.5 Sonnet v1(`anthropic.claude-3-5-sonnet-20240620-v1:0`, `ap-northeast-2`)으로 업그레이드 완료 (2026-08-27). 실측 TTFT 617ms, 사서 에이전트와 버전 통일.
+- [ ] 최신 CRIS Reasoning 모델들(Sonnet 4/4.5/5, Opus 5 등)은 reasoning 지연(TTFT 1.7~2.4초)으로 실시간 챗봇에는 부적합하나, 향후 스트리밍이 필요 없는 비실시간 작업(예: `POST /api/v1/classify-genre`의 난해한 장르 분류, OCR 서지 오탈자 정밀 보정, 대량 오프라인 배치)의 전용 모델로 활용 검토.

@@ -10,9 +10,9 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 ### 담당 기능
 1. **오케스트레이터 에이전트 (Strands Agents SDK)** — 사용자 의도를 파악하여 도서 추천 에이전트(로컬 도구) 또는 사서 에이전트(HTTP 원격 도구)로 라우팅/위임한다 (Agent-as-a-Tool 패턴).
 2. **도서 추천 에이전트 (Research Agent)** — 자연어 질의에 웹 검색 도구(Tavily)로 후보 도서 및 실제 쪽수(페이지수)를 찾고, `truncate_books_by_count` 순수 함수를 통해 요청된 `count`개로 결정론적으로 상한을 강제한 정형 마크다운 포맷(`### 📖`, `- **저자**: 저자 (OO쪽)`, `- **추천 이유**:`)으로 응답을 생성한다.
-3. **사서 에이전트 연동 (Librarian Tool)** — 별도 사서 서비스(`backend-librarian`)와 HTTP 통신하며, 서비스 미가동 시 graceful 스텁 응답을 제공한다.
+3. **사서 에이전트 연동 (Librarian Tool)** — 별도 사서 마이크로서비스(`backend-librarian`)와 HTTP 통신(`POST /api/v1/chat`)하며, 세션별 활성 사서 ID(`librarian_id`), 사용자 위치 좌표(`latitude`/`longitude`)를 안전하게 주입하고 사서의 `signals`(날씨/무드/장르) 및 `switch_to`(사서 전환 제안)를 오케스트레이션한다. 서비스 미가동 시 graceful 스텁 응답을 제공한다.
 4. **도서 표준 장르 분류 (`GenreClassifierService`)** — 도서 제목, 저자, 원본 카테고리(알라딘/OCR 등) 정보를 분석하여 ERD 표준 16개 장르 체계 중 1개로 분류한다 (`POST /api/v1/classify-genre`).
-5. **대화 세션 관리** — `ChatSessionStore`(Redis)가 멀티턴 대화 히스토리를 sliding TTL로 저장·조회한다.
+5. **대화 세션 및 메타데이터 관리** — `ChatSessionStore`(Redis)가 멀티턴 대화 히스토리 및 활성 사서/좌표 메타데이터를 sliding TTL로 저장·조회한다.
 6. ~~시간대/테마 기반 큐레이션~~, ~~도서 데이터 동기화(벡터 upsert)~~ — 폐기됨.
    상세는 `.harness/DECISIONS.md`, `archive/vector-search-poc/README.md` 참고.
 
@@ -20,12 +20,12 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 | 구분 | 선택 |
 | --- | --- |
 | 언어/런타임 | Python 3.12 |
-| 웹 프레임워크 | FastAPI (async) |
+| 웹 프레임워크 | FastAPI (async) (포트 8001) |
 | 검증/직렬화 | Pydantic V2 (`ConfigDict(from_attributes=True)`) |
-| 캐시/세션 | Redis 7 (redis.asyncio) — 대화 세션 관리 |
+| 캐시/세션 | Redis 7 (redis.asyncio) — 대화 세션 및 메타 관리 |
 | 에이전트 | Strands Agents SDK (Orchestrator + Agent-as-a-Tool) |
 | 웹 검색 도구 | Tavily API (`search_depth="basic"` 고정, 무료 티어 월 1,000 크레딧 비용 방어) |
-| LLM | AWS Bedrock via boto3, Claude 3 Haiku (`anthropic.claude-3-haiku-20240307-v1:0`) |
+| LLM | AWS Bedrock via boto3, Claude 3.5 Sonnet v1 (`anthropic.claude-3-5-sonnet-20240620-v1:0`, `ap-northeast-2`) |
 | 패키지 관리 | uv (`pyproject.toml` + `uv.lock`) |
 | 정적 분석 | ruff, mypy |
 | 테스트 | pytest, pytest-asyncio, pytest-mock, testcontainers(redis), httpx |
@@ -45,10 +45,10 @@ asyncpg, Alembic, testcontainers(postgres). RDB로 남는 데이터가 없어 �
         ┌────────────────────────────────┼──────────────────────────────┬────────────────────────┐
         ▼                                ▼                              ▼                        ▼
     Redis                     Agent-as-a-Tool (로컬)            Agent-as-a-Tool (HTTP)    Genre Classifier
-(대화 세션 관리)               도서 추천 에이전트                  사서 에이전트 스텁       (Claude 3 Haiku)
+(대화 세션 및 메타)            도서 추천 에이전트                  사서 에이전트           (Claude 3 Haiku)
                                          │                     (backend-librarian)
-                                         ▼
-                                 Tavily 웹 검색
+                                         ▼                              │
+                                 Tavily 웹 검색               (날씨 시그널 / switch_to)
 ```
 
 ## 패키지 구조 / 컨벤션
@@ -90,16 +90,23 @@ backend-discovery/
   데이터를 복제하지 않는다. 도서 후보는 매 요청 시 웹 검색 도구로 조회한다.
 - **Redis 키 구조** (`ChatSessionStore`):
   ```
-  키 패턴: chat:session:{session_id}
-  타입:    List<string>  (각 원소는 JSON: {"role": "...", "content": "..."})
-  TTL:     sliding window — append_turn 호출마다 EXPIRE 갱신
-           (CHAT_SESSION_TTL_SECONDS, 기본 3600s)
-  길이 제한: LTRIM으로 최근 CHAT_HISTORY_MAX_TURNS개만 유지 (기본 20)
+  1. 세션 히스토리
+     키 패턴: chat:session:{session_id}
+     타입:    List<string>  (각 원소는 JSON: {"role": "...", "content": "..."})
+     TTL:     sliding window — append_turn 호출마다 EXPIRE 갱신 (CHAT_SESSION_TTL_SECONDS)
+     길이:    LTRIM으로 최근 CHAT_HISTORY_MAX_TURNS개만 유지 (기본 20)
+
+  2. 세션 메타데이터
+     키 패턴: chat:session:{session_id}:meta
+     타입:    String (JSON: {"librarian_id": "...", "latitude": 37.5, "longitude": 127.0})
+     TTL:     sliding window — update_session_meta 호출마다 EXPIRE 갱신 (CHAT_SESSION_TTL_SECONDS)
 
   연산:
-    APPEND_TURN(session_id, turn) → RPUSH + LTRIM + EXPIRE
-    GET_HISTORY(session_id)       → LRANGE 0 -1
-    CLEAR(session_id)             → DEL
+    APPEND_TURN(session_id, turn)           → RPUSH + LTRIM + EXPIRE
+    GET_HISTORY(session_id)                 → LRANGE 0 -1
+    GET_SESSION_META(session_id)            → GET
+    UPDATE_SESSION_META(session_id, **meta) → SET (ex=TTL)
+    CLEAR(session_id)                       → DEL (히스토리 + 메타)
   ```
   `session_id`는 이 스토어가 생성하지 않는다. 호출자가 결정론적으로 발급해 주입한다.
 

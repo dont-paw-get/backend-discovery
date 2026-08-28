@@ -121,7 +121,9 @@ API wire 계약과 계약 결정은 `.harness`가 아니라 `docs/api/openapi.ya
   - 제목 또는 본문에 관련 티켓 번호를 `[CLIAR-9]`처럼 표기한다 (기존 이력 패턴).
 - 커밋은 사용자가 명시적으로 요청했을 때만 생성한다. 관련 파일을 골라 stage하고, `git add .`/`git add -A`는 피한다.
 - 한 티켓 브랜치에서 작업이 끝나면 PR을 `develop`으로 생성할 수 있지만, PR 생성과 push는 사용자가 명시적으로 요청했을 때만 수행한다.
-- 브랜치 병합과 삭제는 자동으로 수행하지 않는다. PR 병합은 사용자가 직접 하거나, 사용자가 명시적으로 요청했을 때만 수행한다. `develop → main` 릴리스 병합도 동일하다.
+- **모든 PR/병합은 `develop`으로만 향한다 (2026-08-27 확정).** `develop → main` 릴리스 병합은 별도 지시가 있을 때까지 진행하지 않는다. `main`에 직접 PR·커밋·병합하는 예외는 두지 않는다.
+- 브랜치 병합과 삭제는 자동으로 수행하지 않는다. PR 병합은 사용자가 직접 하거나, 사용자가 명시적으로 요청했을 때만 수행한다.
+- 작업이 끝나 `develop`에 머지된 브랜치는 로컬(`git branch -d`)과 원격(`git push origin --delete`) 모두에서 정리한다. 삭제 전 반드시 `git merge-base --is-ancestor <branch> origin/develop`로 머지 완료를 확인하고, 대상 브랜치 목록을 사용자에게 먼저 보여준 뒤 진행한다.
 - 강제 push, `reset --hard`, `clean -fd`, `branch -D` 등 destructive 작업은 사용자의 명시적 허락 없이 수행하지 않는다.
 
 ## Git 작업 정책
