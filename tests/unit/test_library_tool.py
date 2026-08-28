@@ -1,0 +1,176 @@
+"""SearchMyLibraryTool 단위 테스트."""
+
+import httpx
+import pytest
+from pytest_mock import MockerFixture
+
+from discovery.core.config import Settings
+from discovery.domain.orchestrator.library_response import LibraryBookItem
+from discovery.domain.orchestrator.tools.library_tool import (
+    SearchMyLibraryTool,
+    format_books_for_llm,
+)
+
+
+@pytest.fixture
+def settings() -> Settings:
+    return Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-secret",
+        tavily_api_key="tvly-test",
+        library_api_url="http://test-library:8080",
+        library_http_timeout_seconds=5.0,
+    )
+
+
+def test_format_books_for_llm_empty() -> None:
+    assert format_books_for_llm([], query="") == "사용자의 서재에 등록된 도서가 없습니다."
+    assert (
+        format_books_for_llm([], query="어린왕자")
+        == "사용자의 서재에서 '어린왕자' 관련 도서를 찾지 못했습니다."
+    )
+
+
+def test_format_books_for_llm_success() -> None:
+    books = [
+        LibraryBookItem(
+            book_id=1,
+            title="살인자의 기억법",
+            author="김영하",
+            genre="MYSTERY_THRILLER",
+            reading_status="READING",
+            progress=45,
+        ),
+        LibraryBookItem(
+            book_id=2,
+            title="지구 끝의 온실",
+            author="김초엽",
+            genre="SCIENCE_FICTION",
+            reading_status="COMPLETED",
+            progress=100,
+        ),
+    ]
+    formatted = format_books_for_llm(books)
+    assert "[내 서재 도서 목록] (총 2권)" in formatted
+    assert "1. 제목: 살인자의 기억법" in formatted
+    assert "- 저자: 김영하" in formatted
+    assert "- 장르: MYSTERY_THRILLER" in formatted
+    assert "- 독서 상태: 읽는 중 (진행률: 45%)" in formatted
+    assert "2. 제목: 지구 끝의 온실" in formatted
+    assert "- 독서 상태: 완독 (진행률: 100%)" in formatted
+
+
+@pytest.mark.asyncio
+async def test_search_missing_auth_token(settings: Settings) -> None:
+    tool = SearchMyLibraryTool(settings=settings)
+    books = await tool.search(query="김영하", auth_token=None)
+    assert books == []
+
+
+@pytest.mark.asyncio
+async def test_search_success_and_filtering(settings: Settings, mocker: MockerFixture) -> None:
+    fake_response = {
+        "books": [
+            {
+                "bookId": 101,
+                "shelfId": 1,
+                "title": "살인자의 기억법",
+                "author": "김영하",
+                "genre": "MYSTERY_THRILLER",
+                "readingStatus": "READING",
+                "progress": 45,
+            },
+            {
+                "bookId": 102,
+                "shelfId": 1,
+                "title": "작별인사",
+                "author": "김영하",
+                "genre": "SCIENCE_FICTION",
+                "readingStatus": "COMPLETED",
+                "progress": 100,
+            },
+            {
+                "bookId": 103,
+                "shelfId": 2,
+                "title": "지구 끝의 온실",
+                "author": "김초엽",
+                "genre": "SCIENCE_FICTION",
+                "readingStatus": "WISH",
+                "progress": 0,
+            },
+        ],
+        "page": 0,
+        "size": 20,
+        "totalElements": 3,
+        "totalPages": 1,
+    }
+
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_resp = mocker.MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_response
+    mock_client.get.return_value = mock_resp
+
+    tool = SearchMyLibraryTool(settings=settings, http_client=mock_client)
+
+    # 1. 전체 조회
+    res_all = await tool.search(auth_token="test-token")
+    assert len(res_all) == 3
+
+    # 2. query 필터링 (제목 부분 일치)
+    res_title = await tool.search(query="기억법", auth_token="test-token")
+    assert len(res_title) == 1
+    assert res_title[0].title == "살인자의 기억법"
+
+    # 3. query 필터링 (저자 일치)
+    res_author = await tool.search(query="김영하", auth_token="test-token")
+    assert len(res_author) == 2
+
+    # 4. query 필터링 (장르 일치)
+    res_genre = await tool.search(query="SCIENCE_FICTION", auth_token="test-token")
+    assert len(res_genre) == 2
+
+    # 5. reading_status 필터링
+    res_status = await tool.search(reading_status="READING", auth_token="test-token")
+    assert len(res_status) == 1
+    assert res_status[0].title == "살인자의 기억법"
+
+
+@pytest.mark.asyncio
+async def test_search_http_error_graceful_fallback(
+    settings: Settings, mocker: MockerFixture
+) -> None:
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_resp = mocker.MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 500
+    mock_resp.text = "Internal Server Error"
+    mock_client.get.return_value = mock_resp
+
+    tool = SearchMyLibraryTool(settings=settings, http_client=mock_client)
+    res = await tool.search(query="테스트", auth_token="test-token")
+    assert res == []
+
+
+@pytest.mark.asyncio
+async def test_as_tool_execution(settings: Settings, mocker: MockerFixture) -> None:
+    tool = SearchMyLibraryTool(settings=settings)
+    mocker.patch.object(
+        tool,
+        "search",
+        return_value=[
+            LibraryBookItem(
+                book_id=1,
+                title="살인자의 기억법",
+                author="김영하",
+                genre="MYSTERY",
+                reading_status="READING",
+                progress=50,
+            )
+        ],
+    )
+
+    strands_tool_fn = tool.as_tool(auth_token="jwt-abc-123")
+    result_text = await strands_tool_fn(query="살인자", author="", reading_status="")
+
+    assert "[내 서재 도서 목록] (총 1권)" in result_text
+    assert "살인자의 기억법" in result_text

@@ -26,6 +26,7 @@ from discovery.domain.orchestrator.librarian_response import (
     SwitchToSuggestion,
 )
 from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianTool
+from discovery.domain.orchestrator.tools.library_tool import SearchMyLibraryTool
 from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksTool
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
 
@@ -72,12 +73,14 @@ class OrchestratorService:
         settings: Settings,
         recommend_tool: RecommendBooksTool | None = None,
         librarian_tool: ConsultLibrarianTool | None = None,
+        library_tool: SearchMyLibraryTool | None = None,
         tools: list[Any] | None = None,
     ) -> None:
         self._session_store = session_store
         self._settings = settings
         self._recommend_tool = recommend_tool
         self._librarian_tool = librarian_tool
+        self._library_tool = library_tool
         self._tools = tools or []
 
     def _build_agent(
@@ -86,6 +89,7 @@ class OrchestratorService:
         session_id: str,
         meta: dict[str, Any],
         on_librarian_response: Any = None,
+        auth_token: str | None = None,
     ) -> Agent:
         strands_messages = format_history_for_strands(history)
         librarian_id = meta.get("librarian_id") or "cat"
@@ -105,6 +109,8 @@ class OrchestratorService:
                     on_response=on_librarian_response,
                 )
             )
+        if self._library_tool is not None:
+            active_tools.append(self._library_tool.as_tool(auth_token=auth_token))
 
         if not active_tools and self._tools:
             active_tools = self._tools
@@ -124,6 +130,7 @@ class OrchestratorService:
         librarian_id: str | None = None,
         latitude: float | None = None,
         longitude: float | None = None,
+        auth_token: str | None = None,
     ) -> tuple[str, SwitchToSuggestion | None, LibrarianSignals | None]:
         """단일 턴 동기 대화 응답을 생성하고 세션 히스토리 및 메타를 갱신한다."""
         meta_updates: dict[str, Any] = {}
@@ -154,19 +161,22 @@ class OrchestratorService:
             session_id=session_id,
             meta=meta,
             on_librarian_response=on_librarian_response,
+            auth_token=auth_token,
         )
 
         result = await agent.invoke_async(prompt=message)
         response_text = extract_text_from_message(result.message)
         tool_result = extract_fallback_text(agent)
 
-        if tool_result and "### 📖" not in response_text:
-            if response_text.strip():
-                response_text = f"{response_text.strip()}\n\n{tool_result}"
-            else:
+        if tool_result:
+            has_book_card = "### 📖" in tool_result
+            if has_book_card and "### 📖" not in response_text:
+                if response_text.strip():
+                    response_text = f"{response_text.strip()}\n\n{tool_result}"
+                else:
+                    response_text = tool_result
+            elif not response_text.strip():
                 response_text = tool_result
-        elif not response_text.strip() and tool_result:
-            response_text = tool_result
 
         if not switch_to_holder and self._librarian_tool is not None:
             lib_res = await self._librarian_tool.consult(
@@ -224,6 +234,7 @@ class OrchestratorService:
         librarian_id: str | None = None,
         latitude: float | None = None,
         longitude: float | None = None,
+        auth_token: str | None = None,
     ) -> AsyncGenerator[str, None]:
         """스트리밍 대화 응답을 청크 단위로 yield하고, 완료 후 세션 히스토리를 갱신한다."""
         meta_updates: dict[str, Any] = {}
@@ -251,6 +262,7 @@ class OrchestratorService:
             session_id=session_id,
             meta=meta,
             on_librarian_response=on_librarian_response,
+            auth_token=auth_token,
         )
 
         full_response: list[str] = []
@@ -263,16 +275,18 @@ class OrchestratorService:
         response_text = "".join(full_response)
         tool_result = extract_fallback_text(agent)
 
-        if tool_result and "### 📖" not in response_text:
-            append_chunk = f"\n\n{tool_result}" if response_text.strip() else tool_result
-            yield append_chunk
-            if response_text.strip():
-                response_text = f"{response_text.strip()}\n\n{tool_result}"
-            else:
+        if tool_result:
+            has_book_card = "### 📖" in tool_result
+            if has_book_card and "### 📖" not in response_text:
+                append_chunk = f"\n\n{tool_result}" if response_text.strip() else tool_result
+                yield append_chunk
+                if response_text.strip():
+                    response_text = f"{response_text.strip()}\n\n{tool_result}"
+                else:
+                    response_text = tool_result
+            elif not response_text.strip():
+                yield tool_result
                 response_text = tool_result
-        elif not response_text.strip() and tool_result:
-            yield tool_result
-            response_text = tool_result
 
         if not switch_to_holder and self._librarian_tool is not None:
             lib_res = await self._librarian_tool.consult(

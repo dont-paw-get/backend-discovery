@@ -415,3 +415,20 @@
 2. dev 환경(K8s) 배포 후 클러스터 내부 `backend-librarian:8000` 통신 및 프론트엔드 연동 확인.
 3. [제안] 단일 오케스트레이터 기반 올인원 독서 비서 Phase 0~4 착수.
 
+
+## 2026-08-28 — CLIAR-152 올인원 독서 비서 (내 서재 CRUD API 연동 및 복합 의도 오케스트레이션) 완료
+- 브랜치: `CLIAR-152-Unified-Agent-Assistant` (`develop`에서 분기).
+- 사용자가 프론트엔드에서 수동 모드 분기 없이 단일 자연어 입력창으로 내 서재 검색, 외부 도서 추천, 사서 상담, 복합 의도(서재 기반 추천)를 원스톱으로 사용할 수 있도록 아키텍처를 확장했다:
+  - Task 1: `core/config.py` 및 `.env.example`에 `library_api_url`(`http://k8s-dpybbook-backendb-d17a725d36-1113312703.ap-northeast-2.elb.amazonaws.com`), `library_http_timeout_seconds: 10.0` 분리 추가. `domain/orchestrator/library_response.py`에 `LibraryBookItem`, `LibraryBooksResponse` Pydantic DTO 정의.
+  - Task 2: `domain/orchestrator/tools/library_tool.py` 신설 (`SearchMyLibraryTool`). `GET /api/v1/library/books` API 호출, `auth_token` 클로저 주입(IDOR 원천 방지), 제목/저자/장르 부분일치 및 독서상태(`readingStatus`) 필터링, LLM 친화적 정형 텍스트(`format_books_for_llm`) 변환 구현.
+  - Task 3: `api/v1/routers/chat.py`에서 `Authorization: Bearer <token>` 헤더를 추출하여 `OrchestratorService.chat` 및 `stream_chat`에 전달. `api/deps.py`에 `get_search_my_library_tool` 배선.
+  - Task 4: `domain/orchestrator/agent.py`의 `CAT_ORCHESTRATOR_PROMPT` 및 `STORK_ORCHESTRATOR_PROMPT`에 `search_my_library` 도구 분기 규칙(단순 서재 조회 ➔ 서재 도구, 복합 추천 ➔ 서재 도구 ➔ 추천 도구 연쇄) 주입.
+  - Task 5: `extract_fallback_text` 결합 안전장치를 화이트리스트(`has_book_card = "### 📖" in tool_result`)로 제한하여 서재 원시 텍스트 중복 노출 방지. `test_library_tool.py`, `test_chat_router.py`, `test_orchestrator_service.py`, `test_orchestrator_routing.py` 단위 테스트 갱신 및 신설. 정적 분석(`ruff`, `mypy`) 100% 통과, 단위 테스트 121건 전체 통과.
+  - Task 6: `docs/api/decisions/0004-my-library-integration.md` (ADR 0004) 작성 및 `docs/api/openapi.yaml`, `.harness/ARCHITECTURE.md`, `.harness/STATE.md`, `.harness/DECISIONS.md`, `.harness/PLAN.md` 갱신.
+- 커밋·push는 사용자 승인 대기 중 (`[CLIAR-152]` 태그 사용).
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 커밋 생성 및 원격 push (`git push -u origin CLIAR-152-Unified-Agent-Assistant`), `develop` 대상 PR 생성.
+2. 프론트엔드(`my-reading-room`) 단일 챗 UI에서 `Authorization` 헤더 전송 및 서재 검색 / 추천 / 복합 대화 E2E 테스트.
+3. K8s dev 환경 배포 후 통신 검증.
+

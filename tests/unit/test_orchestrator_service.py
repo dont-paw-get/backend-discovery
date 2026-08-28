@@ -388,3 +388,51 @@ async def test_orchestrator_service_stream_chat_appends_tool_result_when_intro_o
             ),
         ]
     )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_service_chat_with_library_tool(mocker: MockerFixture) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_library_tool = mocker.MagicMock()
+    mock_library_tool.as_tool.return_value = mocker.MagicMock()
+
+    mock_agent = mocker.MagicMock()
+    mock_result = mocker.MagicMock()
+    mock_result.message = {
+        "role": "assistant",
+        "content": [{"text": "서재에 살인자의 기억법이 있습니다냥 🐾"}],
+    }
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+
+    mock_create_agent = mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        library_tool=mock_library_tool,
+    )
+
+    response, switch_to, signals = await service.chat(
+        session_id="sess-lib-1",
+        message="내 서재 책 있어?",
+        auth_token="Bearer test-jwt-xyz",
+    )
+
+    assert "살인자의 기억법이 있습니다냥" in response
+    mock_library_tool.as_tool.assert_called_once_with(auth_token="Bearer test-jwt-xyz")
+    mock_create_agent.assert_called_once()
+    assert mock_library_tool.as_tool.return_value in mock_create_agent.call_args[1]["tools"]

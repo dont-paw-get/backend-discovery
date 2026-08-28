@@ -10,6 +10,7 @@ from discovery.application.librarian_service import LibrarianService
 from discovery.application.orchestrator_service import OrchestratorService
 from discovery.core.config import get_settings
 from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianTool
+from discovery.domain.orchestrator.tools.library_tool import SearchMyLibraryTool
 from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksTool
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
 from discovery.infrastructure.search.book_search_tool import BookSearchTool
@@ -70,10 +71,17 @@ def get_consult_librarian_tool() -> ConsultLibrarianTool:
     return ConsultLibrarianTool(settings=settings)
 
 
+def get_search_my_library_tool() -> SearchMyLibraryTool:
+    """서재 도서 조회/검색 HTTP 도구."""
+    settings = get_settings()
+    return SearchMyLibraryTool(settings=settings)
+
+
 def get_orchestrator_service(
     session_store: ChatSessionStore = Depends(get_chat_session_store),
     recommend_tool: RecommendBooksTool = Depends(get_recommend_books_tool),
     librarian_tool: ConsultLibrarianTool = Depends(get_consult_librarian_tool),
+    library_tool: SearchMyLibraryTool = Depends(get_search_my_library_tool),
 ) -> OrchestratorService:
     """오케스트레이터 에이전트 서비스."""
     settings = get_settings()
@@ -82,6 +90,7 @@ def get_orchestrator_service(
         settings=settings,
         recommend_tool=recommend_tool,
         librarian_tool=librarian_tool,
+        library_tool=library_tool,
     )
 
 
