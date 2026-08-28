@@ -13,10 +13,10 @@ from pytest_mock import MockerFixture
 from discovery.application.librarian_service import (
     LibrarianService,
     extract_chunk_from_event,
-    extract_text_from_message,
     format_history_for_strands,
 )
 from discovery.core.config import Settings
+from discovery.domain.librarian.post_processor import extract_text_from_message
 
 
 def test_extract_chunk_from_event() -> None:

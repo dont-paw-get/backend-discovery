@@ -1,6 +1,19 @@
-"""도서 추천 에이전트의 응답 텍스트를 결정론적으로 후처리하는 순수 함수 모듈."""
-
 import re
+from typing import Any
+
+
+def extract_text_from_message(message: Any) -> str:
+    """AgentResult.message에서 텍스트 콘텐츠를 추출한다."""
+    if isinstance(message, dict):
+        content = message.get("content", [])
+        if isinstance(content, list):
+            return "".join(
+                b.get("text", "")
+                for b in content
+                if isinstance(b, dict) and "text" in b and isinstance(b["text"], str)
+            )
+    return ""
+
 
 
 def truncate_books_by_count(markdown: str, count: int) -> str:

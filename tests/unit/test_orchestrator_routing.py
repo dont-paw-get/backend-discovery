@@ -50,6 +50,8 @@ async def test_orchestrator_routes_to_recommend_books_tool(mocker: MockerFixture
     # 3. SessionStore & Agent Mock
     mock_session_store = MagicMock()
     mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
     mock_session_store.append_turn = AsyncMock()
 
     mock_agent = MagicMock()
@@ -85,9 +87,12 @@ async def test_orchestrator_routes_to_recommend_books_tool(mocker: MockerFixture
     )
 
     # 도서 추천 질의 실행
-    response = await service.chat(session_id="test-sess", message="따뜻한 힐링 소설 추천해줘")
+    response, switch_to, signals = await service.chat(
+        session_id="test-sess", message="따뜻한 힐링 소설 추천해줘"
+    )
 
     assert "달러구트 꿈 백화점" in response
+    assert switch_to is None
     mock_agent.invoke_async.assert_awaited_once_with(prompt="따뜻한 힐링 소설 추천해줘")
     assert mock_session_store.append_turn.await_count == 2
 
@@ -109,6 +114,8 @@ async def test_orchestrator_routes_to_consult_librarian_stub(mocker: MockerFixtu
 
     mock_session_store = MagicMock()
     mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
     mock_session_store.append_turn = AsyncMock()
 
     # 오케스트레이터가 consult_librarian 도구의 준비 중 결과를 바탕으로 사용자에게 안내하는 시나리오
@@ -142,8 +149,12 @@ async def test_orchestrator_routes_to_consult_librarian_stub(mocker: MockerFixtu
         tools=[mock_recommend_tool.as_tool(), librarian_tool.as_tool()],
     )
 
-    response = await service.chat(session_id="test-sess-2", message="사서님과 이야기하고 싶어요")
+    response, switch_to, signals = await service.chat(
+        session_id="test-sess-2", message="사서님과 이야기하고 싶어요"
+    )
 
     assert LIBRARIAN_UNAVAILABLE_MESSAGE in response
+    assert switch_to is None
     mock_agent.invoke_async.assert_awaited_once_with(prompt="사서님과 이야기하고 싶어요")
     assert mock_session_store.append_turn.await_count == 2
+

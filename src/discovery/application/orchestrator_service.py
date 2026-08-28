@@ -4,9 +4,8 @@
 사용자 턴과 어시스턴트 턴을 ChatSessionStore에 기록한다.
 
 - 도구 실행 결과(toolResult)는 RecommendBooksTool 내부에서 결정론적으로 권수가 잘린 상태로 반환된다.
-- 향후 과제(직결 스트리밍 파이프라인): 오케스트레이터의 2차 생성 지연을 줄이기 위해
-  하위 추천 에이전트의 토큰 스트림을 직접 클라이언트로 중계하며, N+1번째 `### 📖` 감지 시
-  조기 중단(Early Stop)하는 증분 방식으로 전환한다.
+- 사서 에이전트 연동 시 세션별 활성 사서 ID와 좌표 정보를 유지하고,
+  switch_to 제안을 포착하여 세션을 갱신한다.
 """
 
 from collections.abc import AsyncGenerator
@@ -16,11 +15,18 @@ from strands import Agent
 
 from discovery.application.librarian_service import (
     extract_chunk_from_event,
-    extract_text_from_message,
     format_history_for_strands,
 )
 from discovery.core.config import Settings
+from discovery.domain.librarian.post_processor import extract_text_from_message
 from discovery.domain.orchestrator.agent import create_orchestrator_agent
+from discovery.domain.orchestrator.librarian_response import (
+    LibrarianResponse,
+    LibrarianSignals,
+    SwitchToSuggestion,
+)
+from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianTool
+from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksTool
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
 
 
@@ -64,25 +70,91 @@ class OrchestratorService:
         self,
         session_store: ChatSessionStore,
         settings: Settings,
+        recommend_tool: RecommendBooksTool | None = None,
+        librarian_tool: ConsultLibrarianTool | None = None,
         tools: list[Any] | None = None,
     ) -> None:
         self._session_store = session_store
         self._settings = settings
+        self._recommend_tool = recommend_tool
+        self._librarian_tool = librarian_tool
         self._tools = tools or []
 
-    def _build_agent(self, history: list[dict[str, str]]) -> Agent:
+    def _build_agent(
+        self,
+        history: list[dict[str, str]],
+        session_id: str,
+        meta: dict[str, Any],
+        on_librarian_response: Any = None,
+    ) -> Agent:
         strands_messages = format_history_for_strands(history)
+        librarian_id = meta.get("librarian_id") or "cat"
+
+        active_tools: list[Any] = []
+        if self._recommend_tool is not None:
+            active_tools.append(self._recommend_tool.as_tool(librarian_id=librarian_id))
+        if self._librarian_tool is not None:
+            latitude = meta.get("latitude")
+            longitude = meta.get("longitude")
+            active_tools.append(
+                self._librarian_tool.as_tool(
+                    session_id=session_id,
+                    librarian_id=librarian_id,
+                    latitude=latitude,
+                    longitude=longitude,
+                    on_response=on_librarian_response,
+                )
+            )
+
+        if not active_tools and self._tools:
+            active_tools = self._tools
+
         return create_orchestrator_agent(
             model_id=self._settings.orchestrator_model_id,
             region_name=self._settings.aws_region,
-            tools=self._tools,
+            librarian_id=librarian_id,
+            tools=active_tools,
             messages=strands_messages if strands_messages else None,
         )
 
-    async def chat(self, session_id: str, message: str) -> str:
-        """단일 턴 동기 대화 응답을 생성하고 세션 히스토리를 갱신한다."""
+    async def chat(
+        self,
+        session_id: str,
+        message: str,
+        librarian_id: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+    ) -> tuple[str, SwitchToSuggestion | None, LibrarianSignals | None]:
+        """단일 턴 동기 대화 응답을 생성하고 세션 히스토리 및 메타를 갱신한다."""
+        meta_updates: dict[str, Any] = {}
+        if librarian_id is not None:
+            meta_updates["librarian_id"] = librarian_id
+        if latitude is not None:
+            meta_updates["latitude"] = latitude
+        if longitude is not None:
+            meta_updates["longitude"] = longitude
+
+        if meta_updates:
+            await self._session_store.update_session_meta(session_id, **meta_updates)
+
+        meta = await self._session_store.get_session_meta(session_id)
         history = await self._session_store.get_history(session_id)
-        agent = self._build_agent(history)
+
+        switch_to_holder: list[SwitchToSuggestion] = []
+        signals_holder: list[LibrarianSignals] = []
+
+        def on_librarian_response(res: LibrarianResponse) -> None:
+            if res.signals is not None:
+                signals_holder.append(res.signals)
+            if res.switch_to is not None:
+                switch_to_holder.append(res.switch_to)
+
+        agent = self._build_agent(
+            history=history,
+            session_id=session_id,
+            meta=meta,
+            on_librarian_response=on_librarian_response,
+        )
 
         result = await agent.invoke_async(prompt=message)
         response_text = extract_text_from_message(result.message)
@@ -96,16 +168,90 @@ class OrchestratorService:
         elif not response_text.strip() and tool_result:
             response_text = tool_result
 
+        if not switch_to_holder and self._librarian_tool is not None:
+            lib_res = await self._librarian_tool.consult(
+                message=message,
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                latitude=meta.get("latitude"),
+                longitude=meta.get("longitude"),
+            )
+            if lib_res.signals is not None and not signals_holder:
+                signals_holder.append(lib_res.signals)
+            if lib_res.switch_to is not None:
+                switch_to_holder.append(lib_res.switch_to)
+
+        switch_to: SwitchToSuggestion | None = switch_to_holder[0] if switch_to_holder else None
+        signals: LibrarianSignals | None = signals_holder[0] if signals_holder else None
+        if switch_to is not None:
+            await self._session_store.update_session_meta(session_id, librarian_id=switch_to.id)
+
         await self._session_store.append_turn(session_id, {"role": "user", "content": message})
         await self._session_store.append_turn(
             session_id, {"role": "assistant", "content": response_text}
         )
-        return response_text
+        return response_text, switch_to, signals
 
-    async def stream_chat(self, session_id: str, message: str) -> AsyncGenerator[str, None]:
+    async def get_initial_meta(
+        self,
+        session_id: str,
+        message: str,
+        librarian_id: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+    ) -> tuple[LibrarianSignals | None, SwitchToSuggestion | None]:
+        """스트리밍 응답 헤더(X-Signals, X-Switch-To)에 실어줄 사서 신호와
+        스위칭 제안을 사전 계산한다."""
+        if librarian_id is not None:
+            await self._session_store.update_session_meta(session_id, librarian_id=librarian_id)
+
+        if self._librarian_tool is not None:
+            meta = await self._session_store.get_session_meta(session_id)
+            lib_res = await self._librarian_tool.consult(
+                message=message,
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                latitude=latitude or meta.get("latitude"),
+                longitude=longitude or meta.get("longitude"),
+            )
+            return lib_res.signals, lib_res.switch_to
+        return None, None
+
+    async def stream_chat(
+        self,
+        session_id: str,
+        message: str,
+        librarian_id: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+    ) -> AsyncGenerator[str, None]:
         """스트리밍 대화 응답을 청크 단위로 yield하고, 완료 후 세션 히스토리를 갱신한다."""
+        meta_updates: dict[str, Any] = {}
+        if librarian_id is not None:
+            meta_updates["librarian_id"] = librarian_id
+        if latitude is not None:
+            meta_updates["latitude"] = latitude
+        if longitude is not None:
+            meta_updates["longitude"] = longitude
+
+        if meta_updates:
+            await self._session_store.update_session_meta(session_id, **meta_updates)
+
+        meta = await self._session_store.get_session_meta(session_id)
         history = await self._session_store.get_history(session_id)
-        agent = self._build_agent(history)
+
+        switch_to_holder: list[SwitchToSuggestion] = []
+
+        def on_librarian_response(res: LibrarianResponse) -> None:
+            if res.switch_to is not None:
+                switch_to_holder.append(res.switch_to)
+
+        agent = self._build_agent(
+            history=history,
+            session_id=session_id,
+            meta=meta,
+            on_librarian_response=on_librarian_response,
+        )
 
         full_response: list[str] = []
         async for event in agent.stream_async(prompt=message):
@@ -128,7 +274,24 @@ class OrchestratorService:
             yield tool_result
             response_text = tool_result
 
+        if not switch_to_holder and self._librarian_tool is not None:
+            lib_res = await self._librarian_tool.consult(
+                message=message,
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                latitude=meta.get("latitude"),
+                longitude=meta.get("longitude"),
+            )
+            if lib_res.switch_to is not None:
+                switch_to_holder.append(lib_res.switch_to)
+
+        if switch_to_holder:
+            await self._session_store.update_session_meta(
+                session_id, librarian_id=switch_to_holder[0].id
+            )
+
         await self._session_store.append_turn(session_id, {"role": "user", "content": message})
         await self._session_store.append_turn(
             session_id, {"role": "assistant", "content": response_text}
         )
+

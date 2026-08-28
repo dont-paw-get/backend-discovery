@@ -11,6 +11,7 @@ from strands import Agent
 
 from discovery.core.config import Settings
 from discovery.domain.librarian.agent import create_librarian_agent
+from discovery.domain.librarian.post_processor import extract_text_from_message
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
 from discovery.infrastructure.search.book_search_tool import BookSearchTool
 
@@ -18,19 +19,6 @@ from discovery.infrastructure.search.book_search_tool import BookSearchTool
 def format_history_for_strands(history: list[dict[str, str]]) -> list[dict[str, Any]]:
     """ChatSessionStore의 히스토리를 Strands Agent가 인식할 수 있는 Message 구조로 변환한다."""
     return [{"role": turn["role"], "content": [{"text": turn["content"]}]} for turn in history]
-
-
-def extract_text_from_message(message: Any) -> str:
-    """AgentResult.message에서 텍스트 콘텐츠를 추출한다."""
-    if isinstance(message, dict):
-        content = message.get("content", [])
-        if isinstance(content, list):
-            return "".join(
-                b.get("text", "")
-                for b in content
-                if isinstance(b, dict) and "text" in b and isinstance(b["text"], str)
-            )
-    return ""
 
 
 def extract_chunk_from_event(event: Any) -> str:

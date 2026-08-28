@@ -77,11 +77,11 @@ def get_orchestrator_service(
 ) -> OrchestratorService:
     """오케스트레이터 에이전트 서비스."""
     settings = get_settings()
-    tools = [recommend_tool.as_tool(), librarian_tool.as_tool()]
     return OrchestratorService(
         session_store=session_store,
         settings=settings,
-        tools=tools,
+        recommend_tool=recommend_tool,
+        librarian_tool=librarian_tool,
     )
 
 

@@ -30,17 +30,16 @@ class Settings(BaseSettings):
     redis_url: str
     llm_provider: str = "mock"
     internal_api_token: str
-    aws_region: str | None = None
+    aws_region: str | None = "ap-northeast-2"
     chat_history_max_turns: int = 20
     chat_session_ttl_seconds: int = 3600
-    # 추천 에이전트 전용 모델. 기본값 Claude 3 Haiku
-    # (`anthropic.claude-3-haiku-20240307-v1:0`) — 교육 계정에서 실제 호출 가능
-    # 확인된 모델. 특정 기능만 더 강한 모델(Claude 3.5 Sonnet 등)로 바꾸려면
-    # `LIBRARIAN_MODEL_ID` 환경변수만 교체한다(다른 용도의 모델 설정에 영향 없음).
-    librarian_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
-    orchestrator_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    # 추천 에이전트 및 오케스트레이터 모델: Claude 3.5 Sonnet (ap-northeast-2, TTFT 617ms)
+    librarian_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+    orchestrator_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
     genre_classifier_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
     librarian_agent_url: str | None = None
+    librarian_default_id: str = "cat"
+    librarian_http_timeout_seconds: float = 20.0
     tavily_api_key: str
     tavily_cache_ttl_seconds: int = 86400
     tavily_monthly_credit_limit: int = 900

@@ -84,16 +84,111 @@ components:
           type: string
           description: 대화 세션 ID (미입력 시 서버에서 UUID 생성)
           example: sess-1234-abcd
+        librarian_id:
+          type: string
+          description: 사서 ID ('cat' 또는 'stork')
+          example: cat
         message:
           type: string
           minLength: 1
           maxLength: 1000
           description: 사용자 질문 또는 도서 추천 요청 메시지
           example: 비 오는 날 읽기 좋은 잔잔한 일본 소설 추천해줘.
+        latitude:
+          type: number
+          format: float
+          description: 사용자 위도 (선택, 사서 날씨 큐레이션용)
+          example: 37.5665
+        longitude:
+          type: number
+          format: float
+          description: 사용자 경도 (선택, 사서 날씨 큐레이션용)
+          example: 126.9780
         stream:
           type: boolean
           default: false
           description: 스트리밍 응답 여부
+
+    SwitchToSuggestion:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          description: 제안된 사서 ID (예: cat, stork)
+          example: cat
+        name:
+          type: string
+          description: 제안된 사서 이름
+          example: 고양이 사서
+        icon:
+          type: string
+          description: 사서 아이콘/이모지
+          example: 🐱
+        genres:
+          type: array
+          items:
+            type: string
+          description: 해당 사서의 전문 장르 목록
+          example: ["소설", "에세이"]
+
+    WeatherSignal:
+      type: object
+      properties:
+        weather:
+          type: string
+          description: 날씨 상태
+          example: 맑음
+        condition:
+          type: string
+          description: 날씨 상태 코드
+          example: clear
+        temperature:
+          type: number
+          format: float
+          description: 기온 (°C)
+          example: 28.0
+        is_rainy:
+          type: boolean
+          description: 강수 여부
+          example: false
+        description:
+          type: string
+          description: 날씨 설명
+          example: 맑고 쾌청한 하늘
+        location_source:
+          type: string
+          description: 위치 출처 (user, default_seoul, none)
+          example: user
+        confidence:
+          type: number
+          format: float
+          description: 날씨 분석 신뢰도
+
+    LibrarianSignals:
+      type: object
+      properties:
+        weather:
+          $ref: '#/components/schemas/WeatherSignal'
+          description: 날씨 시그널
+        time_of_day:
+          type: string
+          description: 시간대 (dawn, day, evening, night)
+          example: day
+        mood:
+          type: string
+          description: 사용자 감정/무드 키워드
+          example: cozy
+        genre_focus:
+          description: 추천 포커스 장르 목록 또는 문자열
+          oneOf:
+            - type: array
+              items:
+                type: string
+            - type: string
+          example: ["소설", "에세이"]
 
     ChatResponse:
       type: object
@@ -108,6 +203,12 @@ components:
         message:
           type: string
           description: 추천 에이전트의 추천 답변
+        switch_to:
+          $ref: '#/components/schemas/SwitchToSuggestion'
+          description: 다른 사서 페르소나로의 전환 제안 (선택)
+        signals:
+          $ref: '#/components/schemas/LibrarianSignals'
+          description: 사서 분석 신호 (날씨, 시간대, 무드, 장르 포커스) (선택)
 
     StandardGenre:
       type: string

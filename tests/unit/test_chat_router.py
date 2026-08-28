@@ -17,7 +17,9 @@ from discovery.main import app
 @pytest.mark.asyncio
 async def test_chat_json_response() -> None:
     mock_service = MagicMock()
-    mock_service.chat = AsyncMock(return_value="추천해드리는 도서는 '어린 왕자'입니다.")
+    mock_service.chat = AsyncMock(
+        return_value=("추천해드리는 도서는 '어린 왕자'입니다.", None, None)
+    )
 
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
@@ -25,16 +27,60 @@ async def test_chat_json_response() -> None:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             response = await client.post(
                 "/api/v1/chat",
-                json={"session_id": "sess-test-1", "message": "동화책 추천해줘"},
+                json={
+                    "session_id": "sess-test-1",
+                    "message": "동화책 추천해줘",
+                    "latitude": 37.5665,
+                    "longitude": 126.9780,
+                },
             )
 
         assert response.status_code == 200
         data = response.json()
         assert data["session_id"] == "sess-test-1"
         assert data["message"] == "추천해드리는 도서는 '어린 왕자'입니다."
+        assert data["switch_to"] is None
+        assert data["signals"] is None
         mock_service.chat.assert_awaited_once_with(
-            session_id="sess-test-1", message="동화책 추천해줘"
+            session_id="sess-test-1",
+            message="동화책 추천해줘",
+            librarian_id=None,
+            latitude=37.5665,
+            longitude=126.9780,
         )
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_chat_json_response_with_switch_to() -> None:
+    from discovery.api.schemas.chat import SwitchToSuggestion
+
+    mock_service = MagicMock()
+    mock_service.chat = AsyncMock(
+        return_value=(
+            "황새 사서에게 안내해 드릴게요.",
+            SwitchToSuggestion(id="stork", name="황새 사서", icon="🪶", genres=["시"]),
+            None,
+        )
+    )
+
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={"session_id": "sess-test-stork", "message": "시 읽고 싶어"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["session_id"] == "sess-test-stork"
+        assert data["message"] == "황새 사서에게 안내해 드릴게요."
+        assert data["switch_to"] is not None
+        assert data["switch_to"]["id"] == "stork"
+        assert data["switch_to"]["name"] == "황새 사서"
     finally:
         app.dependency_overrides.clear()
 
@@ -42,7 +88,7 @@ async def test_chat_json_response() -> None:
 @pytest.mark.asyncio
 async def test_chat_generates_session_id_if_empty() -> None:
     mock_service = MagicMock()
-    mock_service.chat = AsyncMock(return_value="답변입니다.")
+    mock_service.chat = AsyncMock(return_value=("답변입니다.", None, None))
 
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
@@ -64,7 +110,7 @@ async def test_chat_generates_session_id_if_empty() -> None:
 @pytest.mark.asyncio
 async def test_chat_accepts_null_session_id() -> None:
     mock_service = MagicMock()
-    mock_service.chat = AsyncMock(return_value="답변입니다.")
+    mock_service.chat = AsyncMock(return_value=("답변입니다.", None, None))
 
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
@@ -85,13 +131,34 @@ async def test_chat_accepts_null_session_id() -> None:
 
 @pytest.mark.asyncio
 async def test_chat_streaming_response() -> None:
-    async def fake_stream_chat(session_id: str, message: str) -> AsyncGenerator[str, None]:
+    from discovery.domain.orchestrator.librarian_response import (
+        LibrarianSignals,
+        SwitchToSuggestion,
+        WeatherSignal,
+    )
+
+    async def fake_stream_chat(
+        session_id: str,
+        message: str,
+        librarian_id: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+    ) -> AsyncGenerator[str, None]:
         chunks = ["사서 ", "추천 ", "도서입니다."]
         for chunk in chunks:
             yield chunk
 
+    mock_signals = LibrarianSignals(
+        weather=WeatherSignal(condition="clear", temperature=27.5, description="맑음"),
+        time_of_day="day",
+        mood="cozy",
+        genre_focus=["소설", "에세이"],
+    )
+    mock_switch_to = SwitchToSuggestion(id="stork", name="황새 사서", icon="🪶")
+
     mock_service = MagicMock()
     mock_service.stream_chat = fake_stream_chat
+    mock_service.get_initial_meta = AsyncMock(return_value=(mock_signals, mock_switch_to))
 
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
@@ -105,6 +172,8 @@ async def test_chat_streaming_response() -> None:
         assert response.status_code == 200
         assert response.text == "사서 추천 도서입니다."
         assert response.headers.get("x-session-id") == "sess-stream-1"
+        assert response.headers.get("x-signals") is not None
+        assert response.headers.get("x-switch-to") is not None
     finally:
         app.dependency_overrides.clear()
 
@@ -124,3 +193,4 @@ async def test_chat_validation_error_on_empty_message() -> None:
         assert response.status_code == 422
     finally:
         app.dependency_overrides.clear()
+

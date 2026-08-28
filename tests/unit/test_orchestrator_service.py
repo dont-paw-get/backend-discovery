@@ -20,6 +20,8 @@ async def test_orchestrator_service_chat(mocker: MockerFixture) -> None:
     mock_session_store.get_history = AsyncMock(
         return_value=[{"role": "user", "content": "이전 대화"}]
     )
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
     mock_session_store.append_turn = AsyncMock()
 
     mock_tool = mocker.MagicMock()
@@ -51,14 +53,19 @@ async def test_orchestrator_service_chat(mocker: MockerFixture) -> None:
         tools=[mock_tool],
     )
 
-    response = await service.chat(session_id="sess-orch-1", message="도서 추천해줘")
+    response, switch_to, signals = await service.chat(
+        session_id="sess-orch-1", message="도서 추천해줘"
+    )
 
     assert response == "안녕하세요! 오케스트레이터 응답입니다."
+    assert switch_to is None
+    assert signals is None
 
     mock_session_store.get_history.assert_awaited_once_with("sess-orch-1")
     mock_create_agent.assert_called_once_with(
         model_id="anthropic.claude-3-haiku-20240307-v1:0",
         region_name="us-east-1",
+        librarian_id="cat",
         tools=[mock_tool],
         messages=[{"role": "user", "content": [{"text": "이전 대화"}]}],
     )
@@ -77,9 +84,105 @@ async def test_orchestrator_service_chat(mocker: MockerFixture) -> None:
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_service_chat_with_coordinates_and_switch_to(
+    mocker: MockerFixture,
+) -> None:
+    from discovery.domain.orchestrator.librarian_response import LibrarianResponse
+
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(
+        return_value={"librarian_id": "cat", "latitude": 37.5, "longitude": 127.0}
+    )
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_librarian_tool = mocker.MagicMock()
+    mock_recommend_tool = mocker.MagicMock()
+
+    # 사서 도구가 호출되었을 때 switch_to를 포함하는 LibrarianResponse를 발생시키는 시뮬레이션
+    def fake_as_tool(**kwargs: Any) -> Any:
+        on_response = kwargs.get("on_response")
+
+        async def fake_tool_func(message: str) -> str:
+            if on_response:
+                on_response(
+                    LibrarianResponse(
+                        message="황새 사서에게 안내해 드릴게요.",
+                        switch_to={"id": "stork", "name": "황새 사서", "genres": ["시"]},
+                    )
+                )
+            return "황새 사서에게 안내해 드릴게요."
+
+        return fake_tool_func
+
+    mock_librarian_tool.as_tool.side_effect = fake_as_tool
+
+    mock_agent = mocker.MagicMock()
+    mock_result = mocker.MagicMock()
+    mock_result.message = {
+        "role": "assistant",
+        "content": [{"text": "사서님의 추천입니다: 황새 사서에게 안내해 드릴게요."}],
+    }
+
+    async def fake_invoke(prompt: str) -> Any:
+        # tool 실행 트리거
+        tool_fn = mock_librarian_tool.as_tool.call_args[1]["on_response"]
+        tool_fn(
+            LibrarianResponse(
+                message="황새 사서에게 안내해 드릴게요.",
+                switch_to={"id": "stork", "name": "황새 사서", "genres": ["시"]},
+            )
+        )
+        return mock_result
+
+    mock_agent.invoke_async.side_effect = fake_invoke
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        recommend_tool=mock_recommend_tool,
+        librarian_tool=mock_librarian_tool,
+    )
+
+    response, switch_to, signals = await service.chat(
+        session_id="sess-switch-1",
+        message="시 추천해줘",
+        latitude=37.5665,
+        longitude=126.9780,
+    )
+
+    assert "사서님의 추천입니다" in response
+    assert switch_to is not None
+    assert switch_to.id == "stork"
+    assert switch_to.name == "황새 사서"
+
+    # 좌표 저장 및 사서 switch_to 갱신 확인
+    mock_session_store.update_session_meta.assert_has_awaits(
+        [
+            mocker.call("sess-switch-1", latitude=37.5665, longitude=126.9780),
+            mocker.call("sess-switch-1", librarian_id="stork"),
+        ]
+    )
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_service_stream_chat(mocker: MockerFixture) -> None:
     mock_session_store = mocker.MagicMock()
     mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
     mock_session_store.append_turn = AsyncMock()
 
     mock_tool = mocker.MagicMock()
@@ -171,6 +274,8 @@ async def test_orchestrator_service_stream_chat_uses_fallback_when_empty(
 ) -> None:
     mock_session_store = mocker.MagicMock()
     mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
     mock_session_store.append_turn = AsyncMock()
 
     settings = Settings(
@@ -230,6 +335,8 @@ async def test_orchestrator_service_stream_chat_appends_tool_result_when_intro_o
 ) -> None:
     mock_session_store = mocker.MagicMock()
     mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
     mock_session_store.append_turn = AsyncMock()
 
     settings = Settings(
