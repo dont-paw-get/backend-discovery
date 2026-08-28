@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     librarian_agent_url: str | None = None
     librarian_default_id: str = "cat"
     librarian_http_timeout_seconds: float = 20.0
+    library_api_url: str = (
+        "http://k8s-dpybbook-backendb-d17a725d36-1113312703.ap-northeast-2.elb.amazonaws.com"
+    )
+    library_http_timeout_seconds: float = 10.0
     tavily_api_key: str
     tavily_cache_ttl_seconds: int = 86400
     tavily_monthly_credit_limit: int = 900

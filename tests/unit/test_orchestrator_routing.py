@@ -158,3 +158,70 @@ async def test_orchestrator_routes_to_consult_librarian_stub(mocker: MockerFixtu
     mock_agent.invoke_async.assert_awaited_once_with(prompt="사서님과 이야기하고 싶어요")
     assert mock_session_store.append_turn.await_count == 2
 
+
+@pytest.mark.asyncio
+async def test_orchestrator_routes_to_search_my_library_tool(mocker: MockerFixture) -> None:
+    from discovery.domain.orchestrator.library_response import LibraryBookItem
+    from discovery.domain.orchestrator.tools.library_tool import SearchMyLibraryTool
+
+    mock_library_tool = MagicMock(spec=SearchMyLibraryTool)
+    mock_library_tool.as_tool.return_value = MagicMock()
+    mock_library_tool.search = AsyncMock(
+        return_value=[
+            LibraryBookItem(
+                book_id=101,
+                title="살인자의 기억법",
+                author="김영하",
+                genre="MYSTERY_THRILLER",
+                reading_status="READING",
+                progress=45,
+            )
+        ]
+    )
+
+    mock_session_store = MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    mock_agent = MagicMock()
+    mock_result = MagicMock()
+    mock_result.message = {
+        "role": "assistant",
+        "content": [
+            {
+                "text": (
+                    "서재에 김영하 작가님의 『살인자의 기억법』"
+                    "(진행률 45%, 읽는 중)이 있습니다냥! 🐾"
+                )
+            }
+        ],
+    }
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=Settings(
+            redis_url="redis://localhost:6379",
+            internal_api_token="token",
+            tavily_api_key="key",
+        ),
+        library_tool=mock_library_tool,
+    )
+
+    response, switch_to, signals = await service.chat(
+        session_id="test-sess-my-library",
+        message="내 서재에 김영하 책 있어?",
+        auth_token="Bearer test-token",
+    )
+
+    assert "살인자의 기억법" in response
+    mock_agent.invoke_async.assert_awaited_once_with(prompt="내 서재에 김영하 책 있어?")
+    mock_library_tool.as_tool.assert_called_once_with(auth_token="Bearer test-token")
+

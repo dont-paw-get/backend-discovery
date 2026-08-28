@@ -47,6 +47,40 @@ async def test_chat_json_response() -> None:
             librarian_id=None,
             latitude=37.5665,
             longitude=126.9780,
+            auth_token=None,
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_chat_passes_authorization_header() -> None:
+    mock_service = MagicMock()
+    mock_service.chat = AsyncMock(
+        return_value=("서재에 살인자의 기억법이 있습니다.", None, None)
+    )
+
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={
+                    "session_id": "sess-test-auth",
+                    "message": "내 서재 책 있어?",
+                },
+                headers={"Authorization": "Bearer jwt-token-xyz"},
+            )
+
+        assert response.status_code == 200
+        mock_service.chat.assert_awaited_once_with(
+            session_id="sess-test-auth",
+            message="내 서재 책 있어?",
+            librarian_id=None,
+            latitude=None,
+            longitude=None,
+            auth_token="Bearer jwt-token-xyz",
         )
     finally:
         app.dependency_overrides.clear()
@@ -143,6 +177,7 @@ async def test_chat_streaming_response() -> None:
         librarian_id: str | None = None,
         latitude: float | None = None,
         longitude: float | None = None,
+        auth_token: str | None = None,
     ) -> AsyncGenerator[str, None]:
         chunks = ["사서 ", "추천 ", "도서입니다."]
         for chunk in chunks:
