@@ -14,8 +14,45 @@
 - [ ] HNSW 파라미터(`m`, `ef_construction`, `ef_search`) 실데이터 기반 튜닝
 - [ ] 대화 세션 요약 압축 — 토큰 한도 초과 시 오래된 턴 요약 전략
 - [ ] CI 워크플로우에 ruff/mypy/pytest(unit+integration) 추가
-- [ ] 관측성: 구조적 로깅, 요청 추적 ID, RAG 검색 품질 지표 수집
 - [ ] 추천 에이전트 번역 지침(시스템 프롬프트) 적용 후에도 해외 도서 원문(일본어/영어 등)이 마크다운 응답에 그대로 섞여 나오는 사례가 실사용에서 관찰되면, post_processor.py와 분리된 별도 모듈(예: translation_fallback.py)에 비한글 패턴 감지 + Haiku 3 단발 호출 후처리 함수(translate_if_needed)를 추가 검토. 번역 전용 에이전트를 도구(Tool)로 등록하는 방식은 기각됨(판단 자체가 추론 비용이라 오히려 레이턴시/신뢰도 손해).
 - [ ] Agents-as-Tools 리팩터링, 사서 연동, ArgoCD 배포 확정 후 `docs/api/openapi.yaml`을 최신 상태로 갱신하고 프론트 담당자에게 공유. 프론트가 axios 클라이언트를 서버별로 작성할 수 있게 엔드포인트/스키마/인증 헤더/CORS 설정을 명확히 문서화.
 - [x] Bedrock 추천/오케스트레이터 모델을 Claude 3.5 Sonnet v1(`anthropic.claude-3-5-sonnet-20240620-v1:0`, `ap-northeast-2`)으로 업그레이드 완료 (2026-08-27). 실측 TTFT 617ms, 사서 에이전트와 버전 통일.
 - [ ] 최신 CRIS Reasoning 모델들(Sonnet 4/4.5/5, Opus 5 등)은 reasoning 지연(TTFT 1.7~2.4초)으로 실시간 챗봇에는 부적합하나, 향후 스트리밍이 필요 없는 비실시간 작업(예: `POST /api/v1/classify-genre`의 난해한 장르 분류, OCR 서지 오탈자 정밀 보정, 대량 오프라인 배치)의 전용 모델로 활용 검토.
+
+## 학습/고도화 트랙 (2026-08-28 확정, CLIAR-111 구현·테스트 완료 후 착수)
+
+담당자(에이전트 파트) 개인 학습 목적. 두 트랙으로 분리 — 같은 "속도 개선"이라도 Strands
+SDK 레벨 변경과 Bedrock 인프라 레벨 변경은 성격이 달라 별도로 진행한다.
+
+### 트랙 A — Strands SDK 관점 (에이전트 실행 구조)
+1. **Observability (트레이싱/메트릭)** — 우선순위 1위, 개인 학습 희망 방향과 일치.
+   `AgentResult.metrics`/`traces` 로깅부터 시작해 OpenTelemetry 계측(OTEL Collector →
+   CloudWatch/X-Ray 연동까지 확장 가능). 지금 이 레포는 구조적 로깅이 전혀 없어
+   "오케스트레이터가 왜 이 도구를 선택했는지", "어느 구간이 느린지"를 볼 방법이 없음
+   (기존 "관측성" 항목과 통합). 이후 트랙의 모든 최적화를 숫자로 검증하는 전제 조건이라
+   반드시 먼저 진행한다.
+2. **직결 스트리밍 파이프라인 (Direct Streaming Pipeline)** — 우선순위 2위.
+   지금 `orchestrator_service.py`는 하위 도구(`recommend_books`/`consult_librarian`)가
+   완전히 끝난 뒤에야 오케스트레이터가 재생성을 시작하는 2단 구조라 체감 지연이 크다.
+   하위 에이전트 토큰을 직접 클라이언트로 중계하고 `### 📖` N+1번째 감지 시 조기 중단
+   (Early Stop)하는 방식으로 전환. 1번(트레이싱)으로 병목 구간을 실측한 뒤 착수해야
+   효과를 개선 전/후로 비교할 수 있음. `PLAN.md` "대기 과제"의 기존 항목과 동일.
+
+### 트랙 B — Bedrock 관점 (모델 인프라)
+1. **Latency-Optimized Inference** — ap-northeast-2 리전 및 현재 사용 모델(Claude 3.5
+   Sonnet)의 지원 여부부터 조사. 지원 안 되면 적용까지는 못 가더라도 리전별 기능
+   가용성을 확인하는 것 자체가 유효한 학습. 목표는 "조사 후 가능하면 적용"으로 설정
+   (무조건 적용을 목표로 잡지 않음).
+2. **Prompt Caching 실측/튜닝** — `CacheConfig(strategy="auto")`가 이미 켜져 있지만
+   캐시 히트/미스를 관측한 적이 없음. 시스템 프롬프트(`ORCHESTRATOR_SYSTEM_PROMPT`,
+   `LIBRARIAN_SYSTEM_PROMPT`)가 모델별 캐시 최소 토큰 기준(Claude 계열 통상
+   1,024~4,096 토큰)을 넘는지 확인하고, 캐시 TTL(통상 5분)과 대화 세션 TTL(1시간)의
+   불일치가 실제 캐시 효율에 영향을 주는지 검증.
+3. **모델 가용성/파라미터 조사** — 리전별 모델 카탈로그, Converse API 추론 파라미터
+   (`temperature`, `topP` 등) 튜닝. 위 "Bedrock 모델 가용성"/"CRIS Reasoning 모델" 기존
+   항목과 연계.
+4. **Guardrails 조사** — 현재 전혀 미사용. 사서/추천 에이전트 응답에 콘텐츠 필터링을
+   적용할 수 있는 지점인지 조사.
+5. **AgentCore 조사** — 지금은 Strands 에이전트를 FastAPI 프로세스 안에서 직접 구동.
+   Bedrock AgentCore로 옮기면 에이전트 배포/스케일링/세션 관리를 Bedrock 인프라
+   레벨에서 관리하는 방식을 학습할 수 있음 (아키텍처 전환 여부는 조사 후 별도 결정).

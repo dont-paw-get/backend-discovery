@@ -425,10 +425,39 @@
   - Task 4: `domain/orchestrator/agent.py`의 `CAT_ORCHESTRATOR_PROMPT` 및 `STORK_ORCHESTRATOR_PROMPT`에 `search_my_library` 도구 분기 규칙(단순 서재 조회 ➔ 서재 도구, 복합 추천 ➔ 서재 도구 ➔ 추천 도구 연쇄) 주입.
   - Task 5: `extract_fallback_text` 결합 안전장치를 화이트리스트(`has_book_card = "### 📖" in tool_result`)로 제한하여 서재 원시 텍스트 중복 노출 방지. `test_library_tool.py`, `test_chat_router.py`, `test_orchestrator_service.py`, `test_orchestrator_routing.py` 단위 테스트 갱신 및 신설. 정적 분석(`ruff`, `mypy`) 100% 통과, 단위 테스트 121건 전체 통과.
   - Task 6: `docs/api/decisions/0004-my-library-integration.md` (ADR 0004) 작성 및 `docs/api/openapi.yaml`, `.harness/ARCHITECTURE.md`, `.harness/STATE.md`, `.harness/DECISIONS.md`, `.harness/PLAN.md` 갱신.
-- 커밋·push는 사용자 승인 대기 중 (`[CLIAR-152]` 태그 사용).
+- 커밋·push 완료 (`bc9db6d`, `git push -u origin CLIAR-152-Unified-Agent-Assistant`).
 
 ### 다음 세션이 할 일
-1. 사용자 승인 시 커밋 생성 및 원격 push (`git push -u origin CLIAR-152-Unified-Agent-Assistant`), `develop` 대상 PR 생성.
-2. 프론트엔드(`my-reading-room`) 단일 챗 UI에서 `Authorization` 헤더 전송 및 서재 검색 / 추천 / 복합 대화 E2E 테스트.
-3. K8s dev 환경 배포 후 통신 검증.
+1. 프론트엔드(`my-reading-room`) 단일 챗 UI에서 `Authorization` 헤더 전송 및 서재 검색 / 추천 / 복합 대화 E2E 테스트.
+2. K8s dev 환경 배포 후 통신 검증.
+
+
+## 2026-08-28 — Bedrock 성능 고도화 3단계(관측 ➔ 직결 스트리밍 ➔ 인프라 최적화) 계획 수립
+- `CLIAR-152` 커밋 및 원격 푸시 완료 상태 확인.
+- 워킹 트리에 남아 있는 `src/discovery/domain/librarian/agent.py`의 도서 공식 풀네임/시리즈명 표기 지침 보강 수정사항 확인.
+- Bedrock 관점의 성능 고도화 작업 3가지를 "관측(Observability) ➔ 아키텍처 개선(직결 스트리밍) ➔ 인프라 최적화(AWS Bedrock Latency-Optimized Inference)"의 계층적 스토리라인으로 정리하여 `.harness/PLAN.md`에 확정 계획으로 수립:
+  - **Phase 1 (Observability)**: TTFT, 오케스트레이터 분류 시간, 도구 I/O 및 내부 LLM 추론 시간 구간별 계측 로거 구축 및 베이스라인 측정.
+  - **Phase 2 (Direct Streaming Pipeline)**: 하위 에이전트 생성 스트림을 클라이언트로 즉시 직결 바이패스하여 2중 버퍼링 및 재포장 추론 턴 제거 (체감 2~3초 단축).
+  - **Phase 3 (Latency-Optimized Inference)**: AWS Bedrock의 Latency-Optimized Routing / Inference Profile 지원 현황(리전/모델) 조사 및 가능 시 적용.
+- 캐싱(이미 적용됨), Structured Output(별도 트랙), 병렬 도구(추후 도구 증가 시 검토)는 백로그로 명확히 분리.
+
+### 다음 세션이 할 일
+1. 새 티켓 브랜치 생성 (예: `CLIAR-153-Agent-Performance-Optimization` 등) 및 `agent.py` 잔여 수정사항 반영.
+2. `.harness/PLAN.md`의 Phase 1 (구간별 레이턴시 계측 로거 및 베이스라인 실측)부터 착수.
+3. Phase 1 실측 데이터를 바탕으로 Phase 2 직결 스트리밍 파이프라인 구현 및 비교 검증.
+
+
+## 2026-08-29 — 도서 표준 장르 분류 API의 ISBN 필드 지원 및 LLM 식별 강화 완료
+- 도서 OCR 및 메인 API 서버(`backend-book`)의 `GET /api/v1/books/search`가 고유 식별자인 `isbn` 기반 검색으로 개편됨에 따라, `backend-discovery`의 도서 표준 장르 분류 API(`POST /api/v1/classify-genre`)에서도 `isbn`을 수신하여 LLM 프롬프트에 도서 식별 단서로 제공하도록 지원을 완료했다:
+  - Task 1: `docs/api/openapi.yaml` 계약 갱신 및 `src/discovery/api/schemas/genre.py`의 `BookClassificationRequest`에 `isbn: str = Field(default="", ...)` 선택 필드 추가.
+  - Task 2: `src/discovery/domain/genre/classifier.py`의 `GENRE_CLASSIFIER_SYSTEM_PROMPT` 및 `build_classification_prompt`에 `isbn` 파라미터 반영 (ISBN이 제공되면 도서 고유 식별자로 최우선 분석, 미제공 시 기존 title/author/raw_category로 fallback). `src/discovery/application/genre_classifier_service.py`의 `classify_genre`에 `isbn` 전달 배선.
+  - Task 3: `tests/unit/test_genre_classifier.py` 및 `tests/unit/test_genre_router.py`에 ISBN 포함/미포함 단위 테스트 추가, 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 123건 전체 통과.
+  - Task 4: `docs/api/decisions/0002-book-genre-classification.md` (ADR 0002), `.harness/STATE.md`, `.harness/ARCHITECTURE.md`, `.harness/PLAN.md` 문서 동기화 완료.
+
+### 다음 세션이 할 일
+1. API 서버(`backend-book`) 및 OCR 파이프라인에서 `POST /api/v1/classify-genre`로 `isbn`을 포함한 요청 전송 및 장르 매핑 검증.
+2. 커밋/push 요청 시 진행.
+3. Bedrock 성능 고도화 3단계 착수.
+
+
 
