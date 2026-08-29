@@ -21,3 +21,5 @@
 | 사서별(블루 ⇄ 슈빌) 동적 페르소나 주입 및 프론트엔드 말풍선/UI 일체화 | ✅ 완료 | backend-librarian의 공식 페르소나 정의(블루: ~다냥 🐾 + 미스터리 특화 ⇄ 슈빌: 두둥! + 공손체 🪶 + 비즈니스 특화)를 오케스트레이터 및 도서 추천 에이전트에 1:1 완벽 이식하여 톤 뒤죽박죽 원천 차단, 프론트 말풍선(LibrarianCursor) 및 로딩/전환 멘트 사서별 100% 동기화 완료. 단위 테스트 112건 통과 |
 | 슈빌 '두둥!' 로딩 멘트 반영 & 프리미엄 도서 카드(Book Card) 박스 UI 개선 | ✅ 완료 | 프론트엔드 로딩 멘트에 슈빌의 시그니처 '두둥!' 반영, MarkdownRenderer에서 `### 📖` 도서 블록을 감각적인 북 카드(제목 뱃지 + 저자/쪽수 칩 + 추천이유 박스) 컴포넌트로 묶어 렌더링하도록 UI 대폭 미려화 완료 |
 | CLIAR-152 올인원 독서 비서 (내 서재 CRUD API 연동 및 복합 의도 오케스트레이션) | ✅ 완료 | Task 1(LIBRARY_API_URL 설정 및 DTO 모델링)·Task 2(SearchMyLibraryTool HTTP 도구 및 필터링)·Task 3(Authorization 토큰 패스스루 배선)·Task 4(블루/슈빌 서재 및 복합 추천 분기 프롬프트 주입)·Task 5(fallback 결합 안전장치 보강 및 단위 테스트 121건 통과)·Task 6(ADR 0004 작성 및 하네스 문서 동기화) 모두 완료 |
+| 도서 장르 분류 API의 ISBN 필드 지원 및 LLM 식별 강화 | ✅ 완료 | Task 1(openapi.yaml 및 BookClassificationRequest에 isbn optional 필드 추가)·Task 2(도메인 프롬프트 및 서비스 배선)·Task 3(단위 테스트 123건 및 정적 분석 100% 통과)·Task 4(ADR 0002 및 하네스 문서 동기화) 모두 완료 |
+

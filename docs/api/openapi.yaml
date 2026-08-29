@@ -60,7 +60,7 @@ paths:
     post:
       summary: 도서 표준 장르 분류
       description: >
-        도서 제목, 저자, 원본 카테고리(알라딘/OCR 등) 정보를 기반으로
+        도서 ISBN(선택), 제목, 저자, 원본 카테고리(알라딘/OCR 등) 정보를 기반으로
         DB(ERD) 표준 16개 장르 체계 중 가장 적합한 장르 1개와 신뢰도를 분류하여 반환한다.
       operationId: classifyBookGenre
       tags:
@@ -245,6 +245,11 @@ components:
       required:
         - title
       properties:
+        isbn:
+          type: string
+          default: ""
+          description: 국제표준도서번호 (10자리 또는 13자리 ISBN, 도서 고유 식별용)
+          example: "9788966263769"
         title:
           type: string
           description: 도서 제목

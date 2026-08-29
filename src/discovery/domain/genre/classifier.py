@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 GENRE_CLASSIFIER_SYSTEM_PROMPT = """당신은 도서 메타데이터를 분석하여
 표준 장르로 정확하게 분류하는 전문 사서 AI입니다.
-주어진 도서 제목(title), 저자(author), 원본 카테고리(raw_category) 정보를 종합 분석하여,
+주어진 도서 ISBN(선택), 제목(title), 저자(author), 원본 카테고리(raw_category) 정보를 종합 분석하여,
 반드시 아래 정의된 16개 표준 장르 Enum(genre_type) 중 가장 적합한 1개를 선택하세요.
 
 
@@ -34,7 +34,8 @@ GENRE_CLASSIFIER_SYSTEM_PROMPT = """당신은 도서 메타데이터를 분석�
 16. NONE: 위 장르에 해당하지 않거나 도서 정보가 부족하여 식별 불가능한 경우
 
 [분류 원칙]
-1. raw_category(알라딘/OCR 원본 카테고리)에 명확한 분류 단서가 있다면 최우선으로 고려하세요.
+1. ISBN이 제공된 경우, 해당 도서의 고유 식별 정보와
+   raw_category(알라딘/OCR 원본 카테고리)의 명확한 단서를 최우선으로 고려하세요.
 2. raw_category가 모호하거나 없더라도, 제목(title)과 저자(author)의 특성을 파악하여
    가장 가까운 표준 장르 Enum을 도출하세요.
 3. 소설 중에서 세부 장르(SF, 판타지, 로맨스, 미스터리/스릴러) 구분이 뚜렷하지 않은
@@ -47,10 +48,17 @@ GENRE_CLASSIFIER_SYSTEM_PROMPT = """당신은 도서 메타데이터를 분석�
 """
 
 
-def build_classification_prompt(title: str, author: str = "", raw_category: str = "") -> str:
+def build_classification_prompt(
+    title: str,
+    author: str = "",
+    raw_category: str = "",
+    isbn: str = "",
+) -> str:
     """도서 장르 분류를 위한 LLM 사용자 프롬프트를 생성한다."""
+    isbn_line = f"- ISBN: {isbn}\n" if isbn else ""
     return (
         f"도서 정보:\n"
+        f"{isbn_line}"
         f"- 제목: {title}\n"
         f"- 저자: {author if author else '정보 없음'}\n"
         f"- 원본 카테고리: {raw_category if raw_category else '정보 없음'}\n\n"

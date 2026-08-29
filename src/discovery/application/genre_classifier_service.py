@@ -89,6 +89,7 @@ class GenreClassifierService:
                 title=request.title,
                 author=request.author,
                 raw_category=request.raw_category,
+                isbn=request.isbn,
             )
 
             result = await agent.invoke_async(prompt=prompt)

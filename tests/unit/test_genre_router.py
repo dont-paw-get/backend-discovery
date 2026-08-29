@@ -56,6 +56,33 @@ async def test_classify_genre_success(app: FastAPI, client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
+async def test_classify_genre_with_isbn_success(app: FastAPI, client: AsyncClient) -> None:
+    """isbn이 포함된 정상 요청 시 200 OK와 함께 분류된 장르 응답을 반환한다."""
+    mock_settings = Settings(
+        redis_url="redis://localhost:6379/0",
+        llm_provider="mock",
+        internal_api_token="test-token",
+        tavily_api_key="test-key",
+    )
+    app.dependency_overrides[get_genre_classifier_service] = lambda: GenreClassifierService(
+        settings=mock_settings
+    )
+
+    payload = {
+        "isbn": "9788966263769",
+        "title": "파이썬 코딩의 기술",
+        "author": "브렛 슬라킨",
+        "raw_category": "국내도서 > 컴퓨터/모바일 > 프로그래밍 언어 > 파이썬",
+    }
+    response = await client.post("/api/v1/classify-genre", json=payload)
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["genre"] == StandardGenre.COMPUTER_IT.value
+    assert data["confidence"] == 1.0
+
+
+@pytest.mark.asyncio
 async def test_classify_genre_custom_mock_service(app: FastAPI, client: AsyncClient) -> None:
     """Mock 서비스 주입 시 지정된 BookClassificationResponse가 반환된다."""
 
