@@ -29,6 +29,7 @@ class BookClassificationRequest(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    isbn: str = Field(default="", description="국제표준도서번호 (ISBN)", examples=["9788966263769"])
     title: str = Field(..., min_length=1, description="도서 제목", examples=["파이썬 코딩의 기술"])
     author: str = Field(default="", description="저자명", examples=["브렛 슬라킨"])
     raw_category: str = Field(

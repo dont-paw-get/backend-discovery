@@ -26,13 +26,27 @@ def test_build_classification_prompt() -> None:
     assert "파이썬 코딩의 기술" in prompt
     assert "브렛 슬라킨" in prompt
     assert "국내도서 > 컴퓨터/모바일" in prompt
+    assert "ISBN" not in prompt
+
+
+def test_build_classification_prompt_with_isbn() -> None:
+    """ISBN이 전달되었을 때 프롬프트에 ISBN 정보가 올바르게 포함되는지 검증한다."""
+    prompt = build_classification_prompt(
+        title="파이썬 코딩의 기술",
+        author="브렛 슬라킨",
+        raw_category="국내도서 > 컴퓨터/모바일",
+        isbn="9788966263769",
+    )
+    assert "ISBN: 9788966263769" in prompt
+    assert "파이썬 코딩의 기술" in prompt
 
 
 def test_build_classification_prompt_empty_optional_fields() -> None:
-    """저자나 원본 카테고리가 비어 있을 때 기본 문구가 들어가는지 검증한다."""
+    """저자나 원본 카테고리, ISBN이 비어 있을 때 기본 문구가 들어가는지 검증한다."""
     prompt = build_classification_prompt(title="제목만 있는 책")
     assert "제목만 있는 책" in prompt
     assert "정보 없음" in prompt
+    assert "ISBN" not in prompt
 
 
 @pytest.mark.parametrize(
@@ -195,6 +209,7 @@ async def test_genre_classifier_service_bedrock_mode(
 
     service = GenreClassifierService(settings=bedrock_settings)
     req = BookClassificationRequest(
+        isbn="9788934972464",
         title="코스모스",
         author="칼 세이건",
         raw_category="자연과학",
