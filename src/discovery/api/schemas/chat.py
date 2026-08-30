@@ -28,7 +28,7 @@ class ChatRequest(BaseModel):
     message: str = Field(
         ...,
         min_length=1,
-        max_length=1000,
+        max_length=2000,
         description="사용자 질문 또는 도서 추천 요청 메시지.",
         examples=["비 오는 날 읽기 좋은 잔잔한 일본 소설 추천해줘."],
     )
