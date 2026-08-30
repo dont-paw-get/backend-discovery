@@ -23,3 +23,4 @@ images:
 # 개발 환경에서 달라지는 설정값만 덮어씀
 patches:
   - path: configmap-patch.yaml
+  - path: serviceaccount-patch.yaml
