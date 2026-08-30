@@ -473,5 +473,18 @@
 3. Bedrock 성능 고도화 3단계(관측 ➔ 직결 스트리밍 ➔ 인프라 최적화) 착수.
 
 
+## 2026-08-31 — 프론트엔드 연동 지원: CORS expose_headers 확장 및 ChatRequest 2000자 상향 완료 [CLIAR-184]
+- 프론트엔드(`my-reading-room`)와의 실연동 과정에서 확인된 액션 아이템 2건을 수정 및 배포 준비 완료했다:
+  - Task 1: `src/discovery/api/schemas/chat.py`의 `ChatRequest.message` 필드 `max_length`를 1000자에서 2000자로 상향하고, `docs/api/openapi.yaml` 계약(message maxLength: 2000, 200 응답 헤더 `X-Signals`, `X-Switch-To`)을 동기화.
+  - Task 2: `src/discovery/main.py`의 CORS `expose_headers`에 `["X-Session-Id", "X-Signals", "X-Switch-To"]`를 추가하여 브라우저에서 날씨 뱃지/신호 및 사서 전환 헤더를 정상 수신하도록 수정.
+  - Task 3: `tests/unit/test_chat_router.py`에 2000자 정상 처리, 2001자 거부(422) 및 CORS `access-control-expose-headers` 검증 테스트 추가. 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 126건 + Redis 통합 테스트 16건 전체 통과.
+  - Task 4: `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 `CLIAR-184` 커밋, push 및 PR 생성.
+2. develop 머지 후 프론트엔드 배포 환경에서 날씨 뱃지, 사서 전환 버튼, 2000자 입력창 E2E 연동 검증.
+
+
+
 
 
