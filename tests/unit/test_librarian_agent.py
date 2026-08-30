@@ -103,6 +103,8 @@ def test_librarian_system_prompt_contains_structured_markdown_template() -> None
     assert "search_books" in LIBRARIAN_SYSTEM_PROMPT
     assert "권수" in LIBRARIAN_SYSTEM_PROMPT
     assert "쪽수" in LIBRARIAN_SYSTEM_PROMPT
+    assert "줄거리" in LIBRARIAN_SYSTEM_PROMPT
+    assert "스포일러" in LIBRARIAN_SYSTEM_PROMPT
     assert "톤앤매너" in LIBRARIAN_SYSTEM_PROMPT
     assert "해외 도서 번역" in LIBRARIAN_SYSTEM_PROMPT
     assert "한국어 표준 명칭" in LIBRARIAN_SYSTEM_PROMPT
