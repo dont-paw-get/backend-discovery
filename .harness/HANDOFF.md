@@ -460,4 +460,18 @@
 3. Bedrock 성능 고도화 3단계 착수.
 
 
+## 2026-08-30 — 에이전트 서비스 활용 유도(CTA) 및 과잉 도구/장문 줄거리 방어 가드레일 보강 완료
+- 사용자가 에이전트와의 대화 속에서 자연스럽게 책 상세 확인, 독서 진행률 기록, 한 줄 감상 메모 등 서비스 기능을 활용할 수 있도록 유도(CTA)를 추가하고, 불필요한 웹 검색 과잉 호출 및 장문 줄거리 생성을 원천 차단하는 가드레일을 구축했다:
+  - Task 1: `src/discovery/domain/orchestrator/agent.py`의 `CAT_ORCHESTRATOR_PROMPT` 및 `STORK_ORCHESTRATOR_PROMPT`에 (1) 단순 서재 조회 시 `recommend_books` 및 웹 검색 도구 호출 완벽 차단, (2) 묻지 않은 줄거리 나열 금지 및 독서 상태별(읽는 중: 진행률/요약 질문, 완독: 감상 기록, 멈춤: 요약 제안) 1~2줄 가벼운 CTA 템플릿 주입.
+  - Task 2: `src/discovery/domain/librarian/agent.py`의 `CAT_LIBRARIAN_PROMPT` 및 `STORK_LIBRARIAN_PROMPT`의 `- **추천 이유**:` 규칙에 *“전체 줄거리 나열/스포일러 엄격 금지, 핵심 매력과 추천 이유만 2~3문장 이내 압축 작성”* 가드레일 추가.
+  - Task 3: `tests/unit/test_orchestrator_agent.py` 및 `tests/unit/test_librarian_agent.py` 단위 테스트 갱신, 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 123건 전체 통과.
+  - Task 4: `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+
+### 다음 세션이 할 일
+1. K8s 파드 Bedrock 호출 IAM/Credentials 설정 확인 후 배포 환경 E2E 테스트.
+2. 사용자 요청 시 커밋/push 진행.
+3. Bedrock 성능 고도화 3단계(관측 ➔ 직결 스트리밍 ➔ 인프라 최적화) 착수.
+
+
+
 
