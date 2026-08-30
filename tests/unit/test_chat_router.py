@@ -229,3 +229,69 @@ async def test_chat_validation_error_on_empty_message() -> None:
     finally:
         app.dependency_overrides.clear()
 
+
+@pytest.mark.asyncio
+async def test_chat_validation_accepts_up_to_2000_chars() -> None:
+    mock_service = MagicMock()
+    mock_service.chat = AsyncMock(return_value=("2000자 정상 처리 응답입니다.", None, None))
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
+
+    long_message = "가" * 2000
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={"session_id": "sess-long-2000", "message": long_message},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["message"] == "2000자 정상 처리 응답입니다."
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_chat_validation_error_on_exceeding_2000_chars() -> None:
+    mock_service = MagicMock()
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
+
+    too_long_message = "가" * 2001
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={"session_id": "sess-too-long", "message": too_long_message},
+            )
+
+        assert response.status_code == 422
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_cors_expose_headers_configured() -> None:
+    mock_service = MagicMock()
+    mock_service.chat = AsyncMock(return_value=("CORS 응답입니다.", None, None))
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={"message": "안녕"},
+                headers={"Origin": "http://localhost:5173"},
+            )
+
+        assert response.status_code == 200
+        exposed = response.headers.get("access-control-expose-headers", "")
+        exposed_list = [h.strip() for h in exposed.split(",")]
+        assert "X-Session-Id" in exposed_list
+        assert "X-Signals" in exposed_list
+        assert "X-Switch-To" in exposed_list
+    finally:
+        app.dependency_overrides.clear()
+
+
+
+

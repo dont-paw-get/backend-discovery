@@ -45,6 +45,14 @@ paths:
               schema:
                 type: string
               description: 대화 세션 ID (스트리밍 및 JSON 공통 제공)
+            X-Signals:
+              schema:
+                type: string
+              description: 사서 분석 신호 URL 인코딩 JSON 문자열 (스트리밍 시 제공)
+            X-Switch-To:
+              schema:
+                type: string
+              description: 다른 사서 페르소나 전환 제안 URL 인코딩 JSON 문자열 (스트리밍 시 제공)
           content:
             application/json:
               schema:
@@ -99,7 +107,7 @@ components:
         message:
           type: string
           minLength: 1
-          maxLength: 1000
+          maxLength: 2000
           description: 사용자 질문 또는 도서 추천 요청 메시지
           example: 비 오는 날 읽기 좋은 잔잔한 일본 소설 추천해줘.
         latitude:
