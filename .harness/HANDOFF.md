@@ -491,9 +491,18 @@
   - Task 3: `tests/unit/test_orchestrator_agent.py`, `tests/unit/test_librarian_agent.py`의 Sonnet 5 모델 ID 팩토리 검증 테스트 갱신. 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 126건 + Redis 통합 테스트 16건 전체 통과.
   - Task 4: `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
+## 2026-08-31 — K8s dev 환경 사서 에이전트(backend-librarian) 클러스터 내부 URL 연동 설정 [CLIAR-190]
+- 브랜치: `CLIAR-190-Dev-Librarian-Agent-Url-Config` (`origin/develop`에서 분기).
+- K8s dev 배포 환경에서 discovery 파드가 사서 에이전트 마이크로서비스(`backend-librarian`)와 클러스터 내부 통신할 수 있도록 DNS 주소를 설정했다:
+  - `k8s/overlays/dev/configmap-patch.yaml`의 `data:`에 `LIBRARIAN_AGENT_URL: "http://backend-librarian.dpyb-librarian-dev.svc.cluster.local"` 추가.
+  - 공통 `k8s/base/configmap.yaml`은 주석/빈 값으로 유지하여 향후 prod 환경 영향 격리.
+  - `kubectl kustomize k8s/overlays/dev` 빌드 유효성 검증 완료 및 정적 분석(`ruff`, `mypy`), 단위 테스트 126건 전체 통과.
+  - `.harness/STATE.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+
 ### 다음 세션이 할 일
-1. `CLIAR-189` 커밋, push 및 `develop` 대상 PR 생성.
-2. develop 머지 후 배포 환경에서 Claude Sonnet 5 실시간 추론 동작 E2E 검증.
+1. `CLIAR-190` 커밋, push 및 `develop` 대상 PR 생성.
+2. 배포 후 dev 환경에서 discovery와 사서 에이전트(`backend-librarian`) 간의 클러스터 내부 HTTP 통신 및 페르소나/날씨 시그널 수신 E2E 검증.
+
 
 
 

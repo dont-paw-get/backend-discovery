@@ -5,4 +5,4 @@ metadata:
   name: backend-discovery-config
 data:
   LLM_PROVIDER: "bedrock"
-
+  LIBRARIAN_AGENT_URL: "http://backend-librarian.dpyb-librarian-dev.svc.cluster.local"
