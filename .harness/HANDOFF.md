@@ -491,19 +491,18 @@
   - Task 3: `tests/unit/test_orchestrator_agent.py`, `tests/unit/test_librarian_agent.py`의 Sonnet 5 모델 ID 팩토리 검증 테스트 갱신. 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 126건 + Redis 통합 테스트 16건 전체 통과.
   - Task 4: `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
-## 2026-08-31 — Bedrock 장애·권한 예외 대응 백엔드 Graceful Fallback 및 사서 페르소나 안내 구축 완료 [CLIAR-193]
-- 브랜치: `CLIAR-193-Bedrock-Graceful-Fallback` (`origin/develop`에서 분기).
-- AWS Bedrock 호출 시 권한 부족(`AccessDeniedException`), 레이트 리밋(`ThrottlingException`), 일시적 네트워크 장애 등으로 인해 500 에러가 발생하고 프론트엔드가 자체 하드코딩 문구로 빠지던 문제를 해결하기 위해 백엔드 Graceful Fallback을 구축했다:
-  - Task 1: `src/discovery/domain/orchestrator/fallback.py` 신설 — 사서 페르소나(`librarian_id`: cat ⇄ stork)별 맞춤형 친절한 Fallback 안내 메시지 함수(`get_llm_fallback_message`) 구현.
-    - 블루: *"냥냥... 서재 책장을 정리하던 중에 통신 연결이 잠시 끊겼다냥 🐾 잠시 후에 다시 이야기해달라냥!"*
-    - 슈빌: *"두둥! 서재 사서실 통신에 일시적인 장애가 발생했습니다 🪶 잠시 후 다시 말씀해 주십시오."*
-  - Task 2: `src/discovery/application/orchestrator_service.py`의 `chat`, `stream_chat`, `get_initial_meta`에 try-except 예외 포착 및 fallback 배선 — Bedrock 장애 시 500 전파 대신 사서 fallback 메시지를 청크로 방출하고 200 스트림/응답으로 정상 종료, `[BEDROCK_FALLBACK]` 구조적 로깅.
-  - Task 3: `tests/unit/test_orchestrator_service.py`에 Bedrock 에러(AccessDenied, Throttling, Midstream Timeout) 시뮬레이션 테스트 4건 추가. 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 130건 전체 통과.
+## 2026-08-31 — 스트리밍 초기 블로킹 제거(Fast TTFB) 및 사서 연동 장애 격리 고도화 완료 [CLIAR-194]
+- 브랜치: `CLIAR-194-Streaming-Fast-TTFB-NonBlocking-Meta` (`origin/develop`에서 분기).
+- 스트리밍 대화 요청(`POST /api/v1/chat?stream=true`) 시, 사전 메타데이터(`get_initial_meta`) 조회로 인해 사서 서버(`backend-librarian`)가 느려지거나 통신 장애가 발생했을 때 전체 스트리밍 개시가 수십 초간 블로킹되어 ALB 30초 타임아웃(`ERR_HTTP2_PROTOCOL_ERROR`)이 발생하던 문제를 해결했다:
+  - Task 1: `src/discovery/core/config.py` 및 `k8s/base/configmap.yaml`에 `initial_meta_timeout_seconds: float = 1.5` 필드 및 환경 변수 추가.
+  - Task 2: `src/discovery/application/orchestrator_service.py`의 `get_initial_meta`에서 사서 서버 호출을 `asyncio.wait_for(..., timeout=self._settings.initial_meta_timeout_seconds)`로 감싸고, 타임아웃 발생 시 `[INITIAL_META_TIMEOUT]` 로깅 후 `(None, None)`을 즉시 반환하여 브라우저에 0.1초 이내 스트리밍 응답(`StreamingResponse`)이 열리도록 보장.
+  - Task 3: `tests/unit/test_orchestrator_service.py`에 `get_initial_meta` 1.5초 타임아웃 및 예외 처리 비동기 단위 테스트 3건 추가. 정적 분석(`ruff`, `mypy`) 및 단위 테스트 133건 100% 통과.
   - Task 4: `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
 ### 다음 세션이 할 일
-1. `CLIAR-193` 커밋, push 및 `develop` 대상 PR 생성.
-2. 인프라팀의 Sonnet 5 IAM 권한 승인 후 실호출 연동 검증.
+1. `CLIAR-194` 커밋, push 및 `develop` 대상 PR 생성.
+2. 배포 후 프론트엔드에서 스트리밍 대화 요청 시 TTFB 즉각 응답 및 30초 타임아웃 해소 확인.
+
 
 
 

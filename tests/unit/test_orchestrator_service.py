@@ -13,6 +13,12 @@ from pytest_mock import MockerFixture
 
 from discovery.application.orchestrator_service import OrchestratorService
 from discovery.core.config import Settings
+from discovery.domain.orchestrator.librarian_response import (
+    LibrarianResponse,
+    LibrarianSignals,
+    SwitchToSuggestion,
+    WeatherSignal,
+)
 
 
 @pytest.mark.asyncio
@@ -634,4 +640,127 @@ async def test_orchestrator_service_stream_chat_handles_midstream_exception_grac
     assert "추천을 준비하던 중..." in full_output
     assert "두둥! 서재 사서실 통신에 일시적인 장애가 발생했습니다 🪶" in full_output
     assert "[BEDROCK_FALLBACK]" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_get_initial_meta_handles_timeout_gracefully(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+        initial_meta_timeout_seconds=0.01,
+    )
+
+    import asyncio
+
+    async def slow_consult(*args: Any, **kwargs: Any) -> Any:
+        await asyncio.sleep(0.1)
+        return MagicMock()
+
+    mock_librarian_tool = mocker.MagicMock()
+    mock_librarian_tool.consult = slow_consult
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        librarian_tool=mock_librarian_tool,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        signals, switch_to = await service.get_initial_meta(
+            session_id="sess-timeout",
+            message="추천해줘",
+        )
+
+    assert signals is None
+    assert switch_to is None
+    assert "[INITIAL_META_TIMEOUT]" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_get_initial_meta_handles_exception_gracefully(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+        initial_meta_timeout_seconds=1.5,
+    )
+
+    mock_librarian_tool = mocker.MagicMock()
+    mock_librarian_tool.consult = AsyncMock(side_effect=RuntimeError("Connection refused"))
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        librarian_tool=mock_librarian_tool,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        signals, switch_to = await service.get_initial_meta(
+            session_id="sess-err",
+            message="추천해줘",
+        )
+
+    assert signals is None
+    assert switch_to is None
+    assert "[INITIAL_META_FALLBACK]" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_get_initial_meta_returns_signals_and_switch_to_on_success(
+    mocker: MockerFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+        initial_meta_timeout_seconds=1.5,
+    )
+
+    mock_signals = LibrarianSignals(
+        weather=WeatherSignal(weather="비", is_rainy=True),
+        mood="Reflective",
+    )
+    mock_switch_to = SwitchToSuggestion(id="stork", name="황새 사서", genres=["비즈니스"])
+    mock_res = LibrarianResponse(
+        message="안내",
+        signals=mock_signals,
+        switch_to=mock_switch_to,
+    )
+
+    mock_librarian_tool = mocker.MagicMock()
+    mock_librarian_tool.consult = AsyncMock(return_value=mock_res)
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        librarian_tool=mock_librarian_tool,
+    )
+
+    signals, switch_to = await service.get_initial_meta(
+        session_id="sess-ok",
+        message="추천해줘",
+    )
+
+    assert signals == mock_signals
+    assert switch_to == mock_switch_to
+
 
