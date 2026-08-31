@@ -174,3 +174,99 @@ async def test_as_tool_execution(settings: Settings, mocker: MockerFixture) -> N
 
     assert "[내 서재 도서 목록] (총 1권)" in result_text
     assert "살인자의 기억법" in result_text
+
+
+@pytest.mark.asyncio
+async def test_search_spring_data_page_content_format(
+    settings: Settings, mocker: MockerFixture
+) -> None:
+    """Spring Data JPA 표준 규격인 'content' 키 응답 파싱을 검증한다."""
+    fake_spring_page = {
+        "content": [
+            {
+                "bookId": 201,
+                "title": "클린 아키텍처",
+                "author": "로버트 마틴",
+                "genre": "COMPUTER_IT",
+                "readingStatus": "READING",
+                "progress": 80,
+            }
+        ],
+        "pageable": {"pageNumber": 0, "pageSize": 100},
+        "totalElements": 1,
+        "totalPages": 1,
+    }
+
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_resp = mocker.MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_spring_page
+    mock_client.get.return_value = mock_resp
+
+    tool = SearchMyLibraryTool(settings=settings, http_client=mock_client)
+    res = await tool.search(auth_token="test-token")
+
+    assert len(res) == 1
+    assert res[0].title == "클린 아키텍처"
+    assert res[0].book_id == 201
+    assert res[0].author == "로버트 마틴"
+    assert res[0].reading_status == "READING"
+
+    # params에 page=0, size=100이 전달되었는지 검증
+    call_args, call_kwargs = mock_client.get.call_args
+    assert call_kwargs["params"]["page"] == 0
+    assert call_kwargs["params"]["size"] == 100
+
+
+@pytest.mark.asyncio
+async def test_search_raw_list_format(settings: Settings, mocker: MockerFixture) -> None:
+    """순수 배열([...]) 형태의 응답 파싱을 검증한다."""
+    fake_list = [
+        {
+            "bookId": 301,
+            "title": "도둑맞은 집중력",
+            "author": "요한 하리",
+            "readingStatus": "COMPLETED",
+        }
+    ]
+
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_resp = mocker.MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_list
+    mock_client.get.return_value = mock_resp
+
+    tool = SearchMyLibraryTool(settings=settings, http_client=mock_client)
+    res = await tool.search(auth_token="test-token")
+
+    assert len(res) == 1
+    assert res[0].title == "도둑맞은 집중력"
+
+
+@pytest.mark.asyncio
+async def test_search_data_wrapper_format(settings: Settings, mocker: MockerFixture) -> None:
+    """data 래핑 형태 ({"data": {"content": [...]}}) 응답 파싱을 검증한다."""
+    fake_wrapped = {
+        "status": "SUCCESS",
+        "data": {
+            "content": [
+                {
+                    "bookId": 401,
+                    "title": "사피엔스",
+                    "author": "유발 하라리",
+                }
+            ]
+        },
+    }
+
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_resp = mocker.MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_wrapped
+    mock_client.get.return_value = mock_resp
+
+    tool = SearchMyLibraryTool(settings=settings, http_client=mock_client)
+    res = await tool.search(auth_token="test-token")
+
+    assert len(res) == 1
+    assert res[0].title == "사피엔스"

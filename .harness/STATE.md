@@ -27,6 +27,8 @@
 | CLIAR-190 K8s dev 환경 사서 에이전트(backend-librarian) 클러스터 내부 URL 연동 설정 | ✅ 완료 | `k8s/overlays/dev/configmap-patch.yaml`에 `LIBRARIAN_AGENT_URL: "http://backend-librarian.dpyb-librarian-dev.svc.cluster.local"` 추가 및 kustomize 빌드 유효성 검증 완료 |
 | CLIAR-193 Bedrock 장애·권한 예외 대응 백엔드 Graceful Fallback 및 사서 페르소나 안내 구축 | ✅ 완료 | Task 1(사서 페르소나별 fallback 안내 메시지 유틸리티 fallback.py 신설)·Task 2(OrchestratorService chat/stream_chat/get_initial_meta에 try-except 및 500 방어 배선)·Task 3(단위 테스트 4건 추가, 총 130건 및 정적 분석 100% 통과)·Task 4(하네스 문서 동기화) 모두 완료 |
 | CLIAR-194 스트리밍 초기 블로킹 제거(Fast TTFB) 및 사서 연동 장애 격리 고도화 | ✅ 완료 | Task 1(initial_meta_timeout_seconds 1.5초 설정 및 ConfigMap 반영)·Task 2(OrchestratorService get_initial_meta에 asyncio.wait_for Fail-Fast 타임아웃 및 장애 격리 배선)·Task 3(단위 테스트 3건 추가, 총 133건 및 정적 분석 100% 통과)·Task 4(하네스 문서 동기화) 모두 완료 |
+| CLIAR-195 내 서재 도서 조회 API Spring Data Page 및 전방위 규격 호환성 강화 | ✅ 완료 | Task 1(LibraryBooksResponse 및 LibraryBookItem에 Spring Page content, data 래핑, items, 순수 배열 전방위 model_validator 추가)·Task 2(SearchMyLibraryTool page=0&size=100 파라미터 정렬 및 상세 로깅)·Task 3(단위 테스트 3건 추가, 총 136건 및 정적 분석 100% 통과)·Task 4(하네스 문서 동기화) 모두 완료 |
+
 
 
 

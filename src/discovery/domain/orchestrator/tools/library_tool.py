@@ -71,9 +71,8 @@ class SearchMyLibraryTool:
         url = f"{base}/api/v1/library/books"
 
         params: dict[str, Any] = {
-            "size": 50,
-            "sortBy": "SHELF_ORDER",
-            "sortOrder": "ASC",
+            "page": 0,
+            "size": 100,
         }
         if author:
             params["author"] = author.strip()
@@ -87,6 +86,7 @@ class SearchMyLibraryTool:
         }
 
         timeout = self._settings.library_http_timeout_seconds
+        logger.info("Calling Library API at %s with params: %s", url, params)
 
         try:
             if self._http_client is not None:
@@ -99,33 +99,35 @@ class SearchMyLibraryTool:
                         url, params=params, headers=headers, timeout=timeout
                     )
 
+            logger.info("Library API response status: %d", response.status_code)
             if response.status_code == 200:
                 data = response.json()
-                if isinstance(data, dict):
-                    parsed = LibraryBooksResponse.model_validate(data)
-                    books = parsed.books
+                logger.debug("Library API raw payload: %s", data)
+                parsed = LibraryBooksResponse.model_validate(data)
+                books = parsed.books
+                logger.info("Parsed %d books from Library API", len(books))
 
-                    # query가 주어지면 제목, 저자, 장르 부분 일치 필터링
-                    if query and query.strip():
-                        q_lower = query.strip().lower()
-                        books = [
-                            b
-                            for b in books
-                            if (b.title and q_lower in b.title.lower())
-                            or (b.author and q_lower in b.author.lower())
-                            or (b.genre and q_lower in b.genre.lower())
-                        ]
+                # query가 주어지면 제목, 저자, 장르 부분 일치 필터링
+                if query and query.strip():
+                    q_lower = query.strip().lower()
+                    books = [
+                        b
+                        for b in books
+                        if (b.title and q_lower in b.title.lower())
+                        or (b.author and q_lower in b.author.lower())
+                        or (b.genre and q_lower in b.genre.lower())
+                    ]
 
-                    # reading_status 필터링
-                    if reading_status and reading_status.strip():
-                        st_upper = reading_status.strip().upper()
-                        books = [
-                            b
-                            for b in books
-                            if b.reading_status and b.reading_status.upper() == st_upper
-                        ]
+                # reading_status 필터링
+                if reading_status and reading_status.strip():
+                    st_upper = reading_status.strip().upper()
+                    books = [
+                        b
+                        for b in books
+                        if b.reading_status and b.reading_status.upper() == st_upper
+                    ]
 
-                    return books
+                return books
 
             logger.warning(
                 "Library API returned status %d: %s", response.status_code, response.text
