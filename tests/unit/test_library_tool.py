@@ -270,3 +270,35 @@ async def test_search_data_wrapper_format(settings: Settings, mocker: MockerFixt
 
     assert len(res) == 1
     assert res[0].title == "사피엔스"
+
+
+@pytest.mark.asyncio
+async def test_search_float_progress_rounded_to_int(
+    settings: Settings, mocker: MockerFixture
+) -> None:
+    """소수점 진행률(예: 88.0165...)이 들어와도 정수(88)로 안전하게 파싱됨을 검증한다."""
+    fake_data = {
+        "content": [
+            {
+                "bookId": 501,
+                "title": "객체지향의 사실과 오해",
+                "author": "조영호",
+                "readingStatus": "READING",
+                "progress": 88.01652892561984,
+            }
+        ]
+    }
+
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_resp = mocker.MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_data
+    mock_client.get.return_value = mock_resp
+
+    tool = SearchMyLibraryTool(settings=settings, http_client=mock_client)
+    res = await tool.search(auth_token="test-token")
+
+    assert len(res) == 1
+    assert res[0].title == "객체지향의 사실과 오해"
+    assert res[0].progress == 88
+

@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 __all__ = ["LibraryBookItem", "LibraryBooksResponse"]
 
@@ -18,7 +18,9 @@ class LibraryBookItem(BaseModel):
 
     book_id: int | str = Field(default=0, alias="bookId", description="도서 식별자")
     shelf_id: int | str | None = Field(default=None, alias="shelfId", description="책장 식별자")
-    shelf_rank: str | None = Field(default=None, alias="shelfRank", description="책장 내 순서 랭크")
+    shelf_rank: str | int | None = Field(
+        default=None, alias="shelfRank", description="책장 내 순서 랭크"
+    )
     title: str = Field(default="", description="도서 제목")
     author: str | None = Field(default=None, description="저자명")
     genre: str | None = Field(default=None, description="도서 장르 (예: MYSTERY_THRILLER, SF 등)")
@@ -31,6 +33,17 @@ class LibraryBookItem(BaseModel):
         default=None, alias="coverUrl", description="도서 표지 이미지 URL"
     )
     progress: int | None = Field(default=None, description="독서 진행률 (0~100 %)")
+
+    @field_validator("progress", mode="before")
+    @classmethod
+    def convert_progress_to_int(cls, v: Any) -> int | None:
+        """소수점 진행률(예: 88.0165...)을 정수 퍼센트(88)로 반올림 변환한다."""
+        if v is None:
+            return None
+        try:
+            return int(round(float(v)))
+        except (ValueError, TypeError):
+            return None
 
 
 class LibraryBooksResponse(BaseModel):
