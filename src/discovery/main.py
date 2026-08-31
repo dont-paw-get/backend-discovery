@@ -21,6 +21,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 
 def create_app() -> FastAPI:
+    settings = get_settings()
     app = FastAPI(
         title="DPYB Discovery API",
         description="도서 탐색 및 AI 추천 에이전트 서비스",
@@ -28,10 +29,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # 프론트엔드 로컬 개발 및 연동을 위한 CORS 설정
+    # 프론트엔드 로컬 개발 및 배포 도메인 연동을 위한 CORS 설정
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=[o.strip() for o in settings.cors_allowed_origins.split(",") if o.strip()],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
