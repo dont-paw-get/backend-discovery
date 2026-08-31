@@ -507,14 +507,14 @@
 ## 2026-08-31 — 내 서재 도서 조회 API(GET /api/v1/library/books) Spring Data Page 및 전방위 규격 호환성 강화 완료 [CLIAR-195]
 - 브랜치: `CLIAR-195-Library-API-Page-Compatibility` (`origin/develop`에서 분기)
 - 프론트엔드와 `backend-book` 간의 서재 조회 규격(Spring Data JPA Page `content`, `page=0&size=100`)을 Discovery의 `SearchMyLibraryTool` 및 `LibraryBooksResponse` DTO에 100% 호환되도록 보강했다:
-  - Task 1: `src/discovery/domain/orchestrator/library_response.py`에 `@model_validator(mode="before")`를 추가하여 Spring Page 표준 `content` 키, `data` 래핑 구조(`data.content`, `data.books`, `data.items`), 순수 배열(`[...]`), `items` 키 등 어떤 규격의 응답이 오더라도 `books: list[LibraryBookItem]`으로 자동 변환되도록 다형성 파서를 구축하고, `LibraryBookItem`에 `extra="ignore"` 및 유연한 타입 허용.
+  - Task 1: `src/discovery/domain/orchestrator/library_response.py`에 `@model_validator(mode="before")`를 추가하여 Spring Page 표준 `content` 키, `data` 래핑 구조(`data.content`, `data.books`, `data.items`), 순수 배열(`[...]`), `items` 키 등 어떤 규격의 응답이 오더라도 `books: list[LibraryBookItem]`으로 자동 변환되도록 다형성 파서를 구축하고, `LibraryBookItem`에 `extra="ignore"` 및 소수점 진행률(`progress: float`, 예: `88.0165...`)을 정수(`88`)로 반올림 변환하는 `field_validator` 추가.
   - Task 2: `src/discovery/domain/orchestrator/tools/library_tool.py`의 `params`를 프론트엔드 규격과 동일한 `{"page": 0, "size": 100}`으로 정렬하고, 호출 URL, 상태 코드, 파싱된 도서 수에 대한 상세 로깅 추가.
-  - Task 3: `tests/unit/test_library_tool.py`에 Spring Page `content` 응답, 순수 배열 응답, `data` 래핑 응답, `page=0&size=100` 파라미터 전달 단위 테스트 3건 추가.
-  - Task 4: 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 136건 전체 통과. `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+  - Task 3: `tests/unit/test_library_tool.py`에 Spring Page `content` 응답, 순수 배열 응답, `data` 래핑 응답, `page=0&size=100` 파라미터 전달 및 소수점 progress 반올림 단위 테스트 4건 추가.
+  - Task 4: 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 137건 전체 통과. `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
 ### 다음 세션이 할 일
-1. `CLIAR-195` 커밋, push 및 `develop` 대상 PR 생성.
-2. 프론트엔드 채팅 요청 시 `Authorization: Bearer <token>` 헤더 전송 및 서재 검색 / 복합 추천 E2E 검증.
+1. `CLIAR-195` 추가 커밋 및 push.
+2. 배포 후 프론트엔드에서 내 서재 도서 조회 및 추천 정상 응답 확인.
 
 
 
