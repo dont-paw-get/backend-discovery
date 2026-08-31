@@ -1,0 +1,8 @@
+# 개발 환경에서 base ConfigMap 위에 덮어쓸 값
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: backend-discovery-config
+data:
+  LLM_PROVIDER: "bedrock"
+  LIBRARIAN_AGENT_URL: "http://backend-librarian.dpyb-librarian-dev.svc.cluster.local"

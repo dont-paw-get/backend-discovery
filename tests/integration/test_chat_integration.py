@@ -58,12 +58,10 @@ async def test_multi_turn_chat_with_redis(
     }
 
     mock_agent = MagicMock()
-    mock_agent.invoke_async = AsyncMock(
-        side_effect=[mock_agent_result_1, mock_agent_result_2]
-    )
+    mock_agent.invoke_async = AsyncMock(side_effect=[mock_agent_result_1, mock_agent_result_2])
 
     mock_create_agent = mocker.patch(
-        "discovery.application.librarian_service.create_librarian_agent",
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
         return_value=mock_agent,
     )
 
@@ -76,9 +74,7 @@ async def test_multi_turn_chat_with_redis(
 
     session_id = "test-e2e-session-1"
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Turn 1
         resp1 = await client.post(
             "/api/v1/chat",
@@ -111,3 +107,71 @@ async def test_multi_turn_chat_with_redis(
         {"role": "user", "content": [{"text": "따뜻한 판타지 소설 추천해줘"}]},
         {"role": "assistant", "content": [{"text": "추천 도서는 '달러구트 꿈 백화점'입니다."}]},
     ]
+
+
+@pytest.mark.asyncio
+async def test_chat_with_my_library_integration(
+    redis_client: Redis,
+    mocker: MockerFixture,
+) -> None:
+    from discovery.domain.orchestrator.library_response import LibraryBookItem
+    from discovery.domain.orchestrator.tools.library_tool import SearchMyLibraryTool
+
+    # 1. Mock Library Tool search
+    mock_library_tool = MagicMock(spec=SearchMyLibraryTool)
+    mock_library_tool.as_tool.return_value = MagicMock()
+    mock_library_tool.search = AsyncMock(
+        return_value=[
+            LibraryBookItem(
+                book_id=1,
+                title="살인자의 기억법",
+                author="김영하",
+                genre="MYSTERY_THRILLER",
+                reading_status="READING",
+                progress=45,
+            )
+        ]
+    )
+
+    # 2. Mock Agent response
+    mock_agent_result = MagicMock()
+    mock_agent_result.message = {
+        "role": "assistant",
+        "content": [
+            {
+                "text": (
+                    "서재에 김영하 작가님의 『살인자의 기억법』"
+                    "(진행률 45%, 읽는 중)이 있습니다냥! 🐾"
+                )
+            }
+        ],
+    }
+    mock_agent = MagicMock()
+    mock_agent.invoke_async = AsyncMock(return_value=mock_agent_result)
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    app = create_app()
+    app.state.redis = redis_client
+
+    session_id = "test-e2e-session-library"
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/api/v1/chat",
+            json={"session_id": session_id, "message": "내 서재에 김영하 책 있어?"},
+            headers={"Authorization": "Bearer sample-jwt-token"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "살인자의 기억법" in data["message"]
+
+    # Redis history check
+    store = ChatSessionStore(redis_client, max_turns=20, ttl_seconds=3600)
+    history = await store.get_history(session_id)
+    assert len(history) == 2
+    assert history[0]["content"] == "내 서재에 김영하 책 있어?"
+    assert "살인자의 기억법" in history[1]["content"]

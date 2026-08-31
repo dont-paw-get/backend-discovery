@@ -8,10 +8,13 @@ if [ -z "$1" ]; then
   return 1 2>/dev/null || exit 1
 fi
 
+# 기존 터미널에 남아있는 만료된 세션 환경변수를 먼저 비웁니다
+unset AWS_SESSION_TOKEN AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY
+
 MFA_SERIAL="arn:aws:iam::594532711953:mfa/kosa15"
 TOKEN_CODE="$1"
 
-CREDENTIALS=$(aws sts get-session-token --serial-number "$MFA_SERIAL" --token-code "$TOKEN_CODE" --output json 2>&1)
+CREDENTIALS=$(env -u AWS_SESSION_TOKEN -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY aws sts get-session-token --serial-number "$MFA_SERIAL" --token-code "$TOKEN_CODE" --duration-seconds 43200 --output json 2>&1)
 
 if [ $? -ne 0 ]; then
   echo "❌ MFA 인증에 실패했습니다:"

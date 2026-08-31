@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-discovery
+  labels:
+    app.kubernetes.io/name: backend-discovery
+spec:
+  # replicas 는 overlay 에서 환경별로 지정 (dev=1, prod=2 — prod 는 현재 주석 상태)
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend-discovery
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backend-discovery
+    spec:
+      # IRSA: 위 ServiceAccount(backend-discovery)에 연결된 IAM Role 로
+      # AWS Bedrock 을 호출한다. Secret 의 정적 AWS 키는 더 이상 불필요.
+      serviceAccountName: backend-discovery
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: backend-discovery
+          # 이미지 실제 경로/태그는 overlay 의 images: 트랜스포머가 주입 (CI 가 태그 갱신)
+          image: backend-discovery
+          # develop-latest 처럼 고정 태그를 재사용하므로, 노드에 캐시된
+          # 옛 이미지를 쓰지 않도록 항상 새로 pull 한다.
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: backend-discovery-config
+            - secretRef:
+                name: backend-discovery-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

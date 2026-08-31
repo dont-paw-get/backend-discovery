@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# 개발 환경 (develop 브랜치 → dpyb-discovery-dev 네임스페이스)
+namespace: dpyb-discovery-dev
+
+resources:
+  - ../../base
+
+# 개발은 1개만
+replicas:
+  - name: backend-discovery
+    count: 1
+
+# 개발용 이미지. CI 가 newTag 를 커밋 SHA 로 갱신합니다.
+# 최초 배포 전에는 CI 가 아직 한 번도 push 하지 않았으므로, 첫 워크플로가 성공적으로
+# 실행된 뒤 develop-latest 이미지가 ECR 에 생기면 ArgoCD 가 정상적으로 pull 합니다.
+images:
+  - name: backend-discovery
+    newName: 594532711953.dkr.ecr.ap-northeast-2.amazonaws.com/dpyb-dev/dpyb-discovery
+    newTag: 71817de48a2d10a3e8487d20a61d6b2111ccca50
+
+# 개발 환경에서 달라지는 설정값만 덮어씀
+patches:
+  - path: configmap-patch.yaml
+  - path: serviceaccount-patch.yaml

@@ -5,8 +5,8 @@ info:
     DPYB(Don't Paw Get Your Book)의 backend-discovery 서비스 wire 계약.
     이 파일이 API 계약의 단일 소유 산출물이다. `.harness/*`는 이 내용을 복제하지 않고 참조만 한다.
 
-    Strands Agents SDK 및 Tavily 실시간 웹 검색 기반의 AI 도서 추천 에이전트 서비스 계약을 정의한다.
-  version: 0.2.0
+    Strands Agents SDK 기반 오케스트레이터 및 실시간 웹 검색 도서 추천 에이전트 서비스 계약을 정의한다.
+  version: 0.4.0
 
 servers:
   - url: http://localhost:8000
@@ -15,14 +15,22 @@ servers:
 paths:
   /api/v1/chat:
     post:
-      summary: 추천 에이전트 도서 추천 대화
+      summary: 오케스트레이터 대화 (도서 추천, 서재 검색, 사서 상담)
       description: >
-        자연어 질문으로 추천 에이전트에게 도서 추천을 요청한다.
-        이전 `session_id`를 넘기면 멀티턴 대화 문맥을 유지한다.
-        `stream=true`인 경우 스트리밍 응답(text/plain)을 반환하며, 응답 헤더 `X-Session-Id`에 세션 ID가 포함된다.
-      operationId: chatWithLibrarian
+        자연어 질문으로 오케스트레이터에게 대화를 요청한다.
+        의도에 따라 내 서재 도서 검색, 도서 추천 에이전트 또는 사서 에이전트로 라우팅되며, 이전 `session_id`를 넘기면 멀티턴 대화 문맥을 유지한다.
+        서재 조회가 필요한 경우 `Authorization: Bearer <token>` 헤더를 전달하면 사용자의 서재 데이터를 조회하여 맞춤형 답변을 제공한다.
+        `stream=true`인 경우 스트리밍 응답(text/plain)을 반환하며, 응답 헤더 `X-Session-Id`, `X-Signals`, `X-Switch-To`에 메타데이터가 포함된다.
+      operationId: chatWithOrchestrator
       tags:
         - Chat
+      parameters:
+        - name: Authorization
+          in: header
+          required: false
+          schema:
+            type: string
+          description: 사용자 JWT 인증 토큰 (Bearer <token>, 서재 도서 조회 시 필수)
       requestBody:
         required: true
         content:
@@ -37,6 +45,14 @@ paths:
               schema:
                 type: string
               description: 대화 세션 ID (스트리밍 및 JSON 공통 제공)
+            X-Signals:
+              schema:
+                type: string
+              description: 사서 분석 신호 URL 인코딩 JSON 문자열 (스트리밍 시 제공)
+            X-Switch-To:
+              schema:
+                type: string
+              description: 다른 사서 페르소나 전환 제안 URL 인코딩 JSON 문자열 (스트리밍 시 제공)
           content:
             application/json:
               schema:
@@ -47,6 +63,31 @@ paths:
                 description: 스트리밍 텍스트 청크 스트림
         '422':
           description: 요청 유효성 검증 실패 (빈 메시지 등)
+
+  /api/v1/classify-genre:
+    post:
+      summary: 도서 표준 장르 분류
+      description: >
+        도서 ISBN(선택), 제목, 저자, 원본 카테고리(알라딘/OCR 등) 정보를 기반으로
+        DB(ERD) 표준 16개 장르 체계 중 가장 적합한 장르 1개와 신뢰도를 분류하여 반환한다.
+      operationId: classifyBookGenre
+      tags:
+        - Genre
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BookClassificationRequest'
+      responses:
+        '200':
+          description: 분류된 표준 장르 정보
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookClassificationResponse'
+        '422':
+          description: 요청 유효성 검증 실패 (제목 누락 등)
 
 components:
   schemas:
@@ -59,16 +100,111 @@ components:
           type: string
           description: 대화 세션 ID (미입력 시 서버에서 UUID 생성)
           example: sess-1234-abcd
+        librarian_id:
+          type: string
+          description: 사서 ID ('cat' 또는 'stork')
+          example: cat
         message:
           type: string
           minLength: 1
-          maxLength: 1000
+          maxLength: 2000
           description: 사용자 질문 또는 도서 추천 요청 메시지
           example: 비 오는 날 읽기 좋은 잔잔한 일본 소설 추천해줘.
+        latitude:
+          type: number
+          format: float
+          description: 사용자 위도 (선택, 사서 날씨 큐레이션용)
+          example: 37.5665
+        longitude:
+          type: number
+          format: float
+          description: 사용자 경도 (선택, 사서 날씨 큐레이션용)
+          example: 126.9780
         stream:
           type: boolean
           default: false
           description: 스트리밍 응답 여부
+
+    SwitchToSuggestion:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        id:
+          type: string
+          description: 제안된 사서 ID (예: cat, stork)
+          example: cat
+        name:
+          type: string
+          description: 제안된 사서 이름
+          example: 고양이 사서
+        icon:
+          type: string
+          description: 사서 아이콘/이모지
+          example: 🐱
+        genres:
+          type: array
+          items:
+            type: string
+          description: 해당 사서의 전문 장르 목록
+          example: ["소설", "에세이"]
+
+    WeatherSignal:
+      type: object
+      properties:
+        weather:
+          type: string
+          description: 날씨 상태
+          example: 맑음
+        condition:
+          type: string
+          description: 날씨 상태 코드
+          example: clear
+        temperature:
+          type: number
+          format: float
+          description: 기온 (°C)
+          example: 28.0
+        is_rainy:
+          type: boolean
+          description: 강수 여부
+          example: false
+        description:
+          type: string
+          description: 날씨 설명
+          example: 맑고 쾌청한 하늘
+        location_source:
+          type: string
+          description: 위치 출처 (user, default_seoul, none)
+          example: user
+        confidence:
+          type: number
+          format: float
+          description: 날씨 분석 신뢰도
+
+    LibrarianSignals:
+      type: object
+      properties:
+        weather:
+          $ref: '#/components/schemas/WeatherSignal'
+          description: 날씨 시그널
+        time_of_day:
+          type: string
+          description: 시간대 (dawn, day, evening, night)
+          example: day
+        mood:
+          type: string
+          description: 사용자 감정/무드 키워드
+          example: cozy
+        genre_focus:
+          description: 추천 포커스 장르 목록 또는 문자열
+          oneOf:
+            - type: array
+              items:
+                type: string
+            - type: string
+          example: ["소설", "에세이"]
 
     ChatResponse:
       type: object
@@ -83,3 +219,72 @@ components:
         message:
           type: string
           description: 추천 에이전트의 추천 답변
+        switch_to:
+          $ref: '#/components/schemas/SwitchToSuggestion'
+          description: 다른 사서 페르소나로의 전환 제안 (선택)
+        signals:
+          $ref: '#/components/schemas/LibrarianSignals'
+          description: 사서 분석 신호 (날씨, 시간대, 무드, 장르 포커스) (선택)
+
+    StandardGenre:
+      type: string
+      description: ERD/backend-book 도서 카테고리 표준 규격 Enum (genre_type)
+      enum:
+        - NONE
+        - SCIENCE_FICTION
+        - FANTASY
+        - ROMANCE
+        - MYSTERY_THRILLER
+        - LITERARY_FICTION
+        - ESSAY
+        - POETRY_DRAMA
+        - HUMANITIES
+        - HISTORY
+        - BUSINESS_ECONOMICS
+        - SELF_HELP
+        - SCIENCE
+        - ARTS
+        - RELIGION
+        - COMPUTER_IT
+      example: COMPUTER_IT
+
+    BookClassificationRequest:
+      type: object
+      required:
+        - title
+      properties:
+        isbn:
+          type: string
+          default: ""
+          description: 국제표준도서번호 (10자리 또는 13자리 ISBN, 도서 고유 식별용)
+          example: "9788966263769"
+        title:
+          type: string
+          description: 도서 제목
+          example: 파이썬 코딩의 기술
+        author:
+          type: string
+          default: ""
+          description: 저자명
+          example: 브렛 슬라킨
+        raw_category:
+          type: string
+          default: ""
+          description: 알라딘/OCR 원본 카테고리 문자열
+          example: 국내도서 > 컴퓨터/모바일 > 프로그래밍 언어 > 파이썬
+
+    BookClassificationResponse:
+      type: object
+      required:
+        - genre
+        - confidence
+      properties:
+        genre:
+          $ref: '#/components/schemas/StandardGenre'
+        confidence:
+          type: number
+          format: float
+          default: 1.0
+          description: 분류 신뢰도 (0.0 ~ 1.0)
+          example: 0.95
+
