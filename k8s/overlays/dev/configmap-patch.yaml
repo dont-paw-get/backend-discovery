@@ -4,4 +4,5 @@ kind: ConfigMap
 metadata:
   name: backend-discovery-config
 data:
-  LLM_PROVIDER: "mock"
+  LLM_PROVIDER: "bedrock"
+

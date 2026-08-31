@@ -24,6 +24,8 @@
 | 도서 장르 분류 API의 ISBN 필드 지원 및 LLM 식별 강화 | ✅ 완료 | Task 1(openapi.yaml 및 BookClassificationRequest에 isbn optional 필드 추가)·Task 2(도메인 프롬프트 및 서비스 배선)·Task 3(단위 테스트 123건 및 정적 분석 100% 통과)·Task 4(ADR 0002 및 하네스 문서 동기화) 모두 완료 |
 | 에이전트 서비스 활용 유도(CTA) 및 과잉 도구/장문 줄거리 방어 가드레일 보강 | ✅ 완료 | Task 1(블루/슈빌 오케스트레이터 프롬프트에 서재 조회 시 외부 도구 차단, 장문 줄거리 금지 및 1~2줄 CTA 추가)·Task 2(추천 에이전트 추천 이유 2~3문장 콤팩트 상한 및 줄거리/스포일러 금지)·Task 3(단위 테스트 123건 및 정적 분석 100% 통과) 모두 완료 |
 | CLIAR-184 프론트엔드 연동 지원 (CORS expose_headers 확장 & ChatRequest 2000자 상향) | ✅ 완료 | Task 1(ChatRequest message max_length 2000 상향 및 openapi.yaml 계약 동기화)·Task 2(CORS expose_headers에 X-Signals, X-Switch-To 추가)·Task 3(단위 테스트 126건 및 정적 분석 100% 통과) 모두 완료 |
+| CLIAR-189 AWS Bedrock Claude Sonnet 5 글로벌 추론 프로필 적용 및 dev 배포 환경 Bedrock 활성화 | ✅ 완료 | Task 1(config.py 및 configmap.yaml에 global.anthropic.claude-sonnet-5 반영)·Task 2(k8s dev configmap-patch LLM_PROVIDER를 bedrock으로 수정)·Task 3(단위 테스트 146건 및 정적 분석 100% 통과) 모두 완료 |
+
 
 
 

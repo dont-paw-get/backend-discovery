@@ -33,9 +33,9 @@ class Settings(BaseSettings):
     aws_region: str | None = "ap-northeast-2"
     chat_history_max_turns: int = 20
     chat_session_ttl_seconds: int = 3600
-    # 추천 에이전트 및 오케스트레이터 모델: Claude 3.5 Sonnet (ap-northeast-2, TTFT 617ms)
-    librarian_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
-    orchestrator_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+    # 추천 에이전트 및 오케스트레이터 모델: Claude Sonnet 5 글로벌 크로스리전 프로필
+    librarian_model_id: str = "global.anthropic.claude-sonnet-5"
+    orchestrator_model_id: str = "global.anthropic.claude-sonnet-5"
     genre_classifier_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
     librarian_agent_url: str | None = None
     librarian_default_id: str = "cat"

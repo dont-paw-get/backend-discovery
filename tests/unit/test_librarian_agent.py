@@ -9,8 +9,7 @@ from strands.models.model import CacheConfig
 
 from discovery.domain.librarian.agent import LIBRARIAN_SYSTEM_PROMPT, create_librarian_agent
 
-# 교육 계정에서 실제 호출 가능 확인된 모델(.harness/BACKLOG.md 참고).
-CLAUDE_3_HAIKU_MODEL_ID = "anthropic.claude-3-haiku-20240307-v1:0"
+CLAUDE_SONNET_5_MODEL_ID = "global.anthropic.claude-sonnet-5"
 
 
 def test_create_librarian_agent_uses_configured_model_id(
@@ -18,10 +17,10 @@ def test_create_librarian_agent_uses_configured_model_id(
 ) -> None:
     bedrock_model_cls = mocker.patch("discovery.domain.librarian.agent.BedrockModel")
 
-    create_librarian_agent(model_id=CLAUDE_3_HAIKU_MODEL_ID)
+    create_librarian_agent(model_id=CLAUDE_SONNET_5_MODEL_ID)
 
     bedrock_model_cls.assert_called_once_with(
-        model_id=CLAUDE_3_HAIKU_MODEL_ID,
+        model_id=CLAUDE_SONNET_5_MODEL_ID,
         region_name=None,
         max_tokens=2048,
     )
@@ -30,10 +29,10 @@ def test_create_librarian_agent_uses_configured_model_id(
 def test_create_librarian_agent_passes_region_name(mocker: MockerFixture) -> None:
     bedrock_model_cls = mocker.patch("discovery.domain.librarian.agent.BedrockModel")
 
-    create_librarian_agent(model_id=CLAUDE_3_HAIKU_MODEL_ID, region_name="us-east-1")
+    create_librarian_agent(model_id=CLAUDE_SONNET_5_MODEL_ID, region_name="us-east-1")
 
     bedrock_model_cls.assert_called_once_with(
-        model_id=CLAUDE_3_HAIKU_MODEL_ID,
+        model_id=CLAUDE_SONNET_5_MODEL_ID,
         region_name="us-east-1",
         max_tokens=2048,
     )
@@ -43,13 +42,13 @@ def test_create_librarian_agent_with_prompt_caching(mocker: MockerFixture) -> No
     bedrock_model_cls = mocker.patch("discovery.domain.librarian.agent.BedrockModel")
 
     create_librarian_agent(
-        model_id=CLAUDE_3_HAIKU_MODEL_ID,
+        model_id=CLAUDE_SONNET_5_MODEL_ID,
         region_name="us-east-1",
         enable_prompt_caching=True,
     )
 
     bedrock_model_cls.assert_called_once_with(
-        model_id=CLAUDE_3_HAIKU_MODEL_ID,
+        model_id=CLAUDE_SONNET_5_MODEL_ID,
         region_name="us-east-1",
         max_tokens=2048,
         cache_config=CacheConfig(strategy="auto"),
@@ -61,7 +60,7 @@ def test_create_librarian_agent_sets_librarian_system_prompt(mocker: MockerFixtu
     mocker.patch("discovery.domain.librarian.agent.BedrockModel")
     agent_cls = mocker.patch("discovery.domain.librarian.agent.Agent")
 
-    create_librarian_agent(model_id=CLAUDE_3_HAIKU_MODEL_ID)
+    create_librarian_agent(model_id=CLAUDE_SONNET_5_MODEL_ID)
 
     _, kwargs = agent_cls.call_args
     assert kwargs["system_prompt"] == LIBRARIAN_SYSTEM_PROMPT
@@ -72,7 +71,7 @@ def test_create_librarian_agent_returns_agent_instance(mocker: MockerFixture) ->
     agent_cls = mocker.patch("discovery.domain.librarian.agent.Agent")
     agent_cls.return_value = mocker.sentinel.agent
 
-    result = create_librarian_agent(model_id=CLAUDE_3_HAIKU_MODEL_ID)
+    result = create_librarian_agent(model_id=CLAUDE_SONNET_5_MODEL_ID)
 
     assert result is mocker.sentinel.agent
 
@@ -85,7 +84,7 @@ def test_create_librarian_agent_passes_tools_and_messages(mocker: MockerFixture)
     mock_messages = [{"role": "user", "content": [{"text": "hello"}]}]
 
     create_librarian_agent(
-        model_id=CLAUDE_3_HAIKU_MODEL_ID,
+        model_id=CLAUDE_SONNET_5_MODEL_ID,
         tools=[mock_tool],
         messages=mock_messages,
     )
