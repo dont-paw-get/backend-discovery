@@ -1,54 +1,33 @@
 # PLAN — backend-discovery
 
-## [진행 예정] Bedrock & 에이전트 성능 고도화 3단계 (관측 ➔ 직결 스트리밍 ➔ 인프라 최적화)
+## [계획 초안] Bedrock 장애·권한 예외 대응 백엔드 회복탄력성(Graceful Fallback) 및 사서 페르소나 안내 구축
 
 **목표:**  
-"관측(숫자로 병목 파악) ➔ 아키텍처 개선(직결 스트리밍) ➔ 인프라 최적화(AWS Bedrock Latency-Optimized Inference)"의 계층적 스토리라인에 따라 체계적으로 레이턴시를 단축하고 안정성을 확보한다.
+AWS Bedrock 호출 시 권한 부족(`AccessDeniedException`), 레이트 리밋(`ThrottlingException`), 일시적 네트워크 장애 등이 발생해도 500 에러로 중단되지 않고, 사서 캐릭터별(블루/슈빌) 친절한 안내 메시지로 응답하여 프론트엔드의 엉뚱한 하드코딩 문구 표출을 원천 방어하고 디버깅 로그를 구조화한다.
 
 ---
 
 ### 단계별 Task 체크리스트
 
-#### Phase 1: 관측성 구축 (Observability & Latency Breakdown)
-> **목적:** 각 단계별(오케스트레이터 첫 추론, 도구 호출, 하위 에이전트 추론, Tavily/서재 API 호출 등) 지연시간을 수치로 정확히 측정·로깅
+#### Task 1: Bedrock 예외 처리 및 사서별 Fallback 메시지 유틸리티 설계
+- [x] Bedrock 관련 `botocore.exceptions.ClientError`, `BotoCoreError` 및 일반 예외를 포착하여 사서 페르소나(`librarian_id`: cat ⇄ stork)에 맞춘 친절한 사용자 안내 메시지 생성 함수 구현 (`src/discovery/domain/orchestrator/fallback.py`)
+  - **블루 (고양이)**: *"냥냥... 서재 책장을 정리하던 중에 통신 연결이 잠시 끊겼다냥 🐾 잠시 후에 다시 이야기해달라냥!"*
+  - **슈빌 (황새)**: *"두둥! 서재 사서실 통신에 일시적인 장애가 발생했습니다 🪶 잠시 후 다시 말씀해 주십시오."*
+- [x] 에러 원인(`AccessDeniedException`, `ThrottlingException` 등)과 모델 ID, 리전을 식별할 수 있는 구조적 에러 로그(`[BEDROCK_FALLBACK]`) 출력 배선
 
-- [ ] **Task 1-1: 레이턴시 계측 타이머 및 구조화 로거/컨텍스트 설계**
-  - 스트리밍 세션 시작부터 첫 토큰 방출(TTFT), 각 도구 실행 시간, 하위 에이전트 스트리밍 소요 시간을 추적하는 경량 프로파일러 유틸리티 구축
-- [ ] **Task 1-2: `OrchestratorService` & `stream_chat` 구간별 메트릭 로깅**
-  - 오케스트레이터 의도 분류 소요 시간
-  - 도구별(`SearchMyLibraryTool`, `RecommendBooksTool`, `ConsultLibrarianTool`) I/O 및 내부 LLM 추론 시간
-  - 전체 요청 처리 완료 시간(Total Latency)
-- [ ] **Task 1-3: 현재 베이스라인 지연시간 실측 및 구간별 병목 기록**
-  - 서재 조회, 도서 추천, 사서 상담 각각의 시나리오별 실측 지표 수집 및 분석
+#### Task 2: `OrchestratorService` 스트리밍 및 일반 대화 경로에 회복탄력성 배선
+- [x] `stream_chat`: `agent.stream_async` 실행 및 이벤트 수신 루프에서 Bedrock 예외 발생 시, 500 전파 대신 fallback 텍스트를 청크로 yield하고 세션 히스토리에 정상 기록 후 200 스트림 종료
+- [x] `chat`: `agent.invoke_async` 실행 시 예외 발생 시 fallback 텍스트를 담은 `ChatResponse` 반환
 
----
+#### Task 3: 단위 테스트 작성 및 회복탄력성 검증
+- [x] `tests/unit/test_orchestrator_service.py`에 `AccessDeniedException`, `ThrottlingException`, 일반 런타임 에러 시뮬레이션 테스트 4건 작성
+- [x] 사서별(블루/슈빌) 안내 문구 정상 반환 및 500 방어 검증
+- [x] 정적 분석(`ruff`, `mypy`) 및 단위 테스트 130건 100% 통과 확인
 
-#### Phase 2: 아키텍처 레벨 최적화 (직결 스트리밍 파이프라인 / Direct Streaming)
-> **목적:** Phase 1에서 확인된 최대 병목(하위 에이전트가 완료될 때까지 상위 오케스트레이터가 대기 후 재포장하는 2중 버퍼링)을 제거하여 체감 응답 속도 혁신
-
-- [ ] **Task 2-1: 하위 추천/사서 스트림의 직결 바이패스(Direct Pass-through) 파이프라인 설계**
-  - 오케스트레이터가 도구 호출(`recommend_books` 등)을 결정하는 즉시, 하위 에이전트의 생성 스트림 델타를 클라이언트에 실시간으로 직결 파이핑
-  - 상위 모델의 불필요한 후속 재포장 추론 턴 제거 (1턴 절약으로 2~3초 단축)
-- [ ] **Task 2-2: 사서 어조 및 도서 마크다운 카드 일체화 유지**
-  - 하위 에이전트 프롬프트에서 이미 사서 페르소나(블루/슈빌)와 `### 📖` 마크다운 카드를 완성하여 출력하므로, 계약 파손 없이 직결 전달
-- [ ] **Task 2-3: 단위/통합 테스트 작성 및 개선 후 TTFT/Total Latency 실측 비교**
+#### Task 4: 하네스 문서 동기화
+- [x] `.harness/STATE.md`, `.harness/HANDOFF.md`, `.harness/PLAN.md` 갱신
 
 ---
 
-#### Phase 3: 인프라 레벨 최적화 (AWS Bedrock Latency-Optimized Inference 조사 및 적용)
-> **목적:** 소프트웨어 레벨 최적화 완료 후, 남는 물리적 모델 추론 지연을 AWS 인프라 최적화 기능으로 단축
-
-- [ ] **Task 3-1: AWS Bedrock Latency-Optimized Routing / Inference Profile 지원 현황 조사**
-  - 대상 모델(Claude 3.5 Sonnet, Claude 3 Haiku) 및 리전(`ap-northeast-2`, `us-east-1` 등)별 지연시간 최적화 추론 프로필 지원 여부 조사
-  - 조사 결과를 `.harness/research/` 또는 ADR에 문서화
-- [ ] **Task 3-2: (지원 시) Bedrock 클라이언트 및 환경변수 설정 반영**
-  - 지연시간 최적화 프로필 ARN/Model ID 주입 및 스트리밍 레이턴시 비교
-  - 미지원 시 한계 및 대체 방안(예: 글로벌 CRIS 프로필 활용 현황 점검) 문서화 마감
-
----
-
-### [참고] 보류/후속 백로그
-- 프롬프트 캐싱 실측 및 미세 튜닝 (현재 코드에 적용되어 있으므로 현상 유지)
-- Pydantic Structured Output 전면 전환 (설계 비용이 큰 별도 트랙)
-- 병렬 도구 호출 (도구 수 증가 시 재검토)
-
+### [참고] 후속 대기 과제
+- 인프라팀의 Bedrock Claude Sonnet 5 IAM 권한/모델 액세스 반영 후 실호출 E2E 검증

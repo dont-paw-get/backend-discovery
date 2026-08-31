@@ -25,6 +25,7 @@
 | 에이전트 서비스 활용 유도(CTA) 및 과잉 도구/장문 줄거리 방어 가드레일 보강 | ✅ 완료 | Task 1(블루/슈빌 오케스트레이터 프롬프트에 서재 조회 시 외부 도구 차단, 장문 줄거리 금지 및 1~2줄 CTA 추가)·Task 2(추천 에이전트 추천 이유 2~3문장 콤팩트 상한 및 줄거리/스포일러 금지)·Task 3(단위 테스트 123건 및 정적 분석 100% 통과) 모두 완료 |
 | CLIAR-189 AWS Bedrock Claude Sonnet 5 글로벌 추론 프로필 적용 및 dev 배포 환경 Bedrock 활성화 | ✅ 완료 | Task 1(config.py 및 configmap.yaml에 global.anthropic.claude-sonnet-5 반영)·Task 2(k8s dev configmap-patch LLM_PROVIDER를 bedrock으로 수정)·Task 3(단위 테스트 146건 및 정적 분석 100% 통과) 모두 완료 |
 | CLIAR-190 K8s dev 환경 사서 에이전트(backend-librarian) 클러스터 내부 URL 연동 설정 | ✅ 완료 | `k8s/overlays/dev/configmap-patch.yaml`에 `LIBRARIAN_AGENT_URL: "http://backend-librarian.dpyb-librarian-dev.svc.cluster.local"` 추가 및 kustomize 빌드 유효성 검증 완료 |
+| CLIAR-193 Bedrock 장애·권한 예외 대응 백엔드 Graceful Fallback 및 사서 페르소나 안내 구축 | ✅ 완료 | Task 1(사서 페르소나별 fallback 안내 메시지 유틸리티 fallback.py 신설)·Task 2(OrchestratorService chat/stream_chat/get_initial_meta에 try-except 및 500 방어 배선)·Task 3(단위 테스트 4건 추가, 총 130건 및 정적 분석 100% 통과)·Task 4(하네스 문서 동기화) 모두 완료 |
 
 
 
