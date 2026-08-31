@@ -481,8 +481,20 @@
   - Task 4: `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
 ### 다음 세션이 할 일
-1. 사용자 승인 시 `CLIAR-184` 커밋, push 및 PR 생성.
-2. develop 머지 후 프론트엔드 배포 환경에서 날씨 뱃지, 사서 전환 버튼, 2000자 입력창 E2E 연동 검증.
+1. develop 머지 후 프론트엔드 배포 환경에서 날씨 뱃지, 사서 전환 버튼, 2000자 입력창 E2E 연동 검증.
+
+
+## 2026-08-31 — AWS Bedrock Claude Sonnet 5 글로벌 추론 프로필 적용 및 dev 배포 환경 Bedrock 활성화 [CLIAR-189]
+- 교육 계정의 Bedrock 접근 권한 승인에 따라, discovery 오케스트레이터 및 도서 추천 에이전트의 모델을 최신 Claude Sonnet 5 글로벌 크로스리전 추론 프로필(`global.anthropic.claude-sonnet-5`)로 적용하고 dev K8s 환경을 실 Bedrock으로 전환했다:
+  - Task 1: `src/discovery/core/config.py` 및 `k8s/base/configmap.yaml`의 `orchestrator_model_id`, `librarian_model_id`를 `global.anthropic.claude-sonnet-5`로 갱신.
+  - Task 2: `k8s/overlays/dev/configmap-patch.yaml`의 `LLM_PROVIDER`를 `"mock"` ➔ `"bedrock"`으로 수정하여 실제 Bedrock LLM 실시간 추론 활성화.
+  - Task 3: `tests/unit/test_orchestrator_agent.py`, `tests/unit/test_librarian_agent.py`의 Sonnet 5 모델 ID 팩토리 검증 테스트 갱신. 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 126건 + Redis 통합 테스트 16건 전체 통과.
+  - Task 4: `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+
+### 다음 세션이 할 일
+1. `CLIAR-189` 커밋, push 및 `develop` 대상 PR 생성.
+2. develop 머지 후 배포 환경에서 Claude Sonnet 5 실시간 추론 동작 E2E 검증.
+
 
 
 
