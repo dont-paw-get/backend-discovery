@@ -9,23 +9,21 @@ AWS Bedrock 호출 시 권한 부족(`AccessDeniedException`), 레이트 리밋(
 
 ### 단계별 Task 체크리스트
 
-#### Task 1: Bedrock 예외 처리 및 사서별 Fallback 메시지 유틸리티 설계
-- [x] Bedrock 관련 `botocore.exceptions.ClientError`, `BotoCoreError` 및 일반 예외를 포착하여 사서 페르소나(`librarian_id`: cat ⇄ stork)에 맞춘 친절한 사용자 안내 메시지 생성 함수 구현 (`src/discovery/domain/orchestrator/fallback.py`)
-  - **블루 (고양이)**: *"냥냥... 서재 책장을 정리하던 중에 통신 연결이 잠시 끊겼다냥 🐾 잠시 후에 다시 이야기해달라냥!"*
-  - **슈빌 (황새)**: *"두둥! 서재 사서실 통신에 일시적인 장애가 발생했습니다 🪶 잠시 후 다시 말씀해 주십시오."*
-- [x] 에러 원인(`AccessDeniedException`, `ThrottlingException` 등)과 모델 ID, 리전을 식별할 수 있는 구조적 에러 로그(`[BEDROCK_FALLBACK]`) 출력 배선
+#### Task 1: `initial_meta_timeout_seconds` 설정 추가
+- [x] `src/discovery/core/config.py`의 `Settings`에 `initial_meta_timeout_seconds: float = 1.5` 필드 추가 (기본 1.5초 초고속 Fail-Fast)
+- [x] `k8s/base/configmap.yaml`에 `INITIAL_META_TIMEOUT_SECONDS: "1.5"` 기본값 반영
 
-#### Task 2: `OrchestratorService` 스트리밍 및 일반 대화 경로에 회복탄력성 배선
-- [x] `stream_chat`: `agent.stream_async` 실행 및 이벤트 수신 루프에서 Bedrock 예외 발생 시, 500 전파 대신 fallback 텍스트를 청크로 yield하고 세션 히스토리에 정상 기록 후 200 스트림 종료
-- [x] `chat`: `agent.invoke_async` 실행 시 예외 발생 시 fallback 텍스트를 담은 `ChatResponse` 반환
+#### Task 2: `OrchestratorService.get_initial_meta` Fail-Fast 타임아웃 및 장애 격리 배선
+- [x] `src/discovery/application/orchestrator_service.py`의 `get_initial_meta`에서 사서 서버 호출(`consult`)을 `asyncio.wait_for(..., timeout=self._settings.initial_meta_timeout_seconds)`로 감싸기
+- [x] 타임아웃 또는 네트워크 에러 발생 시 `[INITIAL_META_TIMEOUT]` 경고 로깅 후 지체 없이 `(None, None)` 즉시 반환하여 브라우저에 0.1초~1.5초 이내에 스트리밍 응답(`StreamingResponse`)이 열리도록 보장
 
 #### Task 3: 단위 테스트 작성 및 회복탄력성 검증
-- [x] `tests/unit/test_orchestrator_service.py`에 `AccessDeniedException`, `ThrottlingException`, 일반 런타임 에러 시뮬레이션 테스트 4건 작성
-- [x] 사서별(블루/슈빌) 안내 문구 정상 반환 및 500 방어 검증
-- [x] 정적 분석(`ruff`, `mypy`) 및 단위 테스트 130건 100% 통과 확인
+- [x] `tests/unit/test_orchestrator_service.py`에 `get_initial_meta` 1.5초 타임아웃 발생 시 블로킹 없이 `(None, None)`을 즉시 반환하는지 검증하는 비동기 단위 테스트 3건 추가
+- [x] 전체 단위 테스트 133건 및 정적 분석(`ruff`, `mypy`) 100% 통과 확인
 
-#### Task 4: 하네스 문서 동기화
+#### Task 4: 하네스 문서 동기화 및 PR 생성
 - [x] `.harness/STATE.md`, `.harness/HANDOFF.md`, `.harness/PLAN.md` 갱신
+- [x] `develop` 대상 PR 생성
 
 ---
 

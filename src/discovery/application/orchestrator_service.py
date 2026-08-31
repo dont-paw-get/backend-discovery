@@ -8,6 +8,7 @@
   switch_to 제안을 포착하여 세션을 갱신한다.
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -227,23 +228,39 @@ class OrchestratorService:
         longitude: float | None = None,
     ) -> tuple[LibrarianSignals | None, SwitchToSuggestion | None]:
         """스트리밍 응답 헤더(X-Signals, X-Switch-To)에 실어줄 사서 신호와
-        스위칭 제안을 사전 계산한다."""
+        스위칭 제안을 사전 계산한다.
+
+        사서 서버 지연으로 인한 전체 스트리밍 블로킹을 방지하기 위해
+        initial_meta_timeout_seconds(기본 1.5초) Fail-Fast 타임아웃을 적용한다.
+        """
         if librarian_id is not None:
             await self._session_store.update_session_meta(session_id, librarian_id=librarian_id)
 
         if self._librarian_tool is not None:
+            timeout_sec = getattr(self._settings, "initial_meta_timeout_seconds", 1.5)
             try:
                 meta = await self._session_store.get_session_meta(session_id)
-                lib_res = await self._librarian_tool.consult(
-                    message=message,
-                    session_id=session_id,
-                    librarian_id=meta.get("librarian_id"),
-                    latitude=latitude or meta.get("latitude"),
-                    longitude=longitude or meta.get("longitude"),
+                lib_res = await asyncio.wait_for(
+                    self._librarian_tool.consult(
+                        message=message,
+                        session_id=session_id,
+                        librarian_id=meta.get("librarian_id"),
+                        latitude=latitude or meta.get("latitude"),
+                        longitude=longitude or meta.get("longitude"),
+                    ),
+                    timeout=timeout_sec,
                 )
                 return lib_res.signals, lib_res.switch_to
+            except TimeoutError:
+                logger.warning(
+                    "[INITIAL_META_TIMEOUT] get_initial_meta timed out (%.1fs, session_id=%s). "
+                    "Bypassing to fast stream.",
+                    timeout_sec,
+                    session_id,
+                )
+                return None, None
             except Exception as e:
-                logger.warning("[BEDROCK_FALLBACK] get_initial_meta failed: %s", e)
+                logger.warning("[INITIAL_META_FALLBACK] get_initial_meta failed: %s", e)
                 return None, None
         return None, None
 

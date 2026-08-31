@@ -26,6 +26,7 @@ data:
   # LIBRARIAN_AGENT_URL: ""
   LIBRARIAN_DEFAULT_ID: "cat"
   LIBRARIAN_HTTP_TIMEOUT_SECONDS: "20"
+  INITIAL_META_TIMEOUT_SECONDS: "1.5"
   # 서재 도서 CRUD API (backend-book) 서비스 URL. 필수값 — 미설정 시 앱이 기동되지 않습니다.
   LIBRARY_API_URL: "http://k8s-dpybbook-backendb-d17a725d36-1113312703.ap-northeast-2.elb.amazonaws.com"
   LIBRARY_HTTP_TIMEOUT_SECONDS: "10"
