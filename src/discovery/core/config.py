@@ -29,13 +29,17 @@ class Settings(BaseSettings):
 
     redis_url: str
     llm_provider: str = "mock"
-    internal_api_token: str
-    aws_region: str | None = "ap-northeast-2"
+    # Claude Sonnet 5 글로벌 프로파일 사용 시 us-east-1 필수
+    aws_region: str | None = "us-east-1"
     chat_history_max_turns: int = 20
     chat_session_ttl_seconds: int = 3600
     # 추천 에이전트 및 오케스트레이터 모델: Claude Sonnet 5 글로벌 크로스리전 프로필
     librarian_model_id: str = "global.anthropic.claude-sonnet-5"
     orchestrator_model_id: str = "global.anthropic.claude-sonnet-5"
+    # [서울 리전 초저지연 fallback 옵션 (TTFT ~600ms)]
+    # aws_region: str | None = "ap-northeast-2"
+    # librarian_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
+    # orchestrator_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
     genre_classifier_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
     librarian_agent_url: str | None = None
     librarian_default_id: str = "cat"

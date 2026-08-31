@@ -4,6 +4,7 @@
 히스토리 주입, 도구 주입, 에이전트 실행, 턴 저장 순서 및 스트리밍 동작을 검증한다.
 """
 
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -436,3 +437,201 @@ async def test_orchestrator_service_chat_with_library_tool(mocker: MockerFixture
     mock_library_tool.as_tool.assert_called_once_with(auth_token="Bearer test-jwt-xyz")
     mock_create_agent.assert_called_once()
     assert mock_library_tool.as_tool.return_value in mock_create_agent.call_args[1]["tools"]
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_service_chat_handles_bedrock_exception_gracefully_for_cat(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = mocker.MagicMock()
+    # Bedrock AccessDeniedException 시뮬레이션
+    mock_agent.invoke_async = AsyncMock(
+        side_effect=RuntimeError("AccessDeniedException explicit deny")
+    )
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    with caplog.at_level(logging.ERROR):
+        response, switch_to, signals = await service.chat(
+            session_id="sess-err-cat",
+            message="책 추천해줘",
+        )
+
+    assert "냥냥... 서재 책장을 정리하던 중에 통신 연결이 잠시 끊겼다냥 🐾" in response
+    assert "[BEDROCK_FALLBACK]" in caplog.text
+    mock_session_store.append_turn.assert_has_awaits(
+        [
+            mocker.call("sess-err-cat", {"role": "user", "content": "책 추천해줘"}),
+            mocker.call("sess-err-cat", {"role": "assistant", "content": response}),
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_service_chat_handles_bedrock_exception_gracefully_for_stork(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "stork"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = mocker.MagicMock()
+    mock_agent.invoke_async = AsyncMock(side_effect=RuntimeError("ThrottlingException rate limit"))
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    with caplog.at_level(logging.ERROR):
+        response, switch_to, signals = await service.chat(
+            session_id="sess-err-stork",
+            message="경제 서적 추천해줘",
+        )
+
+    assert "두둥! 서재 사서실 통신에 일시적인 장애가 발생했습니다 🪶" in response
+    assert "[BEDROCK_FALLBACK]" in caplog.text
+    mock_session_store.append_turn.assert_has_awaits(
+        [
+            mocker.call("sess-err-stork", {"role": "user", "content": "경제 서적 추천해줘"}),
+            mocker.call("sess-err-stork", {"role": "assistant", "content": response}),
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_service_stream_chat_handles_bedrock_exception_gracefully_for_cat(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    from collections.abc import AsyncGenerator
+
+    async def fake_failing_stream(prompt: str) -> AsyncGenerator[dict[str, str], None]:
+        raise RuntimeError("AccessDeniedException on Bedrock stream")
+        yield {"data": "test"}
+
+    mock_agent = mocker.MagicMock()
+    mock_agent.stream_async = fake_failing_stream
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    chunks: list[str] = []
+    with caplog.at_level(logging.ERROR):
+        async for chunk in service.stream_chat(session_id="sess-stream-err", message="추천해줘"):
+            chunks.append(chunk)
+
+    full_output = "".join(chunks)
+    assert "냥냥... 서재 책장을 정리하던 중에 통신 연결이 잠시 끊겼다냥 🐾" in full_output
+    assert "[BEDROCK_FALLBACK]" in caplog.text
+    mock_session_store.append_turn.assert_has_awaits(
+        [
+            mocker.call("sess-stream-err", {"role": "user", "content": "추천해줘"}),
+            mocker.call("sess-stream-err", {"role": "assistant", "content": full_output}),
+        ]
+    )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_service_stream_chat_handles_midstream_exception_gracefully_for_stork(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "stork"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    from collections.abc import AsyncGenerator
+
+    async def fake_mid_failing_stream(prompt: str) -> AsyncGenerator[dict[str, str], None]:
+        yield {"data": "추천을 준비하던 중..."}
+        raise RuntimeError("Bedrock connection timeout midstream")
+
+    mock_agent = mocker.MagicMock()
+    mock_agent.stream_async = fake_mid_failing_stream
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    chunks: list[str] = []
+    with caplog.at_level(logging.ERROR):
+        async for chunk in service.stream_chat(
+            session_id="sess-stream-mid-err",
+            message="추천해줘",
+        ):
+            chunks.append(chunk)
+
+    full_output = "".join(chunks)
+    assert "추천을 준비하던 중..." in full_output
+    assert "두둥! 서재 사서실 통신에 일시적인 장애가 발생했습니다 🪶" in full_output
+    assert "[BEDROCK_FALLBACK]" in caplog.text
+

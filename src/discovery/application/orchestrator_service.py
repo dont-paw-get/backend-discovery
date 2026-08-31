@@ -8,6 +8,7 @@
   switch_to 제안을 포착하여 세션을 갱신한다.
 """
 
+import logging
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -20,6 +21,7 @@ from discovery.application.librarian_service import (
 from discovery.core.config import Settings
 from discovery.domain.librarian.post_processor import extract_text_from_message
 from discovery.domain.orchestrator.agent import create_orchestrator_agent
+from discovery.domain.orchestrator.fallback import get_llm_fallback_message
 from discovery.domain.orchestrator.librarian_response import (
     LibrarianResponse,
     LibrarianSignals,
@@ -29,6 +31,8 @@ from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianT
 from discovery.domain.orchestrator.tools.library_tool import SearchMyLibraryTool
 from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksTool
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
+
+logger = logging.getLogger(__name__)
 
 
 def extract_fallback_text(agent: Agent) -> str:
@@ -164,32 +168,44 @@ class OrchestratorService:
             auth_token=auth_token,
         )
 
-        result = await agent.invoke_async(prompt=message)
-        response_text = extract_text_from_message(result.message)
-        tool_result = extract_fallback_text(agent)
+        try:
+            result = await agent.invoke_async(prompt=message)
+            response_text = extract_text_from_message(result.message)
+            tool_result = extract_fallback_text(agent)
 
-        if tool_result:
-            has_book_card = "### 📖" in tool_result
-            if has_book_card and "### 📖" not in response_text:
-                if response_text.strip():
-                    response_text = f"{response_text.strip()}\n\n{tool_result}"
-                else:
+            if tool_result:
+                has_book_card = "### 📖" in tool_result
+                if has_book_card and "### 📖" not in response_text:
+                    if response_text.strip():
+                        response_text = f"{response_text.strip()}\n\n{tool_result}"
+                    else:
+                        response_text = tool_result
+                elif not response_text.strip():
                     response_text = tool_result
-            elif not response_text.strip():
-                response_text = tool_result
+        except Exception as e:
+            logger.exception(
+                "[BEDROCK_FALLBACK] chat invoke failed (session_id=%s, librarian_id=%s): %s",
+                session_id,
+                meta.get("librarian_id"),
+                e,
+            )
+            response_text = get_llm_fallback_message(meta.get("librarian_id"))
 
         if not switch_to_holder and self._librarian_tool is not None:
-            lib_res = await self._librarian_tool.consult(
-                message=message,
-                session_id=session_id,
-                librarian_id=meta.get("librarian_id"),
-                latitude=meta.get("latitude"),
-                longitude=meta.get("longitude"),
-            )
-            if lib_res.signals is not None and not signals_holder:
-                signals_holder.append(lib_res.signals)
-            if lib_res.switch_to is not None:
-                switch_to_holder.append(lib_res.switch_to)
+            try:
+                lib_res = await self._librarian_tool.consult(
+                    message=message,
+                    session_id=session_id,
+                    librarian_id=meta.get("librarian_id"),
+                    latitude=meta.get("latitude"),
+                    longitude=meta.get("longitude"),
+                )
+                if lib_res.signals is not None and not signals_holder:
+                    signals_holder.append(lib_res.signals)
+                if lib_res.switch_to is not None:
+                    switch_to_holder.append(lib_res.switch_to)
+            except Exception as e:
+                logger.warning("[BEDROCK_FALLBACK] librarian fallback consult failed: %s", e)
 
         switch_to: SwitchToSuggestion | None = switch_to_holder[0] if switch_to_holder else None
         signals: LibrarianSignals | None = signals_holder[0] if signals_holder else None
@@ -216,15 +232,19 @@ class OrchestratorService:
             await self._session_store.update_session_meta(session_id, librarian_id=librarian_id)
 
         if self._librarian_tool is not None:
-            meta = await self._session_store.get_session_meta(session_id)
-            lib_res = await self._librarian_tool.consult(
-                message=message,
-                session_id=session_id,
-                librarian_id=meta.get("librarian_id"),
-                latitude=latitude or meta.get("latitude"),
-                longitude=longitude or meta.get("longitude"),
-            )
-            return lib_res.signals, lib_res.switch_to
+            try:
+                meta = await self._session_store.get_session_meta(session_id)
+                lib_res = await self._librarian_tool.consult(
+                    message=message,
+                    session_id=session_id,
+                    librarian_id=meta.get("librarian_id"),
+                    latitude=latitude or meta.get("latitude"),
+                    longitude=longitude or meta.get("longitude"),
+                )
+                return lib_res.signals, lib_res.switch_to
+            except Exception as e:
+                logger.warning("[BEDROCK_FALLBACK] get_initial_meta failed: %s", e)
+                return None, None
         return None, None
 
     async def stream_chat(
@@ -266,11 +286,24 @@ class OrchestratorService:
         )
 
         full_response: list[str] = []
-        async for event in agent.stream_async(prompt=message):
-            chunk = extract_chunk_from_event(event)
-            if chunk:
-                full_response.append(chunk)
-                yield chunk
+        try:
+            async for event in agent.stream_async(prompt=message):
+                chunk = extract_chunk_from_event(event)
+                if chunk:
+                    full_response.append(chunk)
+                    yield chunk
+        except Exception as e:
+            logger.exception(
+                "[BEDROCK_FALLBACK] stream_chat failed (session_id=%s, librarian_id=%s): %s",
+                session_id,
+                meta.get("librarian_id"),
+                e,
+            )
+            fallback_chunk = get_llm_fallback_message(meta.get("librarian_id"))
+            if full_response:
+                fallback_chunk = f"\n\n{fallback_chunk}"
+            full_response.append(fallback_chunk)
+            yield fallback_chunk
 
         response_text = "".join(full_response)
         tool_result = extract_fallback_text(agent)

@@ -491,17 +491,20 @@
   - Task 3: `tests/unit/test_orchestrator_agent.py`, `tests/unit/test_librarian_agent.py`의 Sonnet 5 모델 ID 팩토리 검증 테스트 갱신. 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 126건 + Redis 통합 테스트 16건 전체 통과.
   - Task 4: `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
-## 2026-08-31 — K8s dev 환경 사서 에이전트(backend-librarian) 클러스터 내부 URL 연동 설정 [CLIAR-190]
-- 브랜치: `CLIAR-190-Dev-Librarian-Agent-Url-Config` (`origin/develop`에서 분기).
-- K8s dev 배포 환경에서 discovery 파드가 사서 에이전트 마이크로서비스(`backend-librarian`)와 클러스터 내부 통신할 수 있도록 DNS 주소를 설정했다:
-  - `k8s/overlays/dev/configmap-patch.yaml`의 `data:`에 `LIBRARIAN_AGENT_URL: "http://backend-librarian.dpyb-librarian-dev.svc.cluster.local"` 추가.
-  - 공통 `k8s/base/configmap.yaml`은 주석/빈 값으로 유지하여 향후 prod 환경 영향 격리.
-  - `kubectl kustomize k8s/overlays/dev` 빌드 유효성 검증 완료 및 정적 분석(`ruff`, `mypy`), 단위 테스트 126건 전체 통과.
-  - `.harness/STATE.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+## 2026-08-31 — Bedrock 장애·권한 예외 대응 백엔드 Graceful Fallback 및 사서 페르소나 안내 구축 완료 [CLIAR-193]
+- 브랜치: `CLIAR-193-Bedrock-Graceful-Fallback` (`origin/develop`에서 분기).
+- AWS Bedrock 호출 시 권한 부족(`AccessDeniedException`), 레이트 리밋(`ThrottlingException`), 일시적 네트워크 장애 등으로 인해 500 에러가 발생하고 프론트엔드가 자체 하드코딩 문구로 빠지던 문제를 해결하기 위해 백엔드 Graceful Fallback을 구축했다:
+  - Task 1: `src/discovery/domain/orchestrator/fallback.py` 신설 — 사서 페르소나(`librarian_id`: cat ⇄ stork)별 맞춤형 친절한 Fallback 안내 메시지 함수(`get_llm_fallback_message`) 구현.
+    - 블루: *"냥냥... 서재 책장을 정리하던 중에 통신 연결이 잠시 끊겼다냥 🐾 잠시 후에 다시 이야기해달라냥!"*
+    - 슈빌: *"두둥! 서재 사서실 통신에 일시적인 장애가 발생했습니다 🪶 잠시 후 다시 말씀해 주십시오."*
+  - Task 2: `src/discovery/application/orchestrator_service.py`의 `chat`, `stream_chat`, `get_initial_meta`에 try-except 예외 포착 및 fallback 배선 — Bedrock 장애 시 500 전파 대신 사서 fallback 메시지를 청크로 방출하고 200 스트림/응답으로 정상 종료, `[BEDROCK_FALLBACK]` 구조적 로깅.
+  - Task 3: `tests/unit/test_orchestrator_service.py`에 Bedrock 에러(AccessDenied, Throttling, Midstream Timeout) 시뮬레이션 테스트 4건 추가. 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 130건 전체 통과.
+  - Task 4: `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
 ### 다음 세션이 할 일
-1. `CLIAR-190` 커밋, push 및 `develop` 대상 PR 생성.
-2. 배포 후 dev 환경에서 discovery와 사서 에이전트(`backend-librarian`) 간의 클러스터 내부 HTTP 통신 및 페르소나/날씨 시그널 수신 E2E 검증.
+1. `CLIAR-193` 커밋, push 및 `develop` 대상 PR 생성.
+2. 인프라팀의 Sonnet 5 IAM 권한 승인 후 실호출 연동 검증.
+
 
 
 

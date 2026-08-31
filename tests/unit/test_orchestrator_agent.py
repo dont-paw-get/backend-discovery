@@ -32,11 +32,11 @@ def test_create_orchestrator_agent_uses_configured_model_id(
 def test_create_orchestrator_agent_passes_region_name(mocker: MockerFixture) -> None:
     bedrock_model_cls = mocker.patch("discovery.domain.orchestrator.agent.BedrockModel")
 
-    create_orchestrator_agent(model_id=CLAUDE_SONNET_5_MODEL_ID, region_name="ap-northeast-2")
+    create_orchestrator_agent(model_id=CLAUDE_SONNET_5_MODEL_ID, region_name="us-east-1")
 
     bedrock_model_cls.assert_called_once_with(
         model_id=CLAUDE_SONNET_5_MODEL_ID,
-        region_name="ap-northeast-2",
+        region_name="us-east-1",
         max_tokens=2048,
     )
 
@@ -46,13 +46,13 @@ def test_create_orchestrator_agent_with_prompt_caching(mocker: MockerFixture) ->
 
     create_orchestrator_agent(
         model_id=CLAUDE_SONNET_5_MODEL_ID,
-        region_name="ap-northeast-2",
+        region_name="us-east-1",
         enable_prompt_caching=True,
     )
 
     bedrock_model_cls.assert_called_once_with(
         model_id=CLAUDE_SONNET_5_MODEL_ID,
-        region_name="ap-northeast-2",
+        region_name="us-east-1",
         max_tokens=2048,
         cache_config=CacheConfig(strategy="auto"),
         cache_tools="default",
