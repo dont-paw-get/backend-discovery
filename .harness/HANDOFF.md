@@ -549,8 +549,21 @@
   - Task 5: `docs/api/decisions/0006-streaming-library-books-markdown-format.md` (ADR 0006) 작성 및 `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
 ### 다음 세션이 할 일
-1. `CLIAR-211` 커밋 생성, push 및 `develop` 대상 PR 생성.
-2. 배포 후 프론트엔드(`MarkdownRenderer.jsx`)에서 스트리밍 중 `### 📚` 블록 파싱 및 `[책 열기 ➔]` 버튼 상세 모달 연동 E2E 검증.
+1. `CLIAR-211` PR 머지 완료 확인.
+2. `CLIAR-213` 커밋 생성, push 및 `develop` 대상 PR 생성.
+
+## 2026-09-01 — 단순 날씨/일상 대화 의도 분기 및 과잉 도서 추천 방어 가드레일 [CLIAR-213]
+- 브랜치: `CLIAR-213-Weather-Casual-Chat-Guardrail` (`origin/develop`에서 분기)
+- 사용자가 "오늘 날씨 어때?", "안녕" 등 단순 날씨 확인이나 일상 대화를 건넸을 때, 오케스트레이터 LLM이 날씨/시그널 조회를 '도서 추천 파이프라인의 1단계'로 오인하여 불필요하게 2단계 `recommend_books`를 연쇄 실행(도서 2권 강제 추천)하던 문제를 해결했다:
+  - Task 1: `src/discovery/domain/orchestrator/agent.py`의 `CAT_ORCHESTRATOR_PROMPT` 및 `STORK_ORCHESTRATOR_PROMPT`에 `[단순 인사 / 날씨 질문 / 일상 대화]` 분기를 신설하여 날씨 확인 시 `consult_librarian`만 1회 호출하고 날씨/일상 멘트만 자연스럽게 전달하도록 가드레일 구축 (도서 추천 `recommend_books` 및 서재 조회 `search_my_library` 엄격 차단).
+  - Task 2: 기존 `[일반 도서 추천 질문]`을 `[명시적 도서 추천 질문]`("책 추천해줘", "오늘 날씨에 어울리는 책 골라줘" 등 명시적 요청 시에만 연쇄 실행)으로 명확히 한정.
+  - Task 3: `tests/unit/test_orchestrator_agent.py`에 날씨/일상 대화 및 명시적 추천 분기 지침 존재 검증 assert 추가. 단위 테스트 143건 및 정적 분석(`ruff`, `mypy`) 100% 통과.
+  - Task 4: `.harness/STATE.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+
+### 다음 세션이 할 일
+1. `CLIAR-213` 커밋 생성, push 및 `develop` 대상 PR 생성.
+2. dev 배포 후 CloudShell 및 프론트엔드에서 "오늘 날씨 어때?" 질의 시 도서 추천 카드 없이 날씨/일상 대화만 깔끔하게 응답하는지 검증.
+
 
 
 

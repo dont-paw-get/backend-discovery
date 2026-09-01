@@ -131,7 +131,12 @@ def test_get_orchestrator_system_prompt_by_librarian_id() -> None:
     assert "블루" in stork_prompt
     assert "### 📚" in stork_prompt
 
-    # 3. 고정된 특정 도서 판박이 예시 텍스트(앵무새 복붙 유발) 부재 검증
+    # 3. 날씨/일상 대화 및 명시적 도서 추천 분기 지침 존재 검증
+    for prompt in (cat_prompt, stork_prompt):
+        assert "날씨 질문 / 일상 대화" in prompt
+        assert "명시적 도서 추천 질문" in prompt
+
+    # 4. 고정된 특정 도서 판박이 예시 텍스트(앵무새 복붙 유발) 부재 검증
     for prompt in (cat_prompt, stork_prompt):
         assert "성공하는 인생의 비밀" not in prompt
         assert "이수진 저" not in prompt
