@@ -127,3 +127,10 @@ def test_get_orchestrator_system_prompt_by_librarian_id() -> None:
     assert "두둥" in stork_prompt
     assert "고양이 말투" in stork_prompt
     assert "블루" in stork_prompt
+
+    # 3. 고정된 특정 도서 판박이 예시 텍스트(앵무새 복붙 유발) 부재 검증
+    for prompt in (cat_prompt, stork_prompt):
+        assert "성공하는 인생의 비밀" not in prompt
+        assert "이수진 저" not in prompt
+        assert "88% 진행률" not in prompt
+
