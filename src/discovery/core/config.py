@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     librarian_default_id: str = "cat"
     librarian_http_timeout_seconds: float = 20.0
     initial_meta_timeout_seconds: float = 1.5
+    enable_prompt_caching: bool = False
     library_api_url: str = (
         "http://k8s-dpybbook-backendb-d17a725d36-1113312703.ap-northeast-2.elb.amazonaws.com"
     )

@@ -66,7 +66,7 @@ async def test_orchestrator_service_chat(mocker: MockerFixture) -> None:
 
     assert response == "안녕하세요! 오케스트레이터 응답입니다."
     assert switch_to is None
-    assert signals is None
+    assert signals is not None
     assert library_books is None
 
     mock_session_store.get_history.assert_awaited_once_with("sess-orch-1")
@@ -76,6 +76,7 @@ async def test_orchestrator_service_chat(mocker: MockerFixture) -> None:
         librarian_id="cat",
         tools=[mock_tool],
         messages=[{"role": "user", "content": [{"text": "이전 대화"}]}],
+        enable_prompt_caching=False,
     )
     mock_agent.invoke_async.assert_awaited_once_with(prompt="도서 추천해줘")
 
@@ -89,6 +90,51 @@ async def test_orchestrator_service_chat(mocker: MockerFixture) -> None:
             ),
         ]
     )
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_service_passes_enable_prompt_caching_true(
+    mocker: MockerFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+        enable_prompt_caching=True,
+    )
+
+    mock_agent = mocker.MagicMock()
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": "응답"}]}
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+
+    mock_create_agent = mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    await service.chat(session_id="sess-caching-true", message="질문")
+
+    mock_create_agent.assert_called_once_with(
+        model_id=settings.orchestrator_model_id,
+        region_name=settings.aws_region,
+        librarian_id="cat",
+        tools=[],
+        messages=None,
+        enable_prompt_caching=True,
+    )
+
 
 
 @pytest.mark.asyncio
@@ -829,13 +875,12 @@ async def test_get_initial_meta_handles_timeout_gracefully(
     )
 
     with caplog.at_level(logging.WARNING):
-        signals, switch_to = await service.get_initial_meta(
+        lib_res = await service.get_initial_meta(
             session_id="sess-timeout",
             message="추천해줘",
         )
 
-    assert signals is None
-    assert switch_to is None
+    assert lib_res is None
     assert "[INITIAL_META_TIMEOUT]" in caplog.text
 
 
@@ -865,13 +910,12 @@ async def test_get_initial_meta_handles_exception_gracefully(
     )
 
     with caplog.at_level(logging.WARNING):
-        signals, switch_to = await service.get_initial_meta(
+        lib_res = await service.get_initial_meta(
             session_id="sess-err",
             message="추천해줘",
         )
 
-    assert signals is None
-    assert switch_to is None
+    assert lib_res is None
     assert "[INITIAL_META_FALLBACK]" in caplog.text
 
 
@@ -910,12 +954,265 @@ async def test_get_initial_meta_returns_signals_and_switch_to_on_success(
         librarian_tool=mock_librarian_tool,
     )
 
-    signals, switch_to = await service.get_initial_meta(
+    lib_res = await service.get_initial_meta(
         session_id="sess-ok",
         message="추천해줘",
     )
 
-    assert signals == mock_signals
-    assert switch_to == mock_switch_to
+    assert lib_res == mock_res
+    assert lib_res.signals == mock_signals
+    assert lib_res.switch_to == mock_switch_to
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_reuses_prefetched_librarian_and_skips_extra_consult(
+    mocker: MockerFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+        enable_prompt_caching=True,
+    )
+
+    mock_signals = LibrarianSignals(
+        weather=WeatherSignal(weather="맑음", is_rainy=False),
+        mood="Energetic",
+    )
+    mock_switch_to = SwitchToSuggestion(id="stork", name="황새 사서", genres=["SF"])
+    prefetched_res = LibrarianResponse(
+        message="고양이 사서 인사",
+        signals=mock_signals,
+        switch_to=mock_switch_to,
+    )
+
+    mock_librarian_tool = mocker.MagicMock()
+    mock_librarian_tool.consult = AsyncMock(return_value=prefetched_res)
+
+    # Use real ConsultLibrarianTool to verify as_tool prefetched reuse
+    from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianTool
+
+    real_librarian_tool = ConsultLibrarianTool(settings=settings)
+    real_librarian_tool.consult = AsyncMock(return_value=prefetched_res)  # type: ignore[method-assign]
+
+    async def fake_stream_async(prompt: str) -> Any:
+        # Simulate agent invoking tool once
+        yield {"data": "추천 "}
+        yield {"data": "완료!"}
+
+    mock_agent = mocker.MagicMock()
+    mock_agent.stream_async = fake_stream_async
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        librarian_tool=real_librarian_tool,
+    )
+
+    chunks = []
+    async for chunk in service.stream_chat(
+        session_id="sess-prefetch",
+        message="SF 소설 추천해줘",
+        prefetched_librarian=prefetched_res,
+    ):
+        chunks.append(chunk)
+
+    assert "".join(chunks) == "추천 완료!"
+    # consult should NOT be called at tail because prefetched_librarian was provided
+    assert real_librarian_tool.consult.await_count == 0
+    # session meta should be updated with switch_to from prefetched
+    mock_session_store.update_session_meta.assert_awaited_with(
+        "sess-prefetch", librarian_id="stork"
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_skips_tail_consult_if_consult_called_during_turn(
+    mocker: MockerFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_librarian_tool = mocker.MagicMock()
+    mock_librarian_tool.consult = AsyncMock()
+
+    # Tool execution simulates triggering on_librarian_response without switch_to
+    captured_on_response = None
+
+    def fake_as_tool(**kwargs: Any) -> Any:
+        nonlocal captured_on_response
+        captured_on_response = kwargs.get("on_response")
+
+        async def fake_tool_func(message: str) -> str:
+            return "일반 대화 응답"
+
+        return fake_tool_func
+
+    mock_librarian_tool.as_tool.side_effect = fake_as_tool
+
+    mock_agent = mocker.MagicMock()
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": "사서 응답 완료"}]}
+
+    async def fake_invoke_async(prompt: str) -> Any:
+        if captured_on_response:
+            captured_on_response(
+                LibrarianResponse(
+                    message="일반 대화 응답",
+                    signals=None,
+                    switch_to=None,
+                )
+            )
+        return mock_result
+
+    mock_agent.invoke_async = fake_invoke_async
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        librarian_tool=mock_librarian_tool,
+    )
+
+    response, switch_to, signals, library_books = await service.chat(
+        session_id="sess-dedup",
+        message="안녕",
+    )
+
+    assert response == "사서 응답 완료"
+    # consult should NOT be called at tail because tool was already called during invoke_async
+    assert mock_librarian_tool.consult.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_chat_executes_tail_consult_if_not_called_during_turn(
+    mocker: MockerFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    fallback_res = LibrarianResponse(
+        message="폴백 응답",
+        signals=None,
+        switch_to=None,
+    )
+    mock_librarian_tool = mocker.MagicMock()
+    mock_librarian_tool.consult = AsyncMock(return_value=fallback_res)
+
+    mock_agent = mocker.MagicMock()
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": "내 서재 조회 완료"}]}
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        librarian_tool=mock_librarian_tool,
+    )
+
+    response, switch_to, signals, library_books = await service.chat(
+        session_id="sess-library-only",
+        message="나 책 뭐 있어?",
+    )
+
+    assert response == "내 서재 조회 완료"
+    # consult SHOULD be called at tail because tool was never called during invoke_async
+    assert mock_librarian_tool.consult.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_emits_observability_metrics(
+    mocker: MockerFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_log = mocker.patch("discovery.application.orchestrator_service.log_agent_metrics")
+
+    mock_metrics = MagicMock()
+    mock_metrics.get_summary.return_value = {"total_cycles": 1, "accumulated_usage": {}}
+    mock_result_obj = MagicMock()
+    mock_result_obj.metrics = mock_metrics
+
+    async def fake_stream_async(prompt: str) -> Any:
+        yield {"data": "첫번째 청크"}
+        yield {"data": " 두번째 청크"}
+        yield {"result": mock_result_obj}
+
+    mock_agent = mocker.MagicMock()
+    mock_agent.stream_async = fake_stream_async
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    chunks = []
+    async for chunk in service.stream_chat(session_id="sess-obs", message="테스트 메시지"):
+        chunks.append(chunk)
+
+    assert "".join(chunks) == "첫번째 청크 두번째 청크"
+    mock_log.assert_called_once()
+    call_kwargs = mock_log.call_args.kwargs
+    assert call_kwargs["phase"] == "orchestrator"
+    assert call_kwargs["session_id"] == "sess-obs"
+    assert call_kwargs["mode"] == "stream"
+    assert call_kwargs["message_length"] == len("테스트 메시지")
+    assert call_kwargs["direct_metrics"]["ttfb_ms"] is not None
+    assert call_kwargs["direct_metrics"]["total_duration_ms"] is not None
+
+
 
 

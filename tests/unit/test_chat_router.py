@@ -212,6 +212,7 @@ async def test_chat_accepts_null_session_id() -> None:
 @pytest.mark.asyncio
 async def test_chat_streaming_response() -> None:
     from discovery.domain.orchestrator.librarian_response import (
+        LibrarianResponse,
         LibrarianSignals,
         SwitchToSuggestion,
         WeatherSignal,
@@ -224,6 +225,7 @@ async def test_chat_streaming_response() -> None:
         latitude: float | None = None,
         longitude: float | None = None,
         auth_token: str | None = None,
+        prefetched_librarian: LibrarianResponse | None = None,
     ) -> AsyncGenerator[str, None]:
         chunks = ["사서 ", "추천 ", "도서입니다."]
         for chunk in chunks:
@@ -236,10 +238,15 @@ async def test_chat_streaming_response() -> None:
         genre_focus=["소설", "에세이"],
     )
     mock_switch_to = SwitchToSuggestion(id="stork", name="황새 사서", icon="🪶")
+    mock_res = LibrarianResponse(
+        message="사서 안내",
+        signals=mock_signals,
+        switch_to=mock_switch_to,
+    )
 
     mock_service = MagicMock()
     mock_service.stream_chat = fake_stream_chat
-    mock_service.get_initial_meta = AsyncMock(return_value=(mock_signals, mock_switch_to))
+    mock_service.get_initial_meta = AsyncMock(return_value=mock_res)
 
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
@@ -257,6 +264,46 @@ async def test_chat_streaming_response() -> None:
         assert response.headers.get("x-switch-to") is not None
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_chat_streaming_response_falls_back_to_local_signals_when_prefetch_none() -> None:
+    from discovery.domain.orchestrator.librarian_response import LibrarianResponse
+
+    async def fake_stream_chat(
+        session_id: str,
+        message: str,
+        librarian_id: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        auth_token: str | None = None,
+        prefetched_librarian: LibrarianResponse | None = None,
+    ) -> AsyncGenerator[str, None]:
+        yield "스트리밍 텍스트"
+
+    mock_service = MagicMock()
+    mock_service.stream_chat = fake_stream_chat
+    # Prefetch timed out or failed
+    mock_service.get_initial_meta = AsyncMock(return_value=None)
+
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={"session_id": "sess-stream-fallback", "message": "안녕", "stream": True},
+            )
+
+        assert response.status_code == 200
+        assert response.text == "스트리밍 텍스트"
+        assert response.headers.get("x-session-id") == "sess-stream-fallback"
+        # X-Signals should still be populated via local fallback!
+        assert response.headers.get("x-signals") is not None
+        assert response.headers.get("x-switch-to") is None
+    finally:
+        app.dependency_overrides.clear()
+
 
 
 @pytest.mark.asyncio
