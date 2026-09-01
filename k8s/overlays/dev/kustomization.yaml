@@ -18,7 +18,7 @@ replicas:
 images:
   - name: backend-discovery
     newName: 594532711953.dkr.ecr.ap-northeast-2.amazonaws.com/dpyb-dev/dpyb-discovery
-    newTag: 227cc285712e5b59cf3532a709ef059e6d3b96b4
+    newTag: 82667bb2d160f354c199c54b3e64714a1618195b
 
 # 개발 환경에서 달라지는 설정값만 덮어씀
 patches:
