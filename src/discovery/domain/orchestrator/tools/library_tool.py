@@ -1,6 +1,7 @@
 """서재 도서 CRUD 서비스(backend-book)와 HTTP로 통신하는 서재 검색 도구."""
 
 import logging
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -140,11 +141,13 @@ class SearchMyLibraryTool:
     def as_tool(
         self,
         auth_token: str | None = None,
+        on_books_fetched: Callable[[list[LibraryBookItem]], None] | None = None,
     ) -> Any:
         """Strands 오케스트레이터 에이전트에 등록할 @tool 함수를 반환한다.
 
         인증 토큰은 서비스 레이어에서 클로저로 주입되어
         LLM은 검색 키워드 및 조건만 인자로 전달한다 (IDOR 방지).
+        조회된 도서 목록은 on_books_fetched 콜백을 통해 서비스 레이어로 안전하게 수집된다.
         """
 
         @tool(name="search_my_library")
@@ -172,6 +175,11 @@ class SearchMyLibraryTool:
                 reading_status=reading_status or None,
                 auth_token=auth_token,
             )
+            if on_books_fetched is not None and books:
+                try:
+                    on_books_fetched(books)
+                except Exception:
+                    logger.exception("Failed to execute on_books_fetched callback")
             return format_books_for_llm(books, query=query)
 
         return search_my_library_tool

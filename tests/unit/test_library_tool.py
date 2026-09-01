@@ -154,26 +154,32 @@ async def test_search_http_error_graceful_fallback(
 @pytest.mark.asyncio
 async def test_as_tool_execution(settings: Settings, mocker: MockerFixture) -> None:
     tool = SearchMyLibraryTool(settings=settings)
-    mocker.patch.object(
-        tool,
-        "search",
-        return_value=[
-            LibraryBookItem(
-                book_id=1,
-                title="살인자의 기억법",
-                author="김영하",
-                genre="MYSTERY",
-                reading_status="READING",
-                progress=50,
-            )
-        ],
+    mock_book = LibraryBookItem(
+        book_id=101,
+        title="살인자의 기억법",
+        author="김영하",
+        genre="MYSTERY",
+        reading_status="READING",
+        progress=50,
     )
+    mocker.patch.object(tool, "search", return_value=[mock_book])
 
-    strands_tool_fn = tool.as_tool(auth_token="jwt-abc-123")
+    fetched_holder: list[list[LibraryBookItem]] = []
+
+    def on_fetched(books: list[LibraryBookItem]) -> None:
+        fetched_holder.append(books)
+
+    strands_tool_fn = tool.as_tool(auth_token="jwt-abc-123", on_books_fetched=on_fetched)
     result_text = await strands_tool_fn(query="살인자", author="", reading_status="")
 
     assert "[내 서재 도서 목록] (총 1권)" in result_text
     assert "살인자의 기억법" in result_text
+    # LLM용 포맷팅 텍스트에는 book_id가 노출되지 않아야 함 (사용자 대화문 오염 방지)
+    assert "101" not in result_text
+    assert "도서 ID" not in result_text
+    # 콜백에는 book_id가 온전히 포함된 원본 객체가 수집되어야 함
+    assert len(fetched_holder) == 1
+    assert fetched_holder[0][0].book_id == 101
 
 
 @pytest.mark.asyncio

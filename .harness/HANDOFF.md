@@ -512,9 +512,21 @@
   - Task 3: `tests/unit/test_library_tool.py`에 Spring Page `content` 응답, 순수 배열 응답, `data` 래핑 응답, `page=0&size=100` 파라미터 전달 및 소수점 progress 반올림 단위 테스트 4건 추가.
   - Task 4: 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 137건 전체 통과. `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
+## 2026-08-31 — 내 서재 도서 구조화 데이터(library_books) 응답 및 "책 열기" 연동 계약 구축 완료 [CLIAR-196]
+- 브랜치: `CLIAR-196-Library-Books-Structured-Response` (`origin/develop`에서 분기)
+- 서재 조회 시 마크다운 텍스트 파싱에 의존하지 않고, 구조화된 도서 DTO(`LibraryBookCard`) 및 응답 필드(`library_books`), 스트리밍 헤더(`X-Library-Books`)를 통해 클라이언트에 `book_id` 및 메타데이터를 직접 전달하여 프론트엔드가 '책 열기' UI를 완벽하게 구현할 수 있도록 계약을 수립했다:
+  - Task 1: `docs/api/openapi.yaml` 계약 갱신, `src/discovery/api/schemas/chat.py`에 클라이언트 전용 `LibraryBookCard` 모델(`book_id`, `title`, `author`, `reading_status`, `progress`) 정의, `ChatResponse`에 `library_books: list[LibraryBookCard] | None` 추가 및 `src/discovery/main.py` CORS `expose_headers`에 `"X-Library-Books"` 등록.
+  - Task 2: `src/discovery/domain/orchestrator/tools/library_tool.py`의 `format_books_for_llm`에는 `book_id`를 노출하지 않아 LLM 대화문 오염을 방지하고, `SearchMyLibraryTool.as_tool`에 `on_books_fetched` 콜백을 배선하여 도서 식별자 원본 객체를 서비스 레이어로 전달.
+  - Task 3: `src/discovery/application/orchestrator_service.py`의 `_build_agent`, `chat`, `stream_chat`에서 서재 도구 실행 시 수집된 도서 목록을 `list[LibraryBookCard]`로 매핑하여 `ChatResponse.library_books`로 방출.
+  - Task 4: `src/discovery/domain/orchestrator/agent.py`의 `CAT_ORCHESTRATOR_PROMPT` 및 `STORK_ORCHESTRATOR_PROMPT`의 서재 안내 지침을 "콜론/줄바꿈/볼드체 나열 금지, 자연스러운 한두 문장 대화문 서술"로 정돈하여 프론트엔드 파서 오작동(엉뚱한 등록 버튼 3개 생성)을 원천 차단.
+  - Task 5: `tests/unit/test_chat_router.py`, `tests/unit/test_orchestrator_service.py`, `tests/unit/test_library_tool.py`, `tests/unit/test_orchestrator_routing.py` 단위 테스트 갱신 및 신설. 복합 추천 시 `library_books`가 포함되는 1차 알려진 동작 명시 회귀 테스트 추가. 정적 분석(`ruff`, `mypy`) 및 단위 테스트 139건 100% 통과.
+  - Task 6: `docs/api/decisions/0005-library-books-card-response.md` (ADR 0005) 작성 및 `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+
 ### 다음 세션이 할 일
-1. `CLIAR-195` 추가 커밋 및 push.
-2. 배포 후 프론트엔드에서 내 서재 도서 조회 및 추천 정상 응답 확인.
+1. `CLIAR-196` 커밋 생성, push 및 `develop` 대상 PR 생성.
+2. 배포 후 프론트엔드에서 내 서재 도서 조회 시 사서의 자연스러운 한두 문장 대화문 표출 및 `response.library_books` 기반 "책 열기" 버튼 연동 확인.
+3. 2차 후속 과제(복합 추천 시 `library_books` 노출 억제) 검토.
+
 
 
 

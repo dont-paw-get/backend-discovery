@@ -60,13 +60,14 @@ async def test_orchestrator_service_chat(mocker: MockerFixture) -> None:
         tools=[mock_tool],
     )
 
-    response, switch_to, signals = await service.chat(
+    response, switch_to, signals, library_books = await service.chat(
         session_id="sess-orch-1", message="도서 추천해줘"
     )
 
     assert response == "안녕하세요! 오케스트레이터 응답입니다."
     assert switch_to is None
     assert signals is None
+    assert library_books is None
 
     mock_session_store.get_history.assert_awaited_once_with("sess-orch-1")
     mock_create_agent.assert_called_once_with(
@@ -163,7 +164,7 @@ async def test_orchestrator_service_chat_with_coordinates_and_switch_to(
         librarian_tool=mock_librarian_tool,
     )
 
-    response, switch_to, signals = await service.chat(
+    response, switch_to, signals, library_books = await service.chat(
         session_id="sess-switch-1",
         message="시 추천해줘",
         latitude=37.5665,
@@ -174,6 +175,7 @@ async def test_orchestrator_service_chat_with_coordinates_and_switch_to(
     assert switch_to is not None
     assert switch_to.id == "stork"
     assert switch_to.name == "황새 사서"
+    assert library_books is None
 
     # 좌표 저장 및 사서 switch_to 갱신 확인
     mock_session_store.update_session_meta.assert_has_awaits(
@@ -399,6 +401,8 @@ async def test_orchestrator_service_stream_chat_appends_tool_result_when_intro_o
 
 @pytest.mark.asyncio
 async def test_orchestrator_service_chat_with_library_tool(mocker: MockerFixture) -> None:
+    from discovery.domain.orchestrator.library_response import LibraryBookItem
+
     mock_session_store = mocker.MagicMock()
     mock_session_store.get_history = AsyncMock(return_value=[])
     mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
@@ -412,7 +416,25 @@ async def test_orchestrator_service_chat_with_library_tool(mocker: MockerFixture
     )
 
     mock_library_tool = mocker.MagicMock()
-    mock_library_tool.as_tool.return_value = mocker.MagicMock()
+    mock_book_item = LibraryBookItem(
+        book_id=101,
+        title="살인자의 기억법",
+        author="김영하",
+        reading_status="READING",
+        progress=50,
+    )
+
+    def fake_library_as_tool(**kwargs: Any) -> Any:
+        on_books = kwargs.get("on_books_fetched")
+
+        async def fake_tool_func(*args: Any, **tool_kwargs: Any) -> str:
+            if on_books:
+                on_books([mock_book_item])
+            return "서재 도서 조회 완료"
+
+        return fake_tool_func
+
+    mock_library_tool.as_tool.side_effect = fake_library_as_tool
 
     mock_agent = mocker.MagicMock()
     mock_result = mocker.MagicMock()
@@ -420,9 +442,16 @@ async def test_orchestrator_service_chat_with_library_tool(mocker: MockerFixture
         "role": "assistant",
         "content": [{"text": "서재에 살인자의 기억법이 있습니다냥 🐾"}],
     }
-    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
 
-    mock_create_agent = mocker.patch(
+    async def fake_invoke(prompt: str) -> Any:
+        # LLM 실행 중 도구 호출 시뮬레이션
+        tool_fn = mock_library_tool.as_tool.call_args[1]["on_books_fetched"]
+        tool_fn([mock_book_item])
+        return mock_result
+
+    mock_agent.invoke_async.side_effect = fake_invoke
+
+    mocker.patch(
         "discovery.application.orchestrator_service.create_orchestrator_agent",
         return_value=mock_agent,
     )
@@ -433,16 +462,107 @@ async def test_orchestrator_service_chat_with_library_tool(mocker: MockerFixture
         library_tool=mock_library_tool,
     )
 
-    response, switch_to, signals = await service.chat(
+    response, switch_to, signals, library_books = await service.chat(
         session_id="sess-lib-1",
         message="내 서재 책 있어?",
         auth_token="Bearer test-jwt-xyz",
     )
 
     assert "살인자의 기억법이 있습니다냥" in response
-    mock_library_tool.as_tool.assert_called_once_with(auth_token="Bearer test-jwt-xyz")
-    mock_create_agent.assert_called_once()
-    assert mock_library_tool.as_tool.return_value in mock_create_agent.call_args[1]["tools"]
+    assert library_books is not None
+    assert len(library_books) == 1
+    assert library_books[0].book_id == 101
+    assert library_books[0].title == "살인자의 기억법"
+    assert library_books[0].progress == 50
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_service_chat_hybrid_recommendation_populates_library_books(
+    mocker: MockerFixture,
+) -> None:
+    """[1차 구현 알려진 동작 회귀 테스트]
+    복합 추천(서재 도서 조회 → 도서 추천 연쇄) 시나리오에서도 search_my_library가 호출되면
+    1차 구현 사양에 따라 library_books가 채워져 반환됨을 명시 검증한다.
+    (추후 2차 과제에서 '추천 턴 시 카드 억제' 구현 시 이 테스트를 분기/갱신함).
+    """
+    from discovery.domain.orchestrator.library_response import LibraryBookItem
+
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_library_tool = mocker.MagicMock()
+    mock_book_item = LibraryBookItem(
+        book_id=202,
+        title="클린 아키텍처",
+        author="로버트 마틴",
+        reading_status="COMPLETED",
+        progress=100,
+    )
+
+    def fake_library_as_tool(**kwargs: Any) -> Any:
+        on_books = kwargs.get("on_books_fetched")
+
+        async def fake_tool_func(*args: Any, **tool_kwargs: Any) -> str:
+            if on_books:
+                on_books([mock_book_item])
+            return "서재 도서 조회 완료"
+
+        return fake_tool_func
+
+    mock_library_tool.as_tool.side_effect = fake_library_as_tool
+
+    mock_agent = mocker.MagicMock()
+    mock_result = mocker.MagicMock()
+    mock_result.message = {
+        "role": "assistant",
+        "content": [
+            {
+                "text": (
+                    "서재에 있는 클린 아키텍처와 비슷한 책을 추천해드린다냥!\n\n"
+                    "### 📖 리팩터링 2판\n- **저자**: 마틴 파울러"
+                )
+            }
+        ],
+    }
+
+    async def fake_invoke(prompt: str) -> Any:
+        tool_fn = mock_library_tool.as_tool.call_args[1]["on_books_fetched"]
+        tool_fn([mock_book_item])
+        return mock_result
+
+    mock_agent.invoke_async.side_effect = fake_invoke
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        library_tool=mock_library_tool,
+    )
+
+    response, switch_to, signals, library_books = await service.chat(
+        session_id="sess-hybrid-1",
+        message="내 서재에 있는 책이랑 비슷한 새로운 책 추천해줘",
+        auth_token="Bearer test-jwt-xyz",
+    )
+
+    assert "리팩터링 2판" in response
+    # 1차 구현에서는 도구가 호출되었으므로 library_books가 채워져 있음 (알려진 1차 동작)
+    assert library_books is not None
+    assert len(library_books) == 1
+    assert library_books[0].book_id == 202
 
 
 @pytest.mark.asyncio
@@ -479,12 +599,13 @@ async def test_orchestrator_service_chat_handles_bedrock_exception_gracefully_fo
     )
 
     with caplog.at_level(logging.ERROR):
-        response, switch_to, signals = await service.chat(
+        response, switch_to, signals, library_books = await service.chat(
             session_id="sess-err-cat",
             message="책 추천해줘",
         )
 
     assert "냥냥... 서재 책장을 정리하던 중에 통신 연결이 잠시 끊겼다냥 🐾" in response
+    assert library_books is None
     assert "[BEDROCK_FALLBACK]" in caplog.text
     mock_session_store.append_turn.assert_has_awaits(
         [
@@ -525,12 +646,13 @@ async def test_orchestrator_service_chat_handles_bedrock_exception_gracefully_fo
     )
 
     with caplog.at_level(logging.ERROR):
-        response, switch_to, signals = await service.chat(
+        response, switch_to, signals, library_books = await service.chat(
             session_id="sess-err-stork",
             message="경제 서적 추천해줘",
         )
 
     assert "두둥! 서재 사서실 통신에 일시적인 장애가 발생했습니다 🪶" in response
+    assert library_books is None
     assert "[BEDROCK_FALLBACK]" in caplog.text
     mock_session_store.append_turn.assert_has_awaits(
         [

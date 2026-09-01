@@ -67,7 +67,7 @@ async def chat(
             headers=headers,
         )
 
-    answer, switch_to, signals = await service.chat(
+    answer, switch_to, signals, library_books = await service.chat(
         session_id=session_id,
         message=request_body.message,
         librarian_id=request_body.librarian_id,
@@ -80,4 +80,5 @@ async def chat(
         message=answer,
         switch_to=switch_to,
         signals=signals,
+        library_books=library_books,
     )

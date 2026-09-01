@@ -53,6 +53,10 @@ paths:
               schema:
                 type: string
               description: 다른 사서 페르소나 전환 제안 URL 인코딩 JSON 문자열 (스트리밍 시 제공)
+            X-Library-Books:
+              schema:
+                type: string
+              description: 조회된 서재 도서 목록 URL 인코딩 JSON 문자열 (LibraryBookCard 배열, 스트리밍 시 제공)
           content:
             application/json:
               schema:
@@ -225,6 +229,44 @@ components:
         signals:
           $ref: '#/components/schemas/LibrarianSignals'
           description: 사서 분석 신호 (날씨, 시간대, 무드, 장르 포커스) (선택)
+        library_books:
+          type: array
+          items:
+            $ref: '#/components/schemas/LibraryBookCard'
+          nullable: true
+          description: 조회된 사용자 서재 도서 카드 목록 (선택)
+
+    LibraryBookCard:
+      type: object
+      required:
+        - book_id
+        - title
+      properties:
+        book_id:
+          oneOf:
+            - type: integer
+            - type: string
+          description: 도서 식별자
+          example: 101
+        title:
+          type: string
+          description: 도서 제목
+          example: 성공하는 인생의 비밀
+        author:
+          type: string
+          nullable: true
+          description: 저자명
+          example: 이수진
+        reading_status:
+          type: string
+          nullable: true
+          description: 독서 상태 (READING, COMPLETED, WISH 등)
+          example: READING
+        progress:
+          type: integer
+          nullable: true
+          description: 독서 진행률 (0~100 %)
+          example: 88
 
     StandardGenre:
       type: string

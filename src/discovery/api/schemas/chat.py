@@ -1,13 +1,34 @@
 """대화(Chat) API 요청 및 응답 Pydantic 스키마."""
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from discovery.domain.orchestrator.librarian_response import (
     LibrarianSignals,
     SwitchToSuggestion,
 )
 
-__all__ = ["ChatRequest", "ChatResponse", "SwitchToSuggestion"]
+__all__ = ["ChatRequest", "ChatResponse", "LibraryBookCard", "SwitchToSuggestion"]
+
+
+class LibraryBookCard(BaseModel):
+    """서재 도서 카드 응답 스키마 (클라이언트 '책 열기' 연동용)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    book_id: int | str = Field(
+        validation_alias=AliasChoices("book_id", "bookId"),
+        description="도서 식별자",
+        examples=[101],
+    )
+    title: str = Field(description="도서 제목", examples=["성공하는 인생의 비밀"])
+    author: str | None = Field(default=None, description="저자명", examples=["이수진"])
+    reading_status: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("reading_status", "readingStatus"),
+        description="독서 상태 (READING, COMPLETED, WISH 등)",
+        examples=["READING"],
+    )
+    progress: int | None = Field(default=None, description="독서 진행률 (0~100 %)", examples=[88])
 
 
 class ChatRequest(BaseModel):
@@ -69,4 +90,9 @@ class ChatResponse(BaseModel):
     signals: LibrarianSignals | None = Field(
         default=None,
         description="사서 분석 신호 (날씨, 시간대, 무드, 장르 포커스).",
+    )
+    library_books: list[LibraryBookCard] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("library_books", "libraryBooks"),
+        description="조회된 사용자 서재 도서 카드 목록 (선택).",
     )

@@ -18,7 +18,7 @@ from discovery.main import app
 async def test_chat_json_response() -> None:
     mock_service = MagicMock()
     mock_service.chat = AsyncMock(
-        return_value=("추천해드리는 도서는 '어린 왕자'입니다.", None, None)
+        return_value=("추천해드리는 도서는 '어린 왕자'입니다.", None, None, None)
     )
 
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
@@ -41,6 +41,7 @@ async def test_chat_json_response() -> None:
         assert data["message"] == "추천해드리는 도서는 '어린 왕자'입니다."
         assert data["switch_to"] is None
         assert data["signals"] is None
+        assert data["library_books"] is None
         mock_service.chat.assert_awaited_once_with(
             session_id="sess-test-1",
             message="동화책 추천해줘",
@@ -54,10 +55,54 @@ async def test_chat_json_response() -> None:
 
 
 @pytest.mark.asyncio
+async def test_chat_json_response_with_library_books() -> None:
+    from discovery.api.schemas.chat import LibraryBookCard
+
+    mock_service = MagicMock()
+    mock_books = [
+        LibraryBookCard(
+            book_id=101,
+            title="성공하는 인생의 비밀",
+            author="이수진",
+            reading_status="READING",
+            progress=88,
+        )
+    ]
+    mock_service.chat = AsyncMock(
+        return_value=(
+            "서재에 읽고 계신 책이 한 권 있습니다.",
+            None,
+            None,
+            mock_books,
+        )
+    )
+
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={"session_id": "sess-test-lib", "message": "내 서재 책 보여줘"},
+                headers={"Authorization": "Bearer token-123"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["library_books"] is not None
+        assert len(data["library_books"]) == 1
+        assert data["library_books"][0]["book_id"] == 101
+        assert data["library_books"][0]["title"] == "성공하는 인생의 비밀"
+        assert data["library_books"][0]["progress"] == 88
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_chat_passes_authorization_header() -> None:
     mock_service = MagicMock()
     mock_service.chat = AsyncMock(
-        return_value=("서재에 살인자의 기억법이 있습니다.", None, None)
+        return_value=("서재에 살인자의 기억법이 있습니다.", None, None, None)
     )
 
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
@@ -96,6 +141,7 @@ async def test_chat_json_response_with_switch_to() -> None:
             "황새 사서에게 안내해 드릴게요.",
             SwitchToSuggestion(id="stork", name="황새 사서", icon="🪶", genres=["시"]),
             None,
+            None,
         )
     )
 
@@ -122,7 +168,7 @@ async def test_chat_json_response_with_switch_to() -> None:
 @pytest.mark.asyncio
 async def test_chat_generates_session_id_if_empty() -> None:
     mock_service = MagicMock()
-    mock_service.chat = AsyncMock(return_value=("답변입니다.", None, None))
+    mock_service.chat = AsyncMock(return_value=("답변입니다.", None, None, None))
 
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
@@ -144,7 +190,7 @@ async def test_chat_generates_session_id_if_empty() -> None:
 @pytest.mark.asyncio
 async def test_chat_accepts_null_session_id() -> None:
     mock_service = MagicMock()
-    mock_service.chat = AsyncMock(return_value=("답변입니다.", None, None))
+    mock_service.chat = AsyncMock(return_value=("답변입니다.", None, None, None))
 
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
@@ -233,7 +279,7 @@ async def test_chat_validation_error_on_empty_message() -> None:
 @pytest.mark.asyncio
 async def test_chat_validation_accepts_up_to_2000_chars() -> None:
     mock_service = MagicMock()
-    mock_service.chat = AsyncMock(return_value=("2000자 정상 처리 응답입니다.", None, None))
+    mock_service.chat = AsyncMock(return_value=("2000자 정상 처리 응답입니다.", None, None, None))
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     long_message = "가" * 2000
@@ -272,7 +318,7 @@ async def test_chat_validation_error_on_exceeding_2000_chars() -> None:
 @pytest.mark.asyncio
 async def test_cors_expose_headers_configured() -> None:
     mock_service = MagicMock()
-    mock_service.chat = AsyncMock(return_value=("CORS 응답입니다.", None, None))
+    mock_service.chat = AsyncMock(return_value=("CORS 응답입니다.", None, None, None))
     app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
 
     try:
@@ -289,6 +335,7 @@ async def test_cors_expose_headers_configured() -> None:
         assert "X-Session-Id" in exposed_list
         assert "X-Signals" in exposed_list
         assert "X-Switch-To" in exposed_list
+        assert "X-Library-Books" in exposed_list
     finally:
         app.dependency_overrides.clear()
 
