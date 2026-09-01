@@ -271,10 +271,43 @@ def test_extract_fallback_text() -> None:
     result = extract_fallback_text(mock_agent)
     assert result == "### 📖 불편한 편의점\n- **저자**: 김호연"
 
-    # 2. messages가 비어있는 경우
+    # 2. messages에 서재 카드(### 📚) toolResult가 있는 경우
+    mock_lib_agent = MagicMock()
+    mock_lib_agent.messages = [
+        {"role": "user", "content": [{"text": "내 서재 책 보여줘"}]},
+        {
+            "role": "assistant",
+            "content": [{"toolUse": {"name": "search_my_library", "toolUseId": "call_2"}}],
+        },
+        {
+            "role": "user",
+            "content": [
+                {
+                    "toolResult": {
+                        "toolUseId": "call_2",
+                        "content": [
+                            {
+                                "text": (
+                                    "### 📚 어린왕자\n"
+                                    "- **저자**: 생텍쥐페리\n"
+                                    "- **독서 상태**: 읽는 중 (80%)"
+                                )
+                            }
+                        ],
+                    }
+
+                }
+            ],
+        },
+    ]
+    result_lib = extract_fallback_text(mock_lib_agent)
+    assert result_lib == "### 📚 어린왕자\n- **저자**: 생텍쥐페리\n- **독서 상태**: 읽는 중 (80%)"
+
+    # 3. messages가 비어있는 경우
     mock_empty_agent = MagicMock()
     mock_empty_agent.messages = []
     assert extract_fallback_text(mock_empty_agent) == ""
+
 
 
 @pytest.mark.asyncio

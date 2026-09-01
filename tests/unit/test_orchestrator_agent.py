@@ -105,7 +105,8 @@ def test_orchestrator_system_prompt_contains_rules() -> None:
     assert "recommend_books" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "consult_librarian" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "search_my_library" in ORCHESTRATOR_SYSTEM_PROMPT
-    assert "서재 안내 지침" in ORCHESTRATOR_SYSTEM_PROMPT
+    assert "서재 안내" in ORCHESTRATOR_SYSTEM_PROMPT
+    assert "### 📚" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "위임" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "count" in ORCHESTRATOR_SYSTEM_PROMPT or "권수" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "사서 분석 정보" in ORCHESTRATOR_SYSTEM_PROMPT
@@ -120,6 +121,7 @@ def test_get_orchestrator_system_prompt_by_librarian_id() -> None:
     assert "블루" in cat_prompt
     assert "~다냥" in cat_prompt or "고양이" in cat_prompt
     assert "슈빌" in cat_prompt
+    assert "### 📚" in cat_prompt
 
     # 2. stork 사서: 슈빌 페르소나, 두둥, 존댓말, 고양이 말투 배제
     stork_prompt = get_orchestrator_system_prompt("stork")
@@ -127,10 +129,12 @@ def test_get_orchestrator_system_prompt_by_librarian_id() -> None:
     assert "두둥" in stork_prompt
     assert "고양이 말투" in stork_prompt
     assert "블루" in stork_prompt
+    assert "### 📚" in stork_prompt
 
     # 3. 고정된 특정 도서 판박이 예시 텍스트(앵무새 복붙 유발) 부재 검증
     for prompt in (cat_prompt, stork_prompt):
         assert "성공하는 인생의 비밀" not in prompt
         assert "이수진 저" not in prompt
         assert "88% 진행률" not in prompt
+
 
