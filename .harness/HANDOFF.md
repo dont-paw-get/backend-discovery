@@ -536,9 +536,22 @@
   - Task 5: `ARCHITECTURE.md`, `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
 ### 다음 세션이 할 일
-1. `CLIAR-208` 커밋 생성, push 및 `develop` 대상 PR 생성.
-2. 배포 후 프론트엔드에서 단순 인사("안녕", "블루야 안녕"), 일상 대화("돈 아끼는 법 알려줘"), 서재 조회 시 추천 멘트 미포함 및 자연스러운 대화 E2E 확인.
-3. Bedrock 실호출 시 서재 응답의 CTA가 책 내용에 맞게 유연하게 생성되는지 샘플링 확인.
+1. `CLIAR-208` PR(#28) 머지 완료 확인.
+2. `CLIAR-211` 커밋, push 및 `develop` 대상 PR 생성.
+
+## 2026-09-01 — 스트리밍 서재 도서 마크다운 규격(### 📚) 분리 및 책 열기 연동 계약 [CLIAR-211]
+- 브랜치: `CLIAR-211-Streaming-Library-Books-Markdown-Format` (`origin/develop`에서 분기)
+- 실시간 스트리밍(`stream=true`) 대화 환경에서 HTTP 응답 헤더(`X-Library-Books`)가 도구 실행 전(스트림 개시 시점)에 전송되어 클라이언트가 서재 도서 카드를 실시간 렌더링하지 못하던 구조적 한계를 해결하기 위해, 외부 도서 추천(`### 📖` ➔ `[서재에 등록 ➔]`)과 내 서재 도서 조회(`### 📚` ➔ `[책 열기 ➔]`)의 마크다운 카드 규격을 분리 확립했다:
+  - Task 1: `src/discovery/domain/orchestrator/agent.py`의 `CAT_ORCHESTRATOR_PROMPT` 및 `STORK_ORCHESTRATOR_PROMPT`에 서재 도서 조회 시 서두 안내와 함께 `### 📚 {도서 제목}`, `- **저자**:`, `- **독서 상태**: 읽는 중 (88%)` 전용 마크다운 카드를 출력하도록 지침 주입 (외부 추천 서식 `### 📖` 사용 엄격 금지).
+  - Task 2: `src/discovery/domain/orchestrator/tools/library_tool.py`의 `format_books_for_llm` 구조를 점검하고 최적화.
+  - Task 3: `src/discovery/application/orchestrator_service.py`의 `chat` 및 `stream_chat`에서 `extract_fallback_text` 결합 안전장치를 `### 📚` 서재 카드까지 포괄하도록 확장.
+  - Task 4: `tests/unit/test_orchestrator_agent.py`, `tests/unit/test_orchestrator_service.py`에 `### 📚` 서재 카드 지침 및 fallback 결합 검증 추가. 단위 테스트 143건 및 정적 분석(`ruff`, `mypy`) 100% 통과.
+  - Task 5: `docs/api/decisions/0006-streaming-library-books-markdown-format.md` (ADR 0006) 작성 및 `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+
+### 다음 세션이 할 일
+1. `CLIAR-211` 커밋 생성, push 및 `develop` 대상 PR 생성.
+2. 배포 후 프론트엔드(`MarkdownRenderer.jsx`)에서 스트리밍 중 `### 📚` 블록 파싱 및 `[책 열기 ➔]` 버튼 상세 모달 연동 E2E 검증.
+
 
 
 

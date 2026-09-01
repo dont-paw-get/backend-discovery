@@ -204,14 +204,19 @@ class OrchestratorService:
             tool_result = extract_fallback_text(agent)
 
             if tool_result:
-                has_book_card = "### 📖" in tool_result
-                if has_book_card and "### 📖" not in response_text:
+                has_rec_card = "### 📖" in tool_result
+                has_lib_card = "### 📚" in tool_result
+                missing_rec = has_rec_card and "### 📖" not in response_text
+                missing_lib = has_lib_card and "### 📚" not in response_text
+
+                if (missing_rec or missing_lib) and tool_result not in response_text:
                     if response_text.strip():
                         response_text = f"{response_text.strip()}\n\n{tool_result}"
                     else:
                         response_text = tool_result
                 elif not response_text.strip():
                     response_text = tool_result
+
         except Exception as e:
             logger.exception(
                 "[BEDROCK_FALLBACK] chat invoke failed (session_id=%s, librarian_id=%s): %s",
@@ -374,8 +379,12 @@ class OrchestratorService:
         tool_result = extract_fallback_text(agent)
 
         if tool_result:
-            has_book_card = "### 📖" in tool_result
-            if has_book_card and "### 📖" not in response_text:
+            has_rec_card = "### 📖" in tool_result
+            has_lib_card = "### 📚" in tool_result
+            missing_rec = has_rec_card and "### 📖" not in response_text
+            missing_lib = has_lib_card and "### 📚" not in response_text
+
+            if (missing_rec or missing_lib) and tool_result not in response_text:
                 append_chunk = f"\n\n{tool_result}" if response_text.strip() else tool_result
                 yield append_chunk
                 if response_text.strip():
@@ -385,6 +394,7 @@ class OrchestratorService:
             elif not response_text.strip():
                 yield tool_result
                 response_text = tool_result
+
 
         if not switch_to_holder and self._librarian_tool is not None:
             lib_res = await self._librarian_tool.consult(
