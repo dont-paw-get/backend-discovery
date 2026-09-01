@@ -372,12 +372,16 @@ class ConsultLibrarianTool:
         latitude: float | None = None,
         longitude: float | None = None,
         on_response: Callable[[LibrarianResponse], None] | None = None,
+        prefetched: LibrarianResponse | None = None,
     ) -> Any:
         """Strands 오케스트레이터 에이전트에 등록할 @tool 함수를 반환한다.
 
         세션 ID, 사서 ID, 좌표 정보는 서비스 레이어에서 클로저로 주입되어
         LLM은 순수 대화 메시지만 인자로 전달한다(IDOR 방지).
+        prefetched 데이터가 제공되면 첫 번째 도구 호출에만 이를 재사용하여
+        불필요한 HTTP 왕복을 제거한다.
         """
+        first_call = True
 
         @tool(name="consult_librarian")
         async def consult_librarian_tool(message: str) -> str:
@@ -391,6 +395,14 @@ class ConsultLibrarianTool:
                 message: 사서에게 전달할 사용자의 이야기나 고민 내용
                     (예: '요즘 마음이 허전해요', '사서님과 이야기하고 싶어요').
             """
+            nonlocal first_call
+            if first_call and prefetched is not None:
+                first_call = False
+                if on_response is not None:
+                    on_response(prefetched)
+                return f"{prefetched.message}{format_signals_for_llm(prefetched.signals)}"
+
+            first_call = False
             res = await self.consult(
                 message=message,
                 session_id=session_id,

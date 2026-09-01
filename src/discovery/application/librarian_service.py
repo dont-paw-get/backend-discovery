@@ -66,6 +66,7 @@ class LibrarianService:
             region_name=self._settings.aws_region,
             tools=tools,
             messages=strands_messages if strands_messages else None,
+            enable_prompt_caching=self._settings.enable_prompt_caching,
         )
 
     async def chat(self, session_id: str, message: str) -> str:

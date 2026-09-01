@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from discovery.api.deps import get_orchestrator_service
 from discovery.api.schemas.chat import ChatRequest, ChatResponse
 from discovery.application.orchestrator_service import OrchestratorService
+from discovery.domain.orchestrator.tools.librarian_tool import evaluate_local_persona_response
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -41,7 +42,7 @@ async def chat(
     session_id = request_body.session_id.strip() if request_body.session_id else str(uuid.uuid4())
 
     if request_body.stream:
-        signals, switch_to = await service.get_initial_meta(
+        prefetched_librarian = await service.get_initial_meta(
             session_id=session_id,
             message=request_body.message,
             librarian_id=request_body.librarian_id,
@@ -49,6 +50,20 @@ async def chat(
             longitude=request_body.longitude,
         )
         headers = {"X-Session-Id": session_id}
+        signals = prefetched_librarian.signals if prefetched_librarian is not None else None
+        switch_to = (
+            prefetched_librarian.switch_to if prefetched_librarian is not None else None
+        )
+
+        if signals is None:
+            local_fallback = evaluate_local_persona_response(
+                message=request_body.message,
+                librarian_id=request_body.librarian_id,
+                latitude=request_body.latitude,
+                longitude=request_body.longitude,
+            )
+            signals = local_fallback.signals
+
         if signals is not None:
             headers["X-Signals"] = urllib.parse.quote(signals.model_dump_json())
         if switch_to is not None:
@@ -62,6 +77,7 @@ async def chat(
                 latitude=request_body.latitude,
                 longitude=request_body.longitude,
                 auth_token=authorization,
+                prefetched_librarian=prefetched_librarian,
             ),
             media_type="text/plain; charset=utf-8",
             headers=headers,

@@ -10,6 +10,7 @@
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
@@ -21,6 +22,7 @@ from discovery.application.librarian_service import (
     format_history_for_strands,
 )
 from discovery.core.config import Settings
+from discovery.core.observability import log_agent_metrics
 from discovery.domain.librarian.post_processor import extract_text_from_message
 from discovery.domain.orchestrator.agent import create_orchestrator_agent
 from discovery.domain.orchestrator.fallback import get_llm_fallback_message
@@ -30,7 +32,10 @@ from discovery.domain.orchestrator.librarian_response import (
     SwitchToSuggestion,
 )
 from discovery.domain.orchestrator.library_response import LibraryBookItem
-from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianTool
+from discovery.domain.orchestrator.tools.librarian_tool import (
+    ConsultLibrarianTool,
+    evaluate_local_persona_response,
+)
 from discovery.domain.orchestrator.tools.library_tool import SearchMyLibraryTool
 from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksTool
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
@@ -98,13 +103,19 @@ class OrchestratorService:
         on_librarian_response: Callable[[LibrarianResponse], None] | None = None,
         on_library_books: Callable[[list[LibraryBookItem]], None] | None = None,
         auth_token: str | None = None,
+        prefetched_librarian: LibrarianResponse | None = None,
     ) -> Agent:
         strands_messages = format_history_for_strands(history)
         librarian_id = meta.get("librarian_id") or "cat"
 
         active_tools: list[Any] = []
         if self._recommend_tool is not None:
-            active_tools.append(self._recommend_tool.as_tool(librarian_id=librarian_id))
+            active_tools.append(
+                self._recommend_tool.as_tool(
+                    librarian_id=librarian_id,
+                    session_id=session_id,
+                )
+            )
         if self._librarian_tool is not None:
             latitude = meta.get("latitude")
             longitude = meta.get("longitude")
@@ -115,6 +126,7 @@ class OrchestratorService:
                     latitude=latitude,
                     longitude=longitude,
                     on_response=on_librarian_response,
+                    prefetched=prefetched_librarian,
                 )
             )
         if self._library_tool is not None:
@@ -134,6 +146,7 @@ class OrchestratorService:
             librarian_id=librarian_id,
             tools=active_tools,
             messages=strands_messages if strands_messages else None,
+            enable_prompt_caching=self._settings.enable_prompt_caching,
         )
 
     async def chat(
@@ -151,6 +164,7 @@ class OrchestratorService:
         list[LibraryBookCard] | None,
     ]:
         """단일 턴 동기 대화 응답을 생성하고 세션 히스토리 및 메타를 갱신한다."""
+        start_time = time.perf_counter()
         meta_updates: dict[str, Any] = {}
         if librarian_id is not None:
             meta_updates["librarian_id"] = librarian_id
@@ -168,11 +182,14 @@ class OrchestratorService:
         switch_to_holder: list[SwitchToSuggestion] = []
         signals_holder: list[LibrarianSignals] = []
         library_books_holder: list[LibraryBookCard] = []
+        consult_called = False
 
         def on_librarian_response(res: LibrarianResponse) -> None:
+            nonlocal consult_called
+            consult_called = True
             if res.signals is not None:
                 signals_holder.append(res.signals)
-            if res.switch_to is not None:
+            if res.switch_to is not None and not switch_to_holder:
                 switch_to_holder.append(res.switch_to)
 
         def on_library_books(books: list[LibraryBookItem]) -> None:
@@ -198,8 +215,11 @@ class OrchestratorService:
             auth_token=auth_token,
         )
 
+        orchestrator_metrics: dict[str, Any] | None = None
         try:
             result = await agent.invoke_async(prompt=message)
+            if hasattr(result, "metrics") and result.metrics:
+                orchestrator_metrics = result.metrics.get_summary()
             response_text = extract_text_from_message(result.message)
             tool_result = extract_fallback_text(agent)
 
@@ -226,7 +246,9 @@ class OrchestratorService:
             )
             response_text = get_llm_fallback_message(meta.get("librarian_id"))
 
-        if not switch_to_holder and self._librarian_tool is not None:
+        # Task 2-1: 도구가 consult를 한 번도 호출하지 않았을 때만(예: 순수 서재 조회 등)
+        # 잔여 호출 수행 (동기 경로는 기본 HTTP 타임아웃 유지)
+        if not consult_called and self._librarian_tool is not None:
             try:
                 lib_res = await self._librarian_tool.consult(
                     message=message,
@@ -237,10 +259,20 @@ class OrchestratorService:
                 )
                 if lib_res.signals is not None and not signals_holder:
                     signals_holder.append(lib_res.signals)
-                if lib_res.switch_to is not None:
+                if lib_res.switch_to is not None and not switch_to_holder:
                     switch_to_holder.append(lib_res.switch_to)
             except Exception as e:
                 logger.warning("[BEDROCK_FALLBACK] librarian fallback consult failed: %s", e)
+
+        if not signals_holder:
+            local_res = evaluate_local_persona_response(
+                message=message,
+                librarian_id=meta.get("librarian_id"),
+                latitude=meta.get("latitude"),
+                longitude=meta.get("longitude"),
+            )
+            if local_res.signals is not None:
+                signals_holder.append(local_res.signals)
 
         switch_to: SwitchToSuggestion | None = switch_to_holder[0] if switch_to_holder else None
         signals: LibrarianSignals | None = signals_holder[0] if signals_holder else None
@@ -254,6 +286,17 @@ class OrchestratorService:
         library_books: list[LibraryBookCard] | None = (
             list(library_books_holder) if library_books_holder else None
         )
+
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        log_agent_metrics(
+            phase="orchestrator",
+            session_id=session_id,
+            librarian_id=meta.get("librarian_id"),
+            mode="sync",
+            message_length=len(message),
+            metrics_summary=orchestrator_metrics,
+            direct_metrics={"total_duration_ms": duration_ms},
+        )
         return response_text, switch_to, signals, library_books
 
     async def get_initial_meta(
@@ -263,18 +306,20 @@ class OrchestratorService:
         librarian_id: str | None = None,
         latitude: float | None = None,
         longitude: float | None = None,
-    ) -> tuple[LibrarianSignals | None, SwitchToSuggestion | None]:
+    ) -> LibrarianResponse | None:
         """스트리밍 응답 헤더(X-Signals, X-Switch-To)에 실어줄 사서 신호와
-        스위칭 제안을 사전 계산한다.
+        스위칭 제안 및 첫 턴 도구 실행 시 재사용할 사전 메타 응답을 조회한다.
 
         사서 서버 지연으로 인한 전체 스트리밍 블로킹을 방지하기 위해
         initial_meta_timeout_seconds(기본 1.5초) Fail-Fast 타임아웃을 적용한다.
         """
+        init_start = time.perf_counter()
         if librarian_id is not None:
             await self._session_store.update_session_meta(session_id, librarian_id=librarian_id)
 
+        lib_res: LibrarianResponse | None = None
         if self._librarian_tool is not None:
-            timeout_sec = getattr(self._settings, "initial_meta_timeout_seconds", 1.5)
+            timeout_sec = self._settings.initial_meta_timeout_seconds
             try:
                 meta = await self._session_store.get_session_meta(session_id)
                 lib_res = await asyncio.wait_for(
@@ -287,7 +332,6 @@ class OrchestratorService:
                     ),
                     timeout=timeout_sec,
                 )
-                return lib_res.signals, lib_res.switch_to
             except TimeoutError:
                 logger.warning(
                     "[INITIAL_META_TIMEOUT] get_initial_meta timed out (%.1fs, session_id=%s). "
@@ -295,11 +339,19 @@ class OrchestratorService:
                     timeout_sec,
                     session_id,
                 )
-                return None, None
             except Exception as e:
                 logger.warning("[INITIAL_META_FALLBACK] get_initial_meta failed: %s", e)
-                return None, None
-        return None, None
+
+        init_duration_ms = round((time.perf_counter() - init_start) * 1000, 2)
+        log_agent_metrics(
+            phase="initial_meta",
+            session_id=session_id,
+            librarian_id=librarian_id or "cat",
+            mode="sync",
+            message_length=len(message),
+            direct_metrics={"initial_meta_ms": init_duration_ms},
+        )
+        return lib_res
 
     async def stream_chat(
         self,
@@ -309,8 +361,10 @@ class OrchestratorService:
         latitude: float | None = None,
         longitude: float | None = None,
         auth_token: str | None = None,
+        prefetched_librarian: LibrarianResponse | None = None,
     ) -> AsyncGenerator[str, None]:
         """스트리밍 대화 응답을 청크 단위로 yield하고, 완료 후 세션 히스토리를 갱신한다."""
+        start_time = time.perf_counter()
         meta_updates: dict[str, Any] = {}
         if librarian_id is not None:
             meta_updates["librarian_id"] = librarian_id
@@ -327,9 +381,15 @@ class OrchestratorService:
 
         switch_to_holder: list[SwitchToSuggestion] = []
         library_books_holder: list[LibraryBookCard] = []
+        consult_called = False
+
+        if prefetched_librarian is not None and prefetched_librarian.switch_to is not None:
+            switch_to_holder.append(prefetched_librarian.switch_to)
 
         def on_librarian_response(res: LibrarianResponse) -> None:
-            if res.switch_to is not None:
+            nonlocal consult_called
+            consult_called = True
+            if res.switch_to is not None and not switch_to_holder:
                 switch_to_holder.append(res.switch_to)
 
         def on_library_books(books: list[LibraryBookItem]) -> None:
@@ -353,15 +413,25 @@ class OrchestratorService:
             on_librarian_response=on_librarian_response,
             on_library_books=on_library_books,
             auth_token=auth_token,
+            prefetched_librarian=prefetched_librarian,
         )
 
         full_response: list[str] = []
+        ttfb_ms: float | None = None
+        orchestrator_metrics: dict[str, Any] | None = None
+
         try:
             async for event in agent.stream_async(prompt=message):
                 chunk = extract_chunk_from_event(event)
                 if chunk:
+                    if ttfb_ms is None:
+                        ttfb_ms = round((time.perf_counter() - start_time) * 1000, 2)
                     full_response.append(chunk)
                     yield chunk
+                if isinstance(event, dict) and "result" in event:
+                    res_obj = event["result"]
+                    if hasattr(res_obj, "metrics") and res_obj.metrics:
+                        orchestrator_metrics = res_obj.metrics.get_summary()
         except Exception as e:
             logger.exception(
                 "[BEDROCK_FALLBACK] stream_chat failed (session_id=%s, librarian_id=%s): %s",
@@ -395,17 +465,29 @@ class OrchestratorService:
                 yield tool_result
                 response_text = tool_result
 
-
-        if not switch_to_holder and self._librarian_tool is not None:
-            lib_res = await self._librarian_tool.consult(
-                message=message,
-                session_id=session_id,
-                librarian_id=meta.get("librarian_id"),
-                latitude=meta.get("latitude"),
-                longitude=meta.get("longitude"),
-            )
-            if lib_res.switch_to is not None:
-                switch_to_holder.append(lib_res.switch_to)
+        # Task 2-1: 도구가 consult를 호출하지 않았고 prefetched도 없었을 때만
+        # tail consult 수행 + 1.5초 타임아웃 가드
+        if (
+            not consult_called
+            and prefetched_librarian is None
+            and self._librarian_tool is not None
+        ):
+            timeout_sec = self._settings.initial_meta_timeout_seconds
+            try:
+                lib_res = await asyncio.wait_for(
+                    self._librarian_tool.consult(
+                        message=message,
+                        session_id=session_id,
+                        librarian_id=meta.get("librarian_id"),
+                        latitude=meta.get("latitude"),
+                        longitude=meta.get("longitude"),
+                    ),
+                    timeout=timeout_sec,
+                )
+                if lib_res.switch_to is not None and not switch_to_holder:
+                    switch_to_holder.append(lib_res.switch_to)
+            except Exception as e:
+                logger.warning("[BEDROCK_FALLBACK] librarian stream tail consult failed: %s", e)
 
         if switch_to_holder:
             await self._session_store.update_session_meta(
@@ -416,4 +498,16 @@ class OrchestratorService:
         await self._session_store.append_turn(
             session_id, {"role": "assistant", "content": response_text}
         )
+
+        duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        log_agent_metrics(
+            phase="orchestrator",
+            session_id=session_id,
+            librarian_id=meta.get("librarian_id"),
+            mode="stream",
+            message_length=len(message),
+            metrics_summary=orchestrator_metrics,
+            direct_metrics={"ttfb_ms": ttfb_ms, "total_duration_ms": duration_ms},
+        )
+
 

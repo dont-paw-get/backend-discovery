@@ -32,6 +32,7 @@
 | CLIAR-208 사서 로컬 페르소나 fallback 의도 게이트 고도화 및 하드코딩 응답 제거 | ✅ 완료 | Task 1(evaluate_local_persona_response에 인사/정체성 최우선 필터 및 추천의도 게이트 도입, 도서 추천 멘트 남발 제거)·Task 2(호칭/장르 키워드셋 분리 및 결정론적 Boolean 스위칭 조건 정돈)·Task 3(블루/슈빌 오케스트레이터 프롬프트 판박이 복붙 예시 제거 및 유연한 CTA 가이드라인 적용)·Task 4(단위 테스트 143건 100% 통과, 대조/호칭 충돌/일상 대화 방어 테스트 포함)·Task 5(하네스 동기화) 모두 완료 |
 | CLIAR-211 스트리밍 서재 도서 마크다운 규격(### 📚) 분리 및 책 열기 연동 계약 | ✅ 완료 | Task 1(블루/슈빌 오케스트레이터 프롬프트에 서재 도서 전용 마크다운 규격 ### 📚 및 독서 상태 포맷 지침 주입)·Task 2(SearchMyLibraryTool format_books_for_llm 구조 정돈)·Task 3(OrchestratorService fallback 결합 조건에 ### 📚 확장)·Task 4(단위 테스트 143건 및 정적 분석 100% 통과)·Task 5(ADR 0006 작성 및 하네스 동기화) 모두 완료 |
 | CLIAR-213 단순 날씨/일상 대화 의도 분기 및 과잉 도서 추천 방어 가드레일 | ✅ 완료 | 블루/슈빌 오케스트레이터 프롬프트에 `[단순 인사 / 날씨 질문 / 일상 대화]` 분기를 신설하여 날씨 질문 시 `consult_librarian`만 1회 호출하고 도서 추천/서재 조회를 엄격 차단, `[명시적 도서 추천 질문]`으로 도서 추천 연쇄 호출 한정. 단위 테스트 143건 및 정적 분석 100% 통과 |
+| CLIAR-158 순손실 제거 및 레이턴시 계측 | 🔄 진행 중 | Task 1(core/observability.py 구조화 로그 및 TTFB/소요시간/Strands metrics 계측, input_params 필터링 개인정보 방어)·Task 2-1(tail consult 조건식 버그 수정, 스트리밍 1.5s 가드 및 동기 타임아웃 보존)·Task 2-2(get_initial_meta 전량 반환 및 스트리밍 첫 consult 도구 재사용으로 중복 제거, 라우터 signals fallback) 구현 완료. Task 3(캐싱 히트)·Task 4(Reasoning 토큰)·Task 5(전후 비교표)는 dev 배포 후 실측 대기 |
 
 
 

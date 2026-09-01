@@ -577,3 +577,65 @@
 
 
 
+
+
+## 2026-09-01 — QA 데이터셋 분석 및 레이턴시 최적화 계획 수립 (구현 없음)
+- 브랜치: `CLIAR-215-QA-Optimization` (문서만 변경. 코드 미변경)
+- `chatbot_qa_testv2.csv` 기반 최초 계획안과 성능 최적화 2트랙 제안을 코드와 대조해 검토하고, 계획을 4개 티켓으로 재편했다. 검토 과정에서 확인된 사실:
+  - **케이스 수 정정**: CSV는 47줄이지만 헤더 포함이므로 **46건**. 우선순위 P1 16 / P2 19 / P3 11. 최초 계획안이 커버한 P1은 4건뿐이고 미커버 P1이 12건(라우팅 3, `switch_to` 2, signals 2, 세션 2, 인증 2, 번역 1)이었다.
+  - **인증 공백(P1 2건)**: `api/v1/routers/chat.py`가 `Authorization`을 `Header(default=None)`으로 받아 서재 API 토큰으로만 패스스루하며 검증·401이 없다. 헤더 없이 호출하면 200이 나간다. 소유권(discovery vs 게이트웨이) 결정이 선행 필요.
+  - **이미 구현된 항목**: 웹검색 캐시(`result_cache.py`, `usage_limiter.py`), 과잉 사과 방지(프롬프트 5번 규칙), 해외 도서 번역(추천 프롬프트 7번 규칙), 빈 문자열 422(`min_length=1`). 공백 전용 문자열(`" "`)만 미방어.
+  - **`consult` 중복 호출**: 스트리밍 1건당 최대 3회(라우터 `get_initial_meta` → 도구 `consult_librarian` → `stream_chat` 말미 `if not switch_to_holder`). 3번째는 모든 `yield` 이후 실행되며 타임아웃 가드가 없어 `librarian_http_timeout_seconds=20.0`까지 제너레이터 완료와 세션 기록을 막는다. 동기 `chat()`은 2회.
+  - **프롬프트 캐싱 런타임 미적용**: `enable_prompt_caching` 기본값이 `False`이고 런타임 호출부 3곳이 인자를 전달하지 않는다. `True`로 호출하는 곳은 단위 테스트 2개뿐. 프롬프트 문자열/인자를 단정하는 테스트가 "적용됨" 착각을 만든 사례.
+  - **추천 요청 LLM 왕복 5회**: 오케스트레이터 3회 + 추천 에이전트 2회. 카드 마크다운을 추천 에이전트와 오케스트레이터가 중복 생성.
+  - **Latency-Optimized Inference 적용 불가**: 지원 모델이 Claude 3.5 Haiku / Llama 3.1 70B·405B / Nova Pro뿐이며 preview. Claude Sonnet 5 미지원이라 계획에서 제외.
+  - **Strands 1.26 내부 확인**: `AgentResult.metrics.get_summary()`가 사이클·도구별 지연과 `cacheReadInputTokens`까지 제공. `stream_async`는 마지막에 `{"result": AgentResult}`를 yield. `CacheConfig(strategy="auto")`는 시스템 프롬프트가 아니라 **마지막 assistant 메시지 뒤에 cachePoint를 넣어 대화 히스토리를 캐시**하며, 시스템 프롬프트 캐싱은 `cache_tools="default"`가 담당한다(Bedrock 프리픽스 순서 system → tools → messages). `_supports_caching`은 model_id에 `claude`/`anthropic` 포함 여부만 보므로 `global.anthropic.claude-sonnet-5`는 통과.
+  - **Early Stop / 직결 스트리밍 기각**: `recommend_tool.recommend`가 `invoke_async`(비스트리밍)이라 중단할 스트림이 없고 `truncate_books_by_count`와 충돌. Agent-as-a-Tool은 `@tool`이 `str`을 반환하는 계약이라 하위 스트림 바이패스 불가. 둘 다 백로그로 이관하고, 대신 오케스트레이터의 카드 재생성을 제거해 결정론적으로 splice하는 방식을 CLIAR-171에 배치.
+- 산출물: `.harness/PLAN.md`에 4개 티켓 계획(진행 순서 표 + CLIAR-158 실행 계획 확정), `.harness/DECISIONS.md`에 순서·분할 결정 기록.
+
+## 2026-09-01 — CLIAR-158 구현 결과 피드백 (커밋 전, 모델 Sonnet 전환)
+- 사용자가 이후 구현 세션의 모델을 Opus에서 **Sonnet으로 변경**함 (크레딧·응답 길이 이유). 다음 세션은 Sonnet 기준으로 진행된다.
+- CLIAR-158 Task 1·2-1·2-2 구현을 코드 리딩 + 재현 스크립트로 검증한 결과, 커밋 전 반드시 고쳐야 할 결함 1건과 완료로 보기 어려운 Task 3건을 확인했다. **아직 커밋되지 않았다.**
+
+### 반드시 고칠 것
+1. **개인정보 방어 결함 (`core/observability.py`)**: 최상위 필드는 화이트리스트로 걸렀지만 `strands_metrics.tool_usage`를 통째로 넘겨, `tool_usage[*].tool_info.input_params`에 `consult_librarian(message=...)`/`recommend_books(query=...)`로 넘어간 **사용자 발화 원문이 로그에 그대로 남는다.** 재현 확인됨(위기 발언 예시로 실제 로그 라인에 원문이 찍힘). `message_length`만 기록한다는 원칙이 같은 로그 안에서 깨진다. `tool_usage`에서 `execution_stats`와 도구 이름만 추출하고 `tool_info.input_params`는 제거해야 한다.
+
+### 완료로 보기 어려운 것 (STATE.md/PLAN.md 재검토 필요)
+2. **Task 3 (캐싱 활성화)**: 계획의 종료 조건(`cacheReadInputTokens > 0` 실측, 또는 "현재 트래픽에서 손해면 끈다"는 결론)을 거치지 않고 `enable_prompt_caching: bool = True`를 기본값으로 켜고 `k8s/base/configmap.yaml`에도 `"true"`로 넣음. Bedrock 실호출 없이 기본값만 뒤집힌 상태. dev 실측 전까지 기본값을 `False`로 되돌리거나 최소한 base configmap 반영은 보류하는 게 안전.
+3. **Task 4 (reasoning 확인)**: `STATE.md`에 "Reasoning 토큰 미발생 확인"으로 기록됐으나, 이는 세션이 구현 전 계획 수립 시 SDK 코드 확인으로 이미 적어둔 사실("SDK가 additional_request_fields 없이 thinking을 켜지 않음")이다. 실제 계획의 확인 대상은 "Bedrock 측 기본 동작으로 reasoning 토큰이 발생하는지 Task 1 로그로 판정"이었고, 이건 실측되지 않았다. 관측 안 한 것을 확인된 사실로 기록한 상태이므로 문구 정정 필요.
+4. **Task 5 (전후 비교)**: 시나리오 4종 × 3회 비교표가 없다. Bedrock 실호출이 한 번도 없어 계측 코드가 실제 응답에서 도는지도 미검증(단위 테스트는 `get_summary()`를 손으로 만든 dict로 대체). CLIAR-158을 최우선에 둔 이유가 이 비교표로 CLIAR-171의 판단 근거를 만드는 것이었으므로, dev 배포 후 실측이 필요하다.
+
+### 설계상 참고 (블로킹 아님, 구현 세션 판단)
+5. `getattr(self._settings, "enable_prompt_caching", False)`는 Pydantic Settings 필드에 쓸 이유가 없고 필드명이 바뀌면 조용히 캐싱이 꺼진다 — 직접 속성 접근 권장.
+6. `stream_chat` 경로에는 `chat()`에 넣은 "signals 비면 `evaluate_local_persona_response`로 로컬 보강" 로직이 없다. prefetch가 1.5초 타임아웃으로 `None`이면 `X-Signals` 헤더가 안 나가 프론트 날씨·테마가 빈다(기존 동작과 동일하므로 회귀는 아니지만 비대칭).
+7. `chat()`의 tail consult에 `initial_meta_timeout_seconds`(1.5초)를 그대로 씀. 이 값은 스트리밍 TTFB 보호용으로 정한 값인데, 동기 경로에서는 이게 유일한 사서 호출이라 원격 사서가 1.5초를 넘기면 `switch_to`를 놓친다(기존엔 20초까지 기다렸음). 별도 값 또는 기존 타임아웃 유지 검토.
+8. 스트리밍에서 `prefetched_librarian.switch_to`가 시작 시 한 번, prefetch 재사용 시 `on_response` 콜백으로 또 한 번 append되어 `switch_to_holder`에 중복 적재됨(`[0]`만 쓰므로 기능 영향 없음, 정리 권장).
+
+### csv 파일
+- `chatbot_qa_testv2.csv`는 CLIAR-158 범위가 아니라 **CLIAR-215(QA 최적화) 범위**에서 커밋하는 게 맞다고 확인함. CLIAR-158 커밋에는 포함하지 않는다.
+
+### 다음 세션이 할 일
+1. 위 "반드시 고칠 것"(observability 개인정보 필터링)을 수정한다.
+2. Task 3/4/5를 `PLAN.md`에서 완료로 표시하지 않고, dev 배포 후 실측 로그를 확보해 종료 여부를 판단한다. 캐싱 기본값은 실측 전까지 `False` 유지를 권장.
+3. 수정 완료 후 Task 단위로 커밋(`[CLIAR-158]` 태그), push 전 변경 파일·diff 요약을 사용자에게 먼저 제시한다.
+4. `chatbot_qa_testv2.csv`는 CLIAR-215 작업 시 커밋한다.
+
+
+## 2026-09-01 — CLIAR-158 Task 1·2 구현 및 피드백 결함 조치 완료
+- 브랜치: `CLIAR-158-Latency-Observability` (`origin/develop`에서 분기)
+- 사용자 코드 검토 피드백 8건을 모두 반영하고 정적 분석/단위 테스트 152건 통과를 완료했다:
+  1. **개인정보 방어 수정 (`core/observability.py`)**: `tool_usage`에서 `tool_info.input_params`를 완전히 배제하고, 도구명 및 `execution_stats`만 화이트리스트 추출하도록 수정. 민감 정보 누출 방어 단위 테스트(`test_log_agent_metrics_filters_out_sensitive_input_params`) 추가.
+  2. **프롬프트 캐싱 기본값 롤백 (`config.py`, `.env.example`, `k8s/base/configmap.yaml`)**: `Settings.enable_prompt_caching` 기본값을 `False`로 변경, `configmap.yaml`에서 제거. dev 환경에서 실제 캐시 히트율/비용 측정 후 활성화 여부를 결정하도록 안전하게 둠.
+  3. **직접 속성 접근 적용**: `getattr(self._settings, ...)`를 제거하고 `self._settings.enable_prompt_caching`, `self._settings.initial_meta_timeout_seconds` 직접 접근으로 변경.
+  4. **스트리밍 라우터 signals 로컬 fallback 보강 (`chat.py`)**: `stream_chat`에서 prefetch가 타임아웃/실패(`None`)하더라도 `evaluate_local_persona_response`로 로컬 signals를 생성하여 `X-Signals` 헤더가 항상 유지되도록 대칭성 확보. 단위 테스트 추가.
+  5. **동기 chat() tail consult 타임아웃 보존**: TTFB용 1.5s 대신 기존의 `librarian_http_timeout_seconds`(20s)가 유지되도록 분리.
+  6. **`switch_to_holder` 중복 append 방어**: `on_librarian_response` 및 tail consult에서 이미 `switch_to_holder`가 채워진 경우 중복 주입 차단.
+  7. **하네스 문서 정정 (`STATE.md`, `PLAN.md`, `DECISIONS.md`)**:
+     - `STATE.md`: CLIAR-158 상태를 "진행 중(Task 1·2 완료, Task 3~5 실측 대기)"으로 갱신하고 Task 4 미실측 문구 정정.
+     - `PLAN.md`: `[완료] CLIAR-158` 섹션 제거, 남은 Task 3(캐싱 실측), Task 4(reasoning 토큰 실측), Task 5(전후 비교표) 체크리스트 유지.
+  8. **커밋 제외 확인**: `chatbot_qa_testv2.csv`는 CLIAR-158 커밋 대상에서 제외(CLIAR-215에서 커밋).
+
+### 다음 세션이 할 일
+1. `CLIAR-158` Task 1·2 변경 파일 커밋 생성 (사용자 승인 시 `[CLIAR-158]` 태그로 생성).
+2. dev 배포 후 실제 Bedrock 로그를 통한 Task 3 (캐싱 히트 실측), Task 4 (reasoning 토큰 확인), Task 5 (전후 비교표 작성) 진행.
+3. `chatbot_qa_testv2.csv`는 CLIAR-215에서 다룬다.

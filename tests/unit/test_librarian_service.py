@@ -105,6 +105,7 @@ async def test_librarian_service_chat(mocker: MockerFixture) -> None:
         region_name="us-east-1",
         tools=[mock_tool],
         messages=[{"role": "user", "content": [{"text": "이전 질문"}]}],
+        enable_prompt_caching=False,
     )
     mock_agent.invoke_async.assert_awaited_once_with(prompt="SF 소설 추천해줘")
 
