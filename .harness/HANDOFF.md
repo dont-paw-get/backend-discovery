@@ -523,9 +523,23 @@
   - Task 6: `docs/api/decisions/0005-library-books-card-response.md` (ADR 0005) 작성 및 `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
 
 ### 다음 세션이 할 일
-1. `CLIAR-196` 커밋 생성, push 및 `develop` 대상 PR 생성.
-2. 배포 후 프론트엔드에서 내 서재 도서 조회 시 사서의 자연스러운 한두 문장 대화문 표출 및 `response.library_books` 기반 "책 열기" 버튼 연동 확인.
-3. 2차 후속 과제(복합 추천 시 `library_books` 노출 억제) 검토.
+1. `CLIAR-196` PR(#27) 머지 완료 확인.
+2. `CLIAR-208` 커밋, push 및 `develop` 대상 PR 생성.
+
+## 2026-09-01 — 사서 로컬 페르소나 fallback 의도 게이트 고도화 및 하드코딩 응답 제거 [CLIAR-208]
+- 브랜치: `CLIAR-208-Dynamic-Persona-Fallback` (`origin/develop`에서 분기)
+- 사용자가 단순 인사, 일상 대화, 서재 질문 등을 건넸을 때 로컬 페르소나 fallback 엔진(`evaluate_local_persona_response`)이 무조건 도서 추천 멘트를 반환하거나 키워드 단독 매칭으로 엉뚱하게 `switch_to`를 발동시키던 문제와 오케스트레이터 프롬프트 내 판박이 CTA 복붙(앵무새 현상) 문제를 해결했다:
+  - Task 1: `src/discovery/domain/orchestrator/tools/librarian_tool.py`의 `evaluate_local_persona_response`에 우선순위 의도 게이트(1단계: 인사/정체성 최우선 필터 ➔ 2단계: 상대 사서 직접 호출 `is_call_other_librarian` ➔ 3단계: 추천 의도 `has_rec_intent` AND 상대 도메인 키워드 결합 ➔ 4단계: 명시적 추천 요청 ➔ 5단계: 비추천 일반 대화/감정)를 구축하여 도서 추천 멘트 남발을 원천 차단.
+  - Task 2: 호칭 키워드셋(`STORK_CALL_KEYWORDS`, `CAT_CALL_KEYWORDS`)과 장르 키워드셋(`STORK_GENRE_KEYWORDS`, `CAT_GENRE_KEYWORDS`)을 물리적으로 분리하고 스코어링 없는 결정론적 Boolean 조건식 결합(`is_calling_other or (has_rec_intent and has_domain)`) 적용.
+  - Task 3: `src/discovery/domain/orchestrator/agent.py`의 `CAT_ORCHESTRATOR_PROMPT` 및 `STORK_ORCHESTRATOR_PROMPT`에서 고정된 문장 텍스트 예시(few-shot 복붙 유발)를 전면 제거하고 상황별 유연한 소통 가이드라인으로 개선.
+  - Task 4: `tests/unit/test_librarian_tool.py`에 인사/호칭 충돌 방어, 동일 사서 호칭 방어, 상대 사서 단독 호출, 일상 대화 방어, 조회 vs 추천 대조 단위 테스트 4건 추가 및 `tests/unit/test_orchestrator_agent.py`에 프롬프트 내 고정 예시 부재 검증 추가. 단위 테스트 143건 및 정적 분석(`ruff`, `mypy`) 100% 통과.
+  - Task 5: `ARCHITECTURE.md`, `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+
+### 다음 세션이 할 일
+1. `CLIAR-208` 커밋 생성, push 및 `develop` 대상 PR 생성.
+2. 배포 후 프론트엔드에서 단순 인사("안녕", "블루야 안녕"), 일상 대화("돈 아끼는 법 알려줘"), 서재 조회 시 추천 멘트 미포함 및 자연스러운 대화 E2E 확인.
+3. Bedrock 실호출 시 서재 응답의 CTA가 책 내용에 맞게 유연하게 생성되는지 샘플링 확인.
+
 
 
 

@@ -11,7 +11,8 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 1. **오케스트레이터 에이전트 (Strands Agents SDK)** — 사용자 의도를 파악하여 내 서재 검색(`search_my_library`), 도서 추천 에이전트(`recommend_books`), 사서 상담(`consult_librarian`)으로 라우팅/위임 및 복합 체이닝을 수행한다 (Agent-as-a-Tool 패턴).
 2. **내 서재 도서 검색 (`SearchMyLibraryTool`)** — 서재 CRUD 마이크로서비스(`backend-book`)의 `GET /api/v1/library/books` API를 호출하여 로그인 사용자의 서재 도서 목록을 실시간 조회/필터링하고 자연어로 요약한다.
 3. **도서 추천 에이전트 (Research Agent)** — 자연어 질의에 웹 검색 도구(Tavily)로 후보 도서 및 실제 쪽수(페이지수)를 찾고, `truncate_books_by_count` 순수 함수를 통해 요청된 `count`개로 결정론적으로 상한을 강제한 정형 마크다운 포맷(`### 📖`, `- **저자**: 저자 (OO쪽)`, `- **추천 이유**:`)으로 응답을 생성한다.
-4. **사서 에이전트 연동 (Librarian Tool)** — 별도 사서 마이크로서비스(`backend-librarian`)와 HTTP 통신(`POST /api/v1/chat`)하며, 세션별 활성 사서 ID(`librarian_id`), 사용자 위치 좌표(`latitude`/`longitude`)를 안전하게 주입하고 사서의 `signals`(날씨/무드/장르) 및 `switch_to`(사서 전환 제안)를 오케스트레이션한다. 서비스 미가동 시 graceful 스텁 응답을 제공한다.
+4. **사서 에이전트 연동 (Librarian Tool)** — 별도 사서 마이크로서비스(`backend-librarian`)와 HTTP 통신(`POST /api/v1/chat`)하며, 세션별 활성 사서 ID(`librarian_id`), 사용자 위치 좌표(`latitude`/`longitude`)를 안전하게 주입하고 사서의 `signals`(날씨/무드/장르) 및 `switch_to`(사서 전환 제안)를 오케스트레이션한다. 원격 서비스 장애/미가동 시에는 자체 로컬 fallback 엔진(`evaluate_local_persona_response`)이 인사·의도 게이트·불리언 조건식을 통해 결정론적으로 페르소나 응답과 스위칭 판단을 보정한다.
+
 5. **도서 표준 장르 분류 (`GenreClassifierService`)** — 도서 ISBN(선택), 제목, 저자, 원본 카테고리(알라딘/OCR 등) 정보를 분석하여 ERD 표준 16개 장르 체계 중 1개로 분류한다 (`POST /api/v1/classify-genre`).
 6. **대화 세션 및 메타데이터 관리** — `ChatSessionStore`(Redis)가 멀티턴 대화 히스토리 및 활성 사서/좌표 메타데이터를 sliding TTL로 저장·조회한다.
 7. ~~시간대/테마 기반 큐레이션~~, ~~도서 데이터 동기화(벡터 upsert)~~ — 폐기됨.

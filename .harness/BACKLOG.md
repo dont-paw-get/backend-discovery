@@ -18,6 +18,8 @@
 - [ ] Agents-as-Tools 리팩터링, 사서 연동, ArgoCD 배포 확정 후 `docs/api/openapi.yaml`을 최신 상태로 갱신하고 프론트 담당자에게 공유. 프론트가 axios 클라이언트를 서버별로 작성할 수 있게 엔드포인트/스키마/인증 헤더/CORS 설정을 명확히 문서화.
 - [x] Bedrock 추천/오케스트레이터 모델을 Claude 3.5 Sonnet v1(`anthropic.claude-3-5-sonnet-20240620-v1:0`, `ap-northeast-2`)으로 업그레이드 완료 (2026-08-27). 실측 TTFT 617ms, 사서 에이전트와 버전 통일.
 - [ ] 최신 CRIS Reasoning 모델들(Sonnet 4/4.5/5, Opus 5 등)은 reasoning 지연(TTFT 1.7~2.4초)으로 실시간 챗봇에는 부적합하나, 향후 스트리밍이 필요 없는 비실시간 작업(예: `POST /api/v1/classify-genre`의 난해한 장르 분류, OCR 서지 오탈자 정밀 보정, 대량 오프라인 배치)의 전용 모델로 활용 검토.
+- [ ] 로컬 페르소나 fallback 엔진(`evaluate_local_persona_response`)의 상대 사서 호출 판단 휴리스틱(`_is_calling_librarian`의 15자 이하 짧은 문장 조건) 실사용 오탐(False Positive) 모니터링 및 필요 시 서술어 기반 정밀화 검토.
+
 
 ## 학습/고도화 트랙 (2026-08-28 확정, CLIAR-111 구현·테스트 완료 후 착수)
 
