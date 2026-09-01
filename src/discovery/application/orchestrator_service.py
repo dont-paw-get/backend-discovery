@@ -10,11 +10,12 @@
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 from strands import Agent
 
+from discovery.api.schemas.chat import LibraryBookCard
 from discovery.application.librarian_service import (
     extract_chunk_from_event,
     format_history_for_strands,
@@ -28,6 +29,7 @@ from discovery.domain.orchestrator.librarian_response import (
     LibrarianSignals,
     SwitchToSuggestion,
 )
+from discovery.domain.orchestrator.library_response import LibraryBookItem
 from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianTool
 from discovery.domain.orchestrator.tools.library_tool import SearchMyLibraryTool
 from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksTool
@@ -93,7 +95,8 @@ class OrchestratorService:
         history: list[dict[str, str]],
         session_id: str,
         meta: dict[str, Any],
-        on_librarian_response: Any = None,
+        on_librarian_response: Callable[[LibrarianResponse], None] | None = None,
+        on_library_books: Callable[[list[LibraryBookItem]], None] | None = None,
         auth_token: str | None = None,
     ) -> Agent:
         strands_messages = format_history_for_strands(history)
@@ -115,7 +118,12 @@ class OrchestratorService:
                 )
             )
         if self._library_tool is not None:
-            active_tools.append(self._library_tool.as_tool(auth_token=auth_token))
+            active_tools.append(
+                self._library_tool.as_tool(
+                    auth_token=auth_token,
+                    on_books_fetched=on_library_books,
+                )
+            )
 
         if not active_tools and self._tools:
             active_tools = self._tools
@@ -136,7 +144,12 @@ class OrchestratorService:
         latitude: float | None = None,
         longitude: float | None = None,
         auth_token: str | None = None,
-    ) -> tuple[str, SwitchToSuggestion | None, LibrarianSignals | None]:
+    ) -> tuple[
+        str,
+        SwitchToSuggestion | None,
+        LibrarianSignals | None,
+        list[LibraryBookCard] | None,
+    ]:
         """단일 턴 동기 대화 응답을 생성하고 세션 히스토리 및 메타를 갱신한다."""
         meta_updates: dict[str, Any] = {}
         if librarian_id is not None:
@@ -154,6 +167,7 @@ class OrchestratorService:
 
         switch_to_holder: list[SwitchToSuggestion] = []
         signals_holder: list[LibrarianSignals] = []
+        library_books_holder: list[LibraryBookCard] = []
 
         def on_librarian_response(res: LibrarianResponse) -> None:
             if res.signals is not None:
@@ -161,11 +175,26 @@ class OrchestratorService:
             if res.switch_to is not None:
                 switch_to_holder.append(res.switch_to)
 
+        def on_library_books(books: list[LibraryBookItem]) -> None:
+            cards = [
+                LibraryBookCard(
+                    book_id=b.book_id,
+                    title=b.title,
+                    author=b.author,
+                    reading_status=b.reading_status,
+                    progress=b.progress,
+                )
+                for b in books
+            ]
+            library_books_holder.clear()
+            library_books_holder.extend(cards)
+
         agent = self._build_agent(
             history=history,
             session_id=session_id,
             meta=meta,
             on_librarian_response=on_librarian_response,
+            on_library_books=on_library_books,
             auth_token=auth_token,
         )
 
@@ -217,7 +246,10 @@ class OrchestratorService:
         await self._session_store.append_turn(
             session_id, {"role": "assistant", "content": response_text}
         )
-        return response_text, switch_to, signals
+        library_books: list[LibraryBookCard] | None = (
+            list(library_books_holder) if library_books_holder else None
+        )
+        return response_text, switch_to, signals, library_books
 
     async def get_initial_meta(
         self,
@@ -289,16 +321,32 @@ class OrchestratorService:
         history = await self._session_store.get_history(session_id)
 
         switch_to_holder: list[SwitchToSuggestion] = []
+        library_books_holder: list[LibraryBookCard] = []
 
         def on_librarian_response(res: LibrarianResponse) -> None:
             if res.switch_to is not None:
                 switch_to_holder.append(res.switch_to)
+
+        def on_library_books(books: list[LibraryBookItem]) -> None:
+            cards = [
+                LibraryBookCard(
+                    book_id=b.book_id,
+                    title=b.title,
+                    author=b.author,
+                    reading_status=b.reading_status,
+                    progress=b.progress,
+                )
+                for b in books
+            ]
+            library_books_holder.clear()
+            library_books_holder.extend(cards)
 
         agent = self._build_agent(
             history=history,
             session_id=session_id,
             meta=meta,
             on_librarian_response=on_librarian_response,
+            on_library_books=on_library_books,
             auth_token=auth_token,
         )
 

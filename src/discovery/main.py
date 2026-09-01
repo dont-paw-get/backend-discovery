@@ -36,7 +36,7 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
-        expose_headers=["X-Session-Id", "X-Signals", "X-Switch-To"],
+        expose_headers=["X-Session-Id", "X-Signals", "X-Switch-To", "X-Library-Books"],
     )
 
     @app.get("/health", tags=["Health"])

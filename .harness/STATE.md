@@ -28,6 +28,7 @@
 | CLIAR-193 Bedrock 장애·권한 예외 대응 백엔드 Graceful Fallback 및 사서 페르소나 안내 구축 | ✅ 완료 | Task 1(사서 페르소나별 fallback 안내 메시지 유틸리티 fallback.py 신설)·Task 2(OrchestratorService chat/stream_chat/get_initial_meta에 try-except 및 500 방어 배선)·Task 3(단위 테스트 4건 추가, 총 130건 및 정적 분석 100% 통과)·Task 4(하네스 문서 동기화) 모두 완료 |
 | CLIAR-194 스트리밍 초기 블로킹 제거(Fast TTFB) 및 사서 연동 장애 격리 고도화 | ✅ 완료 | Task 1(initial_meta_timeout_seconds 1.5초 설정 및 ConfigMap 반영)·Task 2(OrchestratorService get_initial_meta에 asyncio.wait_for Fail-Fast 타임아웃 및 장애 격리 배선)·Task 3(단위 테스트 3건 추가, 총 133건 및 정적 분석 100% 통과)·Task 4(하네스 문서 동기화) 모두 완료 |
 | CLIAR-195 내 서재 도서 조회 API Spring Data Page 및 전방위 규격 호환성 강화 | ✅ 완료 | Task 1(LibraryBooksResponse 및 LibraryBookItem에 Spring Page content, data 래핑, items, 순수 배열 전방위 model_validator 및 progress float 소수점 반올림 field_validator 추가)·Task 2(SearchMyLibraryTool page=0&size=100 파라미터 정렬 및 상세 로깅)·Task 3(단위 테스트 4건 추가, 총 137건 및 정적 분석 100% 통과)·Task 4(하네스 문서 동기화) 모두 완료 |
+| CLIAR-196 내 서재 도서 구조화 데이터(library_books) 응답 및 "책 열기" 연동 계약 구축 | ✅ 완료 | Task 1(openapi.yaml 계약 갱신, LibraryBookCard 및 ChatResponse.library_books 추가, CORS X-Library-Books 노출)·Task 2(SearchMyLibraryTool on_books_fetched 콜백 배선, format_books_for_llm book_id 미노출 유지)·Task 3(OrchestratorService 도서 카드 수집 및 반환 배선)·Task 4(블루/슈빌 프롬프트 자연스러운 대화문 정돈으로 프론트 파서 오작동 원천 차단)·Task 5(단위 테스트 139건 100% 통과, 복합 추천 회귀 테스트 포함)·Task 6(ADR 0005 작성 및 프론트 연동 스펙 정리) 모두 완료 |
 
 
 
