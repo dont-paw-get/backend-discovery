@@ -6,3 +6,13 @@ metadata:
 data:
   LLM_PROVIDER: "bedrock"
   LIBRARIAN_AGENT_URL: "http://backend-librarian.dpyb-librarian-dev.svc.cluster.local"
+  # --- OpenTelemetry 분산 트레이싱 (dev) ---
+  # OTel Collector(OTLP HTTP)로 전송 → Grafana Tempo. stdout JSON 로그는 Alloy가
+  # 수집해 Loki로 보내며, 로그의 trace_id로 Tempo ↔ Loki correlation이 된다.
+  # 이 값들은 비밀이 아니므로 ConfigMap에 둔다 (Secret으로 옮기지 않는다).
+  OTEL_SERVICE_NAME: "backend-discovery"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector.monitoring.svc.cluster.local:4318"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+  OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
+  OTEL_TRACES_SAMPLER_ARG: "1.0"
+  OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev,service.namespace=dpyb"

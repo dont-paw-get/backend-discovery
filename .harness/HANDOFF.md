@@ -797,3 +797,30 @@
 ### 다음 세션이 할 일 (CLIAR-216 착수)
 1. 사용자 승인 시 `CLIAR-171-Bedrock-Tuning` 커밋 생성 (`[CLIAR-171]` 태그, push 전 변경 파일/diff 제시), push 및 `develop` 대상 PR 생성.
 2. `develop` 머지 후 `CLIAR-216-Prompt-Guardrails` 브랜치 분기하여 `CLIAR-216 (QA기반 최적화b: 공통 가드레일 리팩터 및 프롬프트 고도화)` 착수.
+
+
+## 2026-09-02 — CLIAR-203 분산 트레이싱 + 구조화 JSON 로깅 통합 (다른 세션 작업 재검증 후 완성)
+- 브랜치: `CLIAR-203-discovery-server-logging-tracing`
+- 다른 세션이 착수했던 초안(`core/tracing.py`, `core/logging.py`, `tests/unit/test_tracing.py`, `observability.py`/`main.py`/`pyproject.toml`/`configmap` 수정)을 실측 검증한 결과 **다수 결함**을 발견해 전면 재작성했다:
+  1. `SpanContext.is_valid`는 property인데 `.is_valid()`로 호출 → `TypeError`로 `log_agent_metrics` 및 관련 테스트 37건 실패.
+  2. `SimpleSpanProcessor` 사용(요구사항은 `BatchSpanProcessor`).
+  3. `exclude_health_endpoints()`가 `instrument()` **후에** 환경변수를 설정 → 무효.
+  4. 전역 `FastAPIInstrumentor().instrument()`는 `discovery.main`이 `from fastapi import FastAPI`로 클래스를 먼저 바인딩해서 적용 안 됨 → server span 자체가 생성되지 않음.
+  5. OTel 의존성 버전핀이 `1.24.x`/`0.45b0`로, strands-agents 1.26이 요구하는 `opentelemetry-api/sdk 1.44.x` + instrumentation `0.65b0`와 충돌.
+  6. **가장 중요**: Strands 자체 tracer가 프롬프트/시스템 프롬프트/LLM 응답/도구 입출력을 span attribute·event에 무조건 넣는다는 점이 전혀 처리되지 않음(요구사항 12 위반). 이 버전엔 내용 수집을 끄는 env 스위치가 없음.
+- **최종 구현**:
+  - `core/tracing.py`: `configure_tracing()`(idempotent) — endpoint 있을 때만 `BatchSpanProcessor` + OTLP HTTP exporter, 샘플러/서비스명은 표준 env, W3C 전파 명시, redis/botocore/httpx 자동 계측. `instrument_fastapi_app(app)`는 `create_app()`에서 명시 호출(health probe 제외 `excluded_urls`). `_SanitizingSpanExporter`가 export 직전 `gen_ai.*` 내용 event 제거(`exception`은 보존)·민감 attribute 키 제거·URL query 제거·400자 초과 문자열 마스킹. 토큰/모델/지연 metadata는 유지.
+  - `core/logging.py`: `JsonLogFormatter` + `configure_json_logging()` — 루트 로거를 stdout JSON 핸들러 하나로 재구성, `trace_id`(32)/`span_id`(16) 주입, 민감 extra 키 마스킹, `uvicorn.access`는 WARNING으로 억제.
+  - `core/trace_context.py`: `current_trace_ids()` 공용 헬퍼(도메인이 OTel에 직접 의존하지 않게).
+  - `observability.py`: 헬퍼로 교체, `.is_valid()` 버그 수정.
+  - `pyproject.toml` + `uv.lock`: OTel 의존성 재정렬(전부 lock 반영, `uv sync` 완료).
+  - `k8s/base/configmap.yaml`(문서화 주석) + `k8s/overlays/dev/configmap-patch.yaml`(OTEL_SERVICE_NAME / OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_PROTOCOL / OTEL_TRACES_SAMPLER=parentbased_traceidratio / OTEL_TRACES_SAMPLER_ARG=1.0 / OTEL_RESOURCE_ATTRIBUTES=deployment.environment=dev). prod 미변경.
+  - `tests/unit/test_tracing.py`: 14건 재작성 — endpoint 미설정 정상, health 제외 + 일반 경로 server span, inbound traceparent 동일 trace ID 연속, httpx/redis/botocore 계측 활성, sanitizer(프롬프트/시스템프롬프트/장문/gen_ai event 제거 + 토큰/예외 보존 + URL query 제거), JSON 로그(필드/hex/마스킹/exception), 메트릭 로그 민감정보 부재.
+- **검증(로컬)**: `ruff check .` 통과, `mypy .` 통과(74 파일), `pytest -m "not integration"` 219건 통과. 별도 스모크로 FakeModel + strands Agent + endpoint 설정 시 export 파이프라인에 `LEAK_*` 문자열이 하나도 나가지 않음을 확인. 수신 불가 collector에 대해 export는 백그라운드 스레드에서 재시도·실패 로깅만 하고 요청 처리에 영향 없음을 확인. 통합 테스트는 로컬 Docker 데몬 미기동으로 미실행(CI 대상).
+- **커밋 안 함**. unstaged: `pyproject.toml` `uv.lock` `src/discovery/main.py` `src/discovery/core/observability.py` `k8s/base/configmap.yaml` `k8s/overlays/dev/configmap-patch.yaml` + untracked `src/discovery/core/{tracing,logging,trace_context}.py` `tests/unit/test_tracing.py`. (`.env`는 gitignore 대상 — 로컬 테스트용 더미값.)
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 `[CLIAR-203]` 태그로 커밋(Task 단위) → push → `develop` PR.
+2. dev 배포 후 Tempo에서 `{ resource.service.name = "backend-discovery" }` 조회, librarian → discovery 호출로 단일 Trace 연결 확인, Loki 로그 `trace_id`가 Tempo Trace ID와 일치하는지 확인(보고서 12·13절 참고).
+3. Alloy 수집 파이프라인에서 `trace_id`/`span_id`가 Loki **label로 승격되지 않도록** 확인(인프라 측).
+4. CLIAR-158 Task 3~5(캐싱/reasoning/전후 비교표) 실측이 여전히 미완 — dev 배포 시 함께 확인 권장.
