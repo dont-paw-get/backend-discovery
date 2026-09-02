@@ -3,11 +3,14 @@
 - 단일 JSON 라인 로깅 (logger.info)
 - 개인정보 보호: 사용자 메시지 원문은 로깅하지 않고 message_length만 기록
 - Strands AgentResult.metrics 요약 덤프 및 직접 계측 구간(TTFB, initial_meta 등) 기록
+- OpenTelemetry 트레이스 컨텍스트 (trace_id/span_id) 자동 포함
 """
 
 import json
 import logging
 from typing import Any
+
+from discovery.core.trace_context import current_trace_ids
 
 logger = logging.getLogger("discovery.observability")
 
@@ -23,7 +26,10 @@ def log_agent_metrics(
     direct_metrics: dict[str, Any] | None = None,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Agent 실행 메트릭 및 계측 데이터를 단일 JSON 라인으로 로깅한다."""
+    """Agent 실행 메트릭 및 계측 데이터를 단일 JSON 라인으로 로깅한다.
+
+    OpenTelemetry 활성 span context가 있으면 trace_id/span_id를 자동으로 포함한다.
+    """
     payload: dict[str, Any] = {
         "event": "agent_metrics",
         "phase": phase,
@@ -56,6 +62,12 @@ def log_agent_metrics(
             "tool_usage": filtered_tool_usage,
             "accumulated_usage": metrics_summary.get("accumulated_usage", {}),
         }
+
+    # OTel trace context 포함 (활성 span이 있을 때만) — Loki ↔ Tempo correlation
+    trace_id, span_id = current_trace_ids()
+    if trace_id is not None:
+        payload["trace_id"] = trace_id
+        payload["span_id"] = span_id
 
     if extra:
         payload.update(extra)

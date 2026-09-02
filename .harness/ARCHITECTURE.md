@@ -31,6 +31,8 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 | 패키지 관리 | uv (`pyproject.toml` + `uv.lock`) |
 | 정적 분석 | ruff, mypy |
 | 테스트 | pytest, pytest-asyncio, pytest-mock, testcontainers(redis), httpx |
+| 관측(트레이싱) | OpenTelemetry SDK 1.44 + OTLP HTTP/protobuf exporter, 자동 계측(FastAPI/redis/botocore/httpx), Strands 자체 agent span 활용. dev는 OTel Collector(`monitoring` ns) → Grafana Tempo |
+| 관측(로깅) | 표준 `logging` 기반 stdout JSON (`core/logging.py`), 각 로그에 `trace_id`/`span_id` 주입. Grafana Alloy가 컨테이너 stdout 수집 → Loki |
 
 **2026-08-21 방향 전환으로 제거된 것**: PostgreSQL, pgvector, SQLAlchemy(async),
 asyncpg, Alembic, testcontainers(postgres). RDB로 남는 데이터가 없어 완전히
@@ -72,8 +74,13 @@ backend-discovery/
 ├── archive/vector-search-poc/   폐기된 pgvector/RAG 코드 보관 (원래 경로 구조 유지)
 ├── docs/api/            openapi.yaml · README.md · decisions/
 ├── src/discovery/
-│   ├── main.py          FastAPI 앱 팩토리, lifespan(Redis만 초기화), /api/v1 라우터 배선
-│   ├── core/            config.py(pydantic-settings)
+│   ├── main.py          FastAPI 앱 팩토리, lifespan(Redis만 초기화), /api/v1 라우터 배선,
+│   │                     import 시 configure_json_logging() + configure_tracing() 1회 실행,
+│   │                     create_app()에서 instrument_fastapi_app(app) 호출
+│   ├── core/            config.py(pydantic-settings) · logging.py(stdout JSON 포매터) ·
+│   │                     tracing.py(OTel 초기화 + 자동 계측 + 프롬프트 스크러빙 exporter) ·
+│   │                     trace_context.py(활성 span → trace_id/span_id 헬퍼) ·
+│   │                     observability.py(Strands metrics 구조화 로그)
 │   ├── domain/          librarian/(agent.py, post_processor.py) · orchestrator/ · genre/
 │   ├── application/     librarian_service.py · orchestrator_service.py · genre_classifier_service.py
 │   ├── infrastructure/
@@ -111,6 +118,36 @@ backend-discovery/
     CLEAR(session_id)                       → DEL (히스토리 + 메타)
   ```
   `session_id`는 이 스토어가 생성하지 않는다. 호출자가 결정론적으로 발급해 주입한다.
+
+## 관측(Observability) — CLIAR-203
+
+목적: Trace + 구조화 로그 통합. Metrics/MeterProvider는 이번 범위 밖.
+
+- **초기화 위치**: `core/tracing.py`의 `configure_tracing()`(idempotent)이 전역
+  `TracerProvider`를 세팅한다. `OTEL_EXPORTER_OTLP_ENDPOINT`(또는 `_TRACES_ENDPOINT`)가
+  있을 때만 `BatchSpanProcessor` + OTLP HTTP exporter를 붙인다. 미설정(로컬)이면
+  export 없이 정상 기동. 샘플러/서비스명/리소스는 표준 OTel 환경변수로 제어
+  (`OTEL_TRACES_SAMPLER`, `OTEL_TRACES_SAMPLER_ARG`, `OTEL_SERVICE_NAME`,
+  `OTEL_RESOURCE_ATTRIBUTES`). 전파는 W3C Trace Context(+baggage).
+- **자동 계측**: FastAPI(server span, `health/healthz/readyz/livez` 제외 → probe로
+  Tempo 오염 방지), redis(GET/SET 등, `db.statement`는 `"SET ? ?"`로 값 마스킹됨),
+  botocore(Bedrock InvokeModel 등 — 기본값에서 프롬프트/본문 미수집), httpx(사서·서재
+  API 및 Tavily SDK 내부 호출).
+- **Strands Agent**: 전역 TracerProvider를 자동 인식해 `invoke_agent` /
+  `execute_event_loop_cycle` / `execute_tool <name>` / `chat` span을 스스로 생성한다.
+  custom business span은 추가하지 않는다.
+- **민감정보 스크러빙**: Strands tracer는 프롬프트·시스템 프롬프트·LLM 응답·도구
+  입출력을 span attribute/event에 넣는다. 이를 막기 위해 exporter 앞단에
+  `_SanitizingSpanExporter`를 두어 (1) `gen_ai.*` 등 내용 event 제거(`exception` event는
+  보존), (2) 민감 attribute 키 제거(`system_prompt`, `gen_ai.input.messages` 등),
+  (3) URL query string 제거, (4) 400자 초과 문자열 값 마스킹. 토큰 사용량·모델 ID·
+  지연시간 등 metadata는 유지한다.
+- **로그 ↔ Trace correlation**: `core/logging.py`의 `JsonLogFormatter`가 매 로그에
+  활성 span의 `trace_id`(32 hex)/`span_id`(16 hex)를 JSON 필드로 주입(활성 span
+  없으면 null). Loki label로 승격하지 않는다(고카디널리티). `observability.py`의
+  구조화 메트릭 로그도 동일 필드를 포함한다.
+- **dev 환경변수**: `k8s/overlays/dev/configmap-patch.yaml` (Secret 아님).
+- **테스트**: `tests/unit/test_tracing.py`.
 
 ## 외부 계약
 API wire 계약은 이 문서가 아니라 `docs/api/openapi.yaml`이 소유한다.
