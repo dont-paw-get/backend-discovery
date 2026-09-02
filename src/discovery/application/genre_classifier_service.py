@@ -47,31 +47,19 @@ class GenreClassifierService:
 
     def _classify_mock(self, request: BookClassificationRequest) -> BookClassificationResponse:
         """테스트 및 로컬 mock 환경을 위한 결정론적 규칙 기반 분류."""
-        # 1. raw_category 우선 매칭
-        if request.raw_category:
-            matched = match_standard_genre(request.raw_category)
+        # 1. ISBN 문자열 매칭 (테스트 편의성)
+        if request.isbn:
+            matched = match_standard_genre(request.isbn)
             if matched:
                 return BookClassificationResponse(genre=matched, confidence=1.0)
 
-        # 2. 제목 매칭
-        if request.title:
-            matched = match_standard_genre(request.title)
-            if matched:
-                return BookClassificationResponse(genre=matched, confidence=1.0)
-
-        # 3. 저자 매칭
-        if request.author:
-            matched = match_standard_genre(request.author)
-            if matched:
-                return BookClassificationResponse(genre=matched, confidence=1.0)
-
-        # 매칭되지 않을 경우 기본값 ETC
+        # 2. 매칭되지 않을 경우 기본값 NONE
         return BookClassificationResponse(genre=StandardGenre.NONE, confidence=1.0)
 
     async def classify_genre(
         self, request: BookClassificationRequest
     ) -> BookClassificationResponse:
-        """도서 정보를 기반으로 ERD 표준 16개 장르 중 1개로 분류한다."""
+        """도서 ISBN 정보를 기반으로 ERD 표준 16개 장르 중 1개로 분류한다."""
         if self._settings.llm_provider == "mock":
             return self._classify_mock(request)
 
@@ -85,12 +73,7 @@ class GenreClassifierService:
                 system_prompt=GENRE_CLASSIFIER_SYSTEM_PROMPT,
             )
 
-            prompt = build_classification_prompt(
-                title=request.title,
-                author=request.author,
-                raw_category=request.raw_category,
-                isbn=request.isbn,
-            )
+            prompt = build_classification_prompt(isbn=request.isbn)
 
             result = await agent.invoke_async(prompt=prompt)
             raw_text = _extract_text_from_message(result.message)
