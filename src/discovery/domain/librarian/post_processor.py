@@ -9,6 +9,7 @@ class RecommendedBookFields(TypedDict):
     author: str | None
     page_count: int | None
     reason: str | None
+    isbn: str | None
 
 
 _BOOK_BLOCK_PATTERN = re.compile(r"(?=(?:^|\n)### 📖)")
@@ -19,6 +20,31 @@ _AUTHOR_LINE_PATTERN = re.compile(
     r"-\s*\*\*저자\*\*:\s*(.+?)(?:\s*\((\d+)\s*쪽\))?\s*$", re.MULTILINE
 )
 _REASON_LINE_PATTERN = re.compile(r"-\s*\*\*추천\s*이유\*\*:\s*(.+?)\s*$", re.MULTILINE)
+# `<!-- isbn: 9788932917245 -->` 형식의 내부용 주석. 10자리 또는 13자리 숫자만 허용
+# (하이픈 등 구분자가 섞여 나올 가능성에 대비해 숫자만 추출한다).
+_ISBN_COMMENT_PATTERN = re.compile(r"<!--\s*isbn:\s*([0-9\- ]+?)\s*-->", re.IGNORECASE)
+
+
+def _extract_isbn(block: str) -> str | None:
+    """도서 블록에서 `<!-- isbn: ... -->` 내부 주석을 찾아 숫자만 남긴 ISBN을 반환한다."""
+    match = _ISBN_COMMENT_PATTERN.search(block)
+    if not match:
+        return None
+    digits = re.sub(r"[^0-9]", "", match.group(1))
+    if len(digits) not in (10, 13):
+        return None
+    return digits
+
+
+def strip_isbn_comments(text: str) -> str:
+    """사용자 응답에 `<!-- isbn: ... -->` 내부 주석이 남아있지 않도록 제거한다.
+
+    LLM이 프롬프트 지침대로 ISBN 주석을 도서 카드에 추가하더라도, 이 주석은 시스템이
+    내부적으로 페이지수를 재검증하는 용도일 뿐 최종 사용자 화면에는 노출되면 안 된다.
+    """
+    if not text:
+        return text
+    return _ISBN_COMMENT_PATTERN.sub("", text)
 
 
 def parse_recommended_books_from_markdown(markdown: str) -> list[RecommendedBookFields]:
@@ -26,6 +52,8 @@ def parse_recommended_books_from_markdown(markdown: str) -> list[RecommendedBook
 
     - 저자와 쪽수를 분리한다: `- **저자**: {name} ({page}쪽)` → `author="{name}"`,
       `page_count={page}`. 쪽수가 없으면 `page_count=None`.
+    - `<!-- isbn: ... -->` 내부 주석이 있으면 `isbn` 필드로 추출한다(10자리 또는 13자리
+      숫자가 아니면 무시).
     - 파싱 실패(필수 필드 누락 등)한 블록은 결과에서 건너뛴다(원본 마크다운 텍스트는
       항상 `message` 필드로 별도 보존되므로 파싱 실패가 사용자 응답 자체를 깨뜨리지 않는다).
 
@@ -64,9 +92,11 @@ def parse_recommended_books_from_markdown(markdown: str) -> list[RecommendedBook
         if reason_match:
             reason = reason_match.group(1).strip() or None
 
+        isbn = _extract_isbn(block)
+
         books.append(
             RecommendedBookFields(
-                title=title, author=author, page_count=page_count, reason=reason
+                title=title, author=author, page_count=page_count, reason=reason, isbn=isbn
             )
         )
     return books

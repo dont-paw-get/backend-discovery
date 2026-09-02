@@ -294,7 +294,9 @@ components:
         page_count:
           type: integer
           nullable: true
-          description: 총 페이지 수 (쪽수 확인 불가 시 null)
+          description: >-
+            총 페이지 수. 가능한 경우 알라딘 실조회(backend-book)로 검증된 값이며,
+            검증 실패 또는 서지 정보 확인 불가 시 null.
           example: 548
         reason:
           type: string

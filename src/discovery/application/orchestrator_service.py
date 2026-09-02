@@ -118,11 +118,18 @@ def _build_recommended_book_cards(response_text: str) -> list[RecommendedBookCar
     """최종 응답 텍스트에서 `### 📖` 도서 블록을 파싱하여 구조화 카드 목록으로 변환한다.
 
     파싱 결과가 없으면(도서 추천 응답이 아니었거나 파싱 실패) `None`을 반환한다.
+    페이지수는 이미 `RecommendBooksTool.recommend()` 단계에서 알라딘 실조회로 검증되어
+    마크다운에 반영된 상태이므로(CLIAR-237), 이 함수는 순수하게 파싱만 수행한다.
     """
     parsed = parse_recommended_books_from_markdown(response_text)
     if not parsed:
         return None
-    return [RecommendedBookCard(**book) for book in parsed]
+    return [
+        RecommendedBookCard(
+            title=b["title"], author=b["author"], page_count=b["page_count"], reason=b["reason"]
+        )
+        for b in parsed
+    ]
 
 
 class OrchestratorService:

@@ -50,6 +50,12 @@ class Settings(BaseSettings):
         "http://k8s-dpybbook-backendb-d17a725d36-1113312703.ap-northeast-2.elb.amazonaws.com"
     )
     library_http_timeout_seconds: float = 10.0
+    # CLIAR-237: 추천 도서 페이지수를 알라딘 실조회로 검증하기 위한 backend-book 서지 조회
+    # 엔드포인트. backend-book이 library_api_url과 동일 서비스이므로 기본값을 재사용한다.
+    book_metadata_api_url: str = (
+        "http://k8s-dpybbook-backendb-d17a725d36-1113312703.ap-northeast-2.elb.amazonaws.com"
+    )
+    book_metadata_timeout_seconds: float = 3.0
     tavily_api_key: str
     tavily_cache_ttl_seconds: int = 86400
     tavily_monthly_credit_limit: int = 900

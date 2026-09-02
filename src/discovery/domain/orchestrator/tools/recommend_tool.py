@@ -1,5 +1,7 @@
 """추천 에이전트를 오케스트레이터의 도구로 감싸는 로컬 도구."""
 
+import asyncio
+import re
 import time
 from typing import Any
 
@@ -10,8 +12,11 @@ from discovery.core.observability import log_agent_metrics
 from discovery.domain.librarian.agent import create_librarian_agent
 from discovery.domain.librarian.post_processor import (
     extract_text_from_message,
+    parse_recommended_books_from_markdown,
+    strip_isbn_comments,
     truncate_books_by_count,
 )
+from discovery.domain.orchestrator.tools.book_metadata_client import BookMetadataClient
 from discovery.infrastructure.search.book_search_tool import BookSearchTool
 
 
@@ -22,9 +27,11 @@ class RecommendBooksTool:
         self,
         book_search_tool: BookSearchTool,
         settings: Settings,
+        book_metadata_client: BookMetadataClient | None = None,
     ) -> None:
         self._book_search_tool = book_search_tool
         self._settings = settings
+        self._book_metadata_client = book_metadata_client
 
     async def recommend(
         self,
@@ -38,6 +45,12 @@ class RecommendBooksTool:
         - `count`는 1~5 범위로 clamp하여 생성량을 유도한다.
         - 반환 지점에서 `truncate_books_by_count` 순수 함수를 호출하여
           초과분을 결정론적으로 잘라낸다.
+        - CLIAR-237: 각 도서 블록의 `<!-- isbn: ... -->` 내부 주석으로 ISBN을 확인하면
+          `backend-book`의 알라딘 실조회 API로 정확한 페이지수를 검증하여 마크다운의
+          `({페이지수}쪽)` 표기를 덮어쓴다. 검증 실패/ISBN 없음 시 LLM 생성값을 유지한다.
+          ISBN 주석 자체는 사용자에게 노출되면 안 되므로 항상 최종 반환 전에 제거한다
+          (오케스트레이터/스트리밍 응답 어느 경로로도 새어나가지 않도록 이 지점에서
+          완전히 소비한다).
         - 하위 에이전트 실행 메트릭(Strands metrics 및 소요시간)을 수집하여 로깅한다.
         """
         start_time = time.perf_counter()
@@ -52,7 +65,8 @@ class RecommendBooksTool:
         prompt = f"{query}\n\n[요청] 반드시 {clamped_count}권의 도서만 추천해주세요."
         result = await agent.invoke_async(prompt=prompt)
         raw_text = extract_text_from_message(result.message)
-        processed_text = truncate_books_by_count(raw_text, count=clamped_count)
+        truncated_text = truncate_books_by_count(raw_text, count=clamped_count)
+        processed_text = await self._verify_page_counts(truncated_text)
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         metrics_summary = (
@@ -70,6 +84,39 @@ class RecommendBooksTool:
             direct_metrics={"total_duration_ms": duration_ms},
         )
         return processed_text
+
+    async def _verify_page_counts(self, markdown: str) -> str:
+        """마크다운의 각 `### 📖` 도서 블록에서 ISBN을 추출해 페이지수를 검증하고,
+        검증된 값으로 `({페이지수}쪽)` 표기를 덮어쓴 뒤 ISBN 주석을 제거한다.
+
+        `book_metadata_client`가 배선되지 않았거나 ISBN이 하나도 없으면 알라딘 호출
+        없이 주석만 제거하고 즉시 반환한다.
+        """
+        if self._book_metadata_client is None:
+            return strip_isbn_comments(markdown)
+
+        parsed = parse_recommended_books_from_markdown(markdown)
+        isbn_by_title: dict[str, str] = {
+            b["title"]: isbn for b in parsed if (isbn := b.get("isbn")) is not None
+        }
+        if not isbn_by_title:
+            return strip_isbn_comments(markdown)
+
+        titles = list(isbn_by_title.keys())
+        verified_pages = await asyncio.gather(
+            *(self._book_metadata_client.fetch_total_pages(isbn_by_title[t]) for t in titles)
+        )
+        page_by_title = {
+            title: pages for title, pages in zip(titles, verified_pages, strict=True) if pages
+        }
+
+        markdown = strip_isbn_comments(markdown)
+        if not page_by_title:
+            return markdown
+
+        for title, verified_page in page_by_title.items():
+            markdown = _replace_page_count_for_title(markdown, title, verified_page)
+        return markdown
 
     def as_tool(
         self,
@@ -96,3 +143,22 @@ class RecommendBooksTool:
             )
 
         return recommend_books_tool
+
+
+def _replace_page_count_for_title(markdown: str, title: str, verified_page: int) -> str:
+    """지정된 도서 제목의 저자 줄에 있는 `({N}쪽)` 표기를 검증된 페이지수로 교체한다.
+
+    저자 줄에 쪽수 표기가 없으면(LLM이 생략했거나 근사치 표현을 프롬프트 지침에 따라
+    쓰지 않은 경우) 새로 추가한다.
+    """
+    block_pattern = re.compile(
+        r"(### 📖\s*" + re.escape(title) + r"\s*\n-\s*\*\*저자\*\*:\s*)(.+?)(\s*\n)"
+    )
+
+    def _replace(match: re.Match[str]) -> str:
+        prefix, author_segment, suffix = match.group(1), match.group(2), match.group(3)
+        # 기존 "(N쪽)" 또는 "(약 N쪽)" 등 근사치 표현을 제거하고 검증된 값으로 교체.
+        author_only = re.sub(r"\s*\([^)]*쪽\)\s*$", "", author_segment).strip()
+        return f"{prefix}{author_only} ({verified_page}쪽){suffix}"
+
+    return block_pattern.sub(_replace, markdown, count=1)
