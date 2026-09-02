@@ -826,6 +826,7 @@
 4. CLIAR-158 Task 3~5(캐싱/reasoning/전후 비교표) 실측이 여전히 미완 — dev 배포 시 함께 확인 권장.
 
 
+
 ## 2026-09-02 — CLIAR-235 도서 표준 장르 분류 API의 ISBN 단일 요청 필드 개편 완료
 - 브랜치: `CLIAR-235-Genre-Classification-ISBN-Only` (`develop`에서 분기)
 - 도서 등록 및 OCR 파이프라인에서 고유 식별자인 `isbn`만을 기준으로 도서를 식별하고 16개 표준 장르 분류를 수행하도록 `POST /api/v1/classify-genre` API를 개편했다:
@@ -837,4 +838,44 @@
 
 ### 다음 세션이 할 일
 1. 사용자 승인 시 `CLIAR-235` 커밋 생성 (`[CLIAR-235]` 태그 사용), push 및 `develop` 대상 PR 생성.
+2. `develop` 머지 후 `CLIAR-216-Prompt-Guardrails` 브랜치 분기하여 `CLIAR-216 (QA기반 최적화b: 공통 가드레일 리팩터 및 프롬프트 고도화)` 착수.
+
+
+## 2026-09-02 — CLIAR-229 완료(PR #37) 및 CLIAR-236(고도화 후 자잘한 버그 수정) 원인 실측·계획 확정
+- CLIAR-229(추천 카드 구조화 필드 `RecommendedBookCard` + `sanitize_html_tags`)를 `CLIAR-229-Recommendation-Card-Structuring` 브랜치에서 완료. 커밋 2건(코드+ADR 0008/문서), push 및 PR #37(`develop` 대상) 생성 완료. 머지는 사용자 승인 대기 중.
+- 프론트팀이 `recommended_books` 구조화 필드 연동(`RegisterBook.jsx`, `bookExtractor.js`, `chatApi.js`) 및 `<br>` 렌더러 정규화(`MarkdownRenderer.jsx`, `LibrarianCursor.jsx`)를 완료했다고 보고함(코드는 직접 확인 못 함, 계약 필드명만 대조 확인 — `recommendedBooks` camelCase 키로는 응답이 안 나간다는 점을 프론트에 정정 전달함).
+- CLIAR-229 dev 배포 후 재현 테스트 중 **새로운 버그**를 발견: 슈빌 모드에서 "명탐정 코난 추천해줘" → 블루로 스위치 → 다음 요청에서 사서 fallback 문구("냥냥... 통신 연결이 끊겼다냥") 노출.
+- `kubectl logs`(파드 `backend-discovery-556f467c4f-5qmxf`)로 실제 원인을 확정함: Claude Sonnet 5가 `recommend_books` 도구 호출 시 정상 Bedrock `toolUse` 블록이 아니라 `<invoke name="recommend_books">...</invoke>` XML 텍스트를 assistant 텍스트로 그대로 출력(포맷 붕괴). Strands가 이를 tool_use로 인식 못해 대화가 assistant로 끝난 상태가 되고 `ValidationException: This model does not support assistant message prefill`로 거부됨. `temperature`/`top_p` 완전 제거(CLIAR-171 핫픽스)와 상관관계 의심되나 확정 불가(Sonnet 5가 두 파라미터 다 미지원이라 되돌릴 수 없음).
+- 이 문제를 **CLIAR-236**(고도화 후 자잘한 버그 수정)으로 명명하고, "재시도(retry) 방어 로직"으로 완화하는 상세 계획을 `.harness/PLAN.md`에 확정 작성함(Task 1: `ValidationException` 메시지 패턴 감지 → 새 Agent 재생성 후 1회 재시도, Task 2: 재시도 경로 단위 테스트, Task 3: 검증 및 dev 재현 확인). `.harness/DECISIONS.md`에도 근본 원인과 재시도 방식 선택 근거를 기록함.
+- 코드 구현은 아직 착수하지 않았다. 이번 세션은 원인 조사와 계획 확정만 완료.
+
+### 다음 세션이 할 일
+1. **`develop`에서 `CLIAR-236-Post-Optimization-Bug-Fixes` 브랜치를 새로 분기하고 PLAN.md의 Task 1부터 바로 착수한다** (사용자가 "제안한 내용대로 바로 시작"을 명시적으로 확정함).
+2. Task 1 구현 시 `orchestrator_service.py`의 `chat`(라인 ~271 `agent.invoke_async` 호출부)과 `stream_chat`(라인 ~550 `agent.stream_async` 호출부) 양쪽에 재시도 로직을 적용해야 한다. 스트리밍은 첫 청크 전송 여부에 따라 재시도 가능 여부가 달라짐에 주의(이미 청크가 나간 뒤에는 재시도하지 말고 기존 fallback 유지).
+3. PR #37(CLIAR-229)이 아직 머지되지 않은 상태이므로, CLIAR-236 브랜치는 `origin/develop`(PR #37 머지 전 기준) 또는 머지 후 최신 `develop`에서 분기할지 사용자와 확인 필요 — `RecommendedBookCard`/`recommended_books` 관련 코드와 충돌 소지는 없어 순서는 크게 상관없어 보이나 브랜치 정책상 최신 `develop` 기준이 안전하다.
+4. CLIAR-236 완료 후 CLIAR-216(QA 가드레일 고도화) 착수.
+
+
+## 2026-09-02 — CLIAR-236 Claude Sonnet 5 도구 호출 포맷 붕괴(ValidationException) 방어 재시도 구현 완료
+- 브랜치: `CLIAR-236-Post-Optimization-Bug-Fixes` (`develop` 최신 헤드에서 분기)
+- CLIAR-236의 모든 Task(Task 1~3)를 완료했다:
+  - **Task 1 (`is_tool_call_format_error` 및 재시도 배선)**:
+    - `src/discovery/application/orchestrator_service.py`에 `TOOL_CALL_FORMAT_ERROR_PATTERNS` 상수 및 `is_tool_call_format_error(exc)` 순수 헬퍼 함수 신설 (`"assistant message prefill"`, `"must end with a user message"` 및 `__cause__`/`__context__` 검사).
+    - `chat`: 1차 `invoke_async`에서 포맷 붕괴 예외 감지 시, 오염된 메시지 상태를 버리고 세션 히스토리 기준으로 새 `Agent`를 재생성하여 1회 재시도. 재시도 실패 시 `[BEDROCK_FALLBACK]` 폴백 메시지 반환. `format_retry_triggered`를 `log_agent_metrics`에 기록.
+    - `stream_chat`: 1차 `stream_async`에서 포맷 붕괴 예외 감지 시, **TTFB 이전(첫 청크 전송 전)일 때만** 새 `Agent`를 재생성하여 1회 재시도. 이미 청크가 클라이언트로 나간(TTFB 이후) 상태에서는 응답 뒤섞임 방지를 위해 재시도하지 않고 fallback chunk를 이어붙임.
+  - **Task 2 (단위 테스트 작성 및 회귀 검증)**:
+    - `tests/unit/test_orchestrator_service.py`에 단위 테스트 6건 신설:
+      1) `test_is_tool_call_format_error`: prefill 메시지, cause/context 중첩, 일반 에러(False), 상수 검증
+      2) `test_chat_retries_on_format_collapse_and_succeeds`: 동기 1회 실패 ➔ 재시도 성공 검증
+      3) `test_chat_retries_on_format_collapse_and_fails_to_fallback`: 동기 1회 실패 ➔ 재시도 실패 ➔ fallback 검증
+      4) `test_stream_chat_retries_on_format_collapse_before_ttfb_and_succeeds`: 스트리밍 TTFB 전 실패 ➔ 재시도 성공 검증
+      5) `test_stream_chat_retries_on_format_collapse_and_fails_to_fallback`: 스트리밍 TTFB 전 실패 ➔ 재시도 실패 ➔ fallback 검증
+      6) `test_stream_chat_does_not_retry_if_chunks_already_yielded`: 스트리밍 TTFB 후 실패 시 재시도 생략 및 fallback chunk 결합 검증
+  - **Task 3 (검증 및 문서 동기화)**:
+    - 정적 분석(`ruff`, `mypy`) 100% 통과 (74개 소스 파일).
+    - 단위 테스트 232건 100% 통과.
+    - `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md`, `.harness/DECISIONS.md` 동기화 완료.
+
+### 다음 세션이 할 일 (CLIAR-216 착수)
+1. 사용자 승인 시 `CLIAR-236-Post-Optimization-Bug-Fixes` 커밋 생성 (`[CLIAR-236]` 태그, push 전 변경 파일/diff 제시), push 및 `develop` 대상 PR 생성.
 2. `develop` 머지 후 `CLIAR-216-Prompt-Guardrails` 브랜치 분기하여 `CLIAR-216 (QA기반 최적화b: 공통 가드레일 리팩터 및 프롬프트 고도화)` 착수.

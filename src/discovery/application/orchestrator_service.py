@@ -51,6 +51,35 @@ from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
 
 logger = logging.getLogger(__name__)
 
+# Bedrock Converse API에서 Claude 도구 호출 포맷 붕괴 시 발생하는 ValidationException 패턴
+TOOL_CALL_FORMAT_ERROR_PATTERNS: tuple[str, ...] = (
+    "assistant message prefill",
+    "must end with a user message",
+)
+
+
+def is_tool_call_format_error(exc: BaseException) -> bool:
+    """Bedrock ValidationException 중 assistant prefill 에러인지 판별한다.
+
+    Claude Sonnet 5가 도구 호출 시 toolUse 블록 대신 raw XML 태그를 assistant 텍스트로
+    출력했을 때, Strands가 이를 일반 텍스트로 처리하여 다음 Converse 호출 시 대화가
+    assistant 턴으로 끝나 Bedrock이 'assistant message prefill' 예외를 반환한다.
+    """
+    msg = str(exc).lower()
+    if any(p in msg for p in TOOL_CALL_FORMAT_ERROR_PATTERNS):
+        return True
+
+    if exc.__cause__ is not None and any(
+        p in str(exc.__cause__).lower() for p in TOOL_CALL_FORMAT_ERROR_PATTERNS
+    ):
+        return True
+    if exc.__context__ is not None and any(
+        p in str(exc.__context__).lower() for p in TOOL_CALL_FORMAT_ERROR_PATTERNS
+    ):
+        return True
+
+    return False
+
 
 def extract_fallback_text(agent: Agent) -> str:
     """오케스트레이터가 도구 실행 후 텍스트를 생성하지 않았을 때 toolResult 텍스트를 추출한다."""
@@ -283,8 +312,57 @@ class OrchestratorService:
         )
 
         orchestrator_metrics: dict[str, Any] | None = None
+        format_retry_triggered = False
         try:
             result = await agent.invoke_async(prompt=message)
+        except Exception as e:
+            if is_tool_call_format_error(e):
+                format_retry_triggered = True
+                logger.warning(
+                    "[FORMAT_COLLAPSE_RETRY] Detected assistant prefill format collapse in chat. "
+                    "Rebuilding agent and retrying 1 time (session_id=%s, librarian_id=%s): %s",
+                    session_id,
+                    meta.get("librarian_id"),
+                    e,
+                )
+                switch_to_holder.clear()
+                signals_holder.clear()
+                library_books_holder.clear()
+                consult_called = False
+                auth_failed = False
+
+                agent = self._build_agent(
+                    history=history,
+                    session_id=session_id,
+                    meta=meta,
+                    on_librarian_response=on_librarian_response,
+                    on_library_books=on_library_books,
+                    auth_token=auth_token,
+                    on_auth_failed=on_auth_failed,
+                )
+                try:
+                    result = await agent.invoke_async(prompt=message)
+                except Exception as retry_err:
+                    logger.exception(
+                        "[BEDROCK_FALLBACK] chat retry also failed "
+                        "(session_id=%s, librarian_id=%s): %s",
+                        session_id,
+                        meta.get("librarian_id"),
+                        retry_err,
+                    )
+                    result = None
+                    response_text = get_llm_fallback_message(meta.get("librarian_id"))
+            else:
+                logger.exception(
+                    "[BEDROCK_FALLBACK] chat invoke failed (session_id=%s, librarian_id=%s): %s",
+                    session_id,
+                    meta.get("librarian_id"),
+                    e,
+                )
+                result = None
+                response_text = get_llm_fallback_message(meta.get("librarian_id"))
+
+        if result is not None:
             if hasattr(result, "metrics") and result.metrics:
                 orchestrator_metrics = result.metrics.get_summary()
             response_text = extract_text_from_message(result.message)
@@ -303,15 +381,6 @@ class OrchestratorService:
                         response_text = tool_result
                 elif not response_text.strip():
                     response_text = tool_result
-
-        except Exception as e:
-            logger.exception(
-                "[BEDROCK_FALLBACK] chat invoke failed (session_id=%s, librarian_id=%s): %s",
-                session_id,
-                meta.get("librarian_id"),
-                e,
-            )
-            response_text = get_llm_fallback_message(meta.get("librarian_id"))
 
         # ADR 0007 2.2절: backend-book이 401(위조/만료 토큰)을 반환하면 조용히
         # 흡수하지 않고 라우터가 401로 전달할 수 있도록 예외를 다시 던진다.
@@ -363,6 +432,9 @@ class OrchestratorService:
         recommended_books = _build_recommended_book_cards(response_text)
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        direct_metrics: dict[str, Any] = {"total_duration_ms": duration_ms}
+        if format_retry_triggered:
+            direct_metrics["format_retry_triggered"] = True
         log_agent_metrics(
             phase="orchestrator",
             session_id=session_id,
@@ -370,7 +442,7 @@ class OrchestratorService:
             mode="sync",
             message_length=len(message),
             metrics_summary=orchestrator_metrics,
-            direct_metrics={"total_duration_ms": duration_ms},
+            direct_metrics=direct_metrics,
         )
         return response_text, switch_to, signals, library_books, recommended_books
 
@@ -548,6 +620,7 @@ class OrchestratorService:
         full_response: list[str] = []
         ttfb_ms: float | None = None
         orchestrator_metrics: dict[str, Any] | None = None
+        format_retry_triggered = False
 
         try:
             async for event in agent.stream_async(prompt=message):
@@ -562,17 +635,70 @@ class OrchestratorService:
                     if hasattr(res_obj, "metrics") and res_obj.metrics:
                         orchestrator_metrics = res_obj.metrics.get_summary()
         except Exception as e:
-            logger.exception(
-                "[BEDROCK_FALLBACK] stream_chat failed (session_id=%s, librarian_id=%s): %s",
-                session_id,
-                meta.get("librarian_id"),
-                e,
-            )
-            fallback_chunk = get_llm_fallback_message(meta.get("librarian_id"))
-            if full_response:
-                fallback_chunk = f"\n\n{fallback_chunk}"
-            full_response.append(fallback_chunk)
-            yield fallback_chunk
+            if is_tool_call_format_error(e) and not full_response:
+                format_retry_triggered = True
+                logger.warning(
+                    "[FORMAT_COLLAPSE_RETRY] Detected assistant prefill format collapse "
+                    "before TTFB in stream. Rebuilding agent and retrying 1 time "
+                    "(session_id=%s, librarian_id=%s): %s",
+                    session_id,
+                    meta.get("librarian_id"),
+                    e,
+                )
+                switch_to_holder.clear()
+                library_books_holder.clear()
+                consult_called = False
+                auth_failed = False
+                if prefetched_librarian is not None and prefetched_librarian.switch_to is not None:
+                    switch_to_holder.append(prefetched_librarian.switch_to)
+
+                agent = self._build_agent(
+                    history=history,
+                    session_id=session_id,
+                    meta=meta,
+                    on_librarian_response=on_librarian_response,
+                    on_library_books=on_library_books,
+                    auth_token=auth_token,
+                    prefetched_librarian=prefetched_librarian,
+                    on_auth_failed=on_auth_failed,
+                )
+                try:
+                    async for event in agent.stream_async(prompt=message):
+                        chunk = extract_chunk_from_event(event)
+                        if chunk:
+                            if ttfb_ms is None:
+                                ttfb_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                            full_response.append(chunk)
+                            yield chunk
+                        if isinstance(event, dict) and "result" in event:
+                            res_obj = event["result"]
+                            if hasattr(res_obj, "metrics") and res_obj.metrics:
+                                orchestrator_metrics = res_obj.metrics.get_summary()
+                except Exception as retry_err:
+                    logger.exception(
+                        "[BEDROCK_FALLBACK] stream_chat retry also failed "
+                        "(session_id=%s, librarian_id=%s): %s",
+                        session_id,
+                        meta.get("librarian_id"),
+                        retry_err,
+                    )
+                    fallback_chunk = get_llm_fallback_message(meta.get("librarian_id"))
+                    if full_response:
+                        fallback_chunk = f"\n\n{fallback_chunk}"
+                    full_response.append(fallback_chunk)
+                    yield fallback_chunk
+            else:
+                logger.exception(
+                    "[BEDROCK_FALLBACK] stream_chat failed (session_id=%s, librarian_id=%s): %s",
+                    session_id,
+                    meta.get("librarian_id"),
+                    e,
+                )
+                fallback_chunk = get_llm_fallback_message(meta.get("librarian_id"))
+                if full_response:
+                    fallback_chunk = f"\n\n{fallback_chunk}"
+                full_response.append(fallback_chunk)
+                yield fallback_chunk
 
         # ADR 0007 2.2절: backend-book이 401(위조/만료 토큰)을 반환하면 동기(chat)
         # 경로는 예외로 전달해 라우터가 401을 반환할 수 있게 한다. 스트리밍 경로는
@@ -641,6 +767,12 @@ class OrchestratorService:
         )
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        direct_metrics_stream: dict[str, Any] = {
+            "ttfb_ms": ttfb_ms,
+            "total_duration_ms": duration_ms,
+        }
+        if format_retry_triggered:
+            direct_metrics_stream["format_retry_triggered"] = True
         log_agent_metrics(
             phase="orchestrator",
             session_id=session_id,
@@ -648,7 +780,7 @@ class OrchestratorService:
             mode="stream",
             message_length=len(message),
             metrics_summary=orchestrator_metrics,
-            direct_metrics={"ttfb_ms": ttfb_ms, "total_duration_ms": duration_ms},
+            direct_metrics=direct_metrics_stream,
         )
 
 

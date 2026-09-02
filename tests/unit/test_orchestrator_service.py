@@ -1356,5 +1356,323 @@ async def test_stream_chat_emits_observability_metrics(
     assert call_kwargs["direct_metrics"]["total_duration_ms"] is not None
 
 
+def test_is_tool_call_format_error() -> None:
+    from discovery.application.orchestrator_service import (
+        TOOL_CALL_FORMAT_ERROR_PATTERNS,
+        is_tool_call_format_error,
+    )
+
+    assert "assistant message prefill" in TOOL_CALL_FORMAT_ERROR_PATTERNS
+    assert "must end with a user message" in TOOL_CALL_FORMAT_ERROR_PATTERNS
+
+    # 1. assistant message prefill 포함
+    err1 = RuntimeError(
+        "ValidationException: The model returned the following errors: "
+        "This model does not support assistant message prefill. "
+        "The conversation must end with a user message."
+    )
+    assert is_tool_call_format_error(err1) is True
+
+    # 2. must end with a user message 포함
+    err2 = Exception("Bedrock error: conversation must end with a user message")
+    assert is_tool_call_format_error(err2) is True
+
+    # 3. Cause에 중첩된 경우
+    cause_err = RuntimeError("ValidationException: assistant message prefill")
+    wrapper_err = Exception("Strands execution failed")
+    wrapper_err.__cause__ = cause_err
+    assert is_tool_call_format_error(wrapper_err) is True
+
+    # 4. Context에 중첩된 경우
+    context_err = RuntimeError("ValidationException: must end with a user message")
+    wrapper_err_ctx = Exception("Strands loop failed")
+    wrapper_err_ctx.__context__ = context_err
+    assert is_tool_call_format_error(wrapper_err_ctx) is True
+
+    # 5. 무관한 예외 (False)
+    assert is_tool_call_format_error(RuntimeError("AccessDeniedException explicit deny")) is False
+    assert is_tool_call_format_error(RuntimeError("ThrottlingException rate limit")) is False
+    assert is_tool_call_format_error(ValueError("Invalid argument")) is False
+
+
+@pytest.mark.asyncio
+async def test_chat_retries_on_format_collapse_and_succeeds(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_log = mocker.patch("discovery.application.orchestrator_service.log_agent_metrics")
+
+    # 1차 에이전트: ValidationException (assistant message prefill) 실패
+    mock_agent_1 = MagicMock()
+    mock_agent_1.invoke_async = AsyncMock(
+        side_effect=RuntimeError(
+            "ValidationException: This model does not support assistant message prefill. "
+            "The conversation must end with a user message."
+        )
+    )
+
+    # 2차 에이전트(재시도): 성공
+    mock_agent_2 = MagicMock()
+    mock_result_2 = MagicMock()
+    mock_result_2.message = {
+        "role": "assistant",
+        "content": [{"text": "재시도 성공했다냥! 🐾"}],
+    }
+    mock_agent_2.invoke_async = AsyncMock(return_value=mock_result_2)
+    mock_agent_2.messages = []
+
+    mock_create_agent = mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        side_effect=[mock_agent_1, mock_agent_2],
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        response, switch_to, signals, library_books, recommended_books = await service.chat(
+            session_id="sess-retry-ok",
+            message="명탐정 코난 추천해줘",
+        )
+
+    assert response == "재시도 성공했다냥! 🐾"
+    assert "[FORMAT_COLLAPSE_RETRY]" in caplog.text
+    assert mock_create_agent.call_count == 2
+    assert mock_agent_1.invoke_async.await_count == 1
+    assert mock_agent_2.invoke_async.await_count == 1
+
+    mock_log.assert_called_once()
+    assert mock_log.call_args.kwargs["direct_metrics"].get("format_retry_triggered") is True
+
+
+@pytest.mark.asyncio
+async def test_chat_retries_on_format_collapse_and_fails_to_fallback(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_log = mocker.patch("discovery.application.orchestrator_service.log_agent_metrics")
+
+    format_err = RuntimeError(
+        "ValidationException: This model does not support assistant message prefill."
+    )
+
+    mock_agent_1 = MagicMock()
+    mock_agent_1.invoke_async = AsyncMock(side_effect=format_err)
+
+    mock_agent_2 = MagicMock()
+    mock_agent_2.invoke_async = AsyncMock(side_effect=RuntimeError("Bedrock timeout on retry"))
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        side_effect=[mock_agent_1, mock_agent_2],
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        response, switch_to, signals, library_books, recommended_books = await service.chat(
+            session_id="sess-retry-fail",
+            message="명탐정 코난 추천해줘",
+        )
+
+    assert "냥냥... 서재 책장을 정리하던 중에 통신 연결이 잠시 끊겼다냥 🐾" in response
+    assert "[FORMAT_COLLAPSE_RETRY]" in caplog.text
+    assert "[BEDROCK_FALLBACK]" in caplog.text
+    assert mock_log.call_args.kwargs["direct_metrics"].get("format_retry_triggered") is True
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_retries_on_format_collapse_before_ttfb_and_succeeds(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_log = mocker.patch("discovery.application.orchestrator_service.log_agent_metrics")
+
+    async def fake_failing_stream(prompt: str) -> Any:
+        raise RuntimeError("ValidationException: assistant message prefill")
+        yield {"data": "never"}
+
+    async def fake_success_stream(prompt: str) -> Any:
+        yield {"data": "스트림 재시도 "}
+        yield {"data": "성공했다냥! 🐾"}
+
+    mock_agent_1 = MagicMock()
+    mock_agent_1.stream_async = fake_failing_stream
+
+    mock_agent_2 = MagicMock()
+    mock_agent_2.stream_async = fake_success_stream
+    mock_agent_2.messages = []
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        side_effect=[mock_agent_1, mock_agent_2],
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    chunks = []
+    with caplog.at_level(logging.WARNING):
+        async for chunk in service.stream_chat(
+            session_id="sess-stream-retry-ok", message="코난 추천"
+        ):
+            chunks.append(chunk)
+
+    assert "".join(chunks) == "스트림 재시도 성공했다냥! 🐾"
+    assert "[FORMAT_COLLAPSE_RETRY]" in caplog.text
+    assert mock_log.call_args.kwargs["direct_metrics"].get("format_retry_triggered") is True
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_retries_on_format_collapse_and_fails_to_fallback(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "stork"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    async def fake_failing_stream_1(prompt: str) -> Any:
+        raise RuntimeError("ValidationException: assistant message prefill")
+        yield {"data": "never"}
+
+    async def fake_failing_stream_2(prompt: str) -> Any:
+        raise RuntimeError("Network error on stream retry")
+        yield {"data": "never"}
+
+    mock_agent_1 = MagicMock()
+    mock_agent_1.stream_async = fake_failing_stream_1
+
+    mock_agent_2 = MagicMock()
+    mock_agent_2.stream_async = fake_failing_stream_2
+    mock_agent_2.messages = []
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        side_effect=[mock_agent_1, mock_agent_2],
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    chunks = []
+    with caplog.at_level(logging.WARNING):
+        async for chunk in service.stream_chat(
+            session_id="sess-stream-retry-fail", message="경영학 추천"
+        ):
+            chunks.append(chunk)
+
+    full_output = "".join(chunks)
+    assert "두둥! 서재 사서실 통신에 일시적인 장애가 발생했습니다 🪶" in full_output
+    assert "[FORMAT_COLLAPSE_RETRY]" in caplog.text
+    assert "[BEDROCK_FALLBACK]" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_does_not_retry_if_chunks_already_yielded(
+    mocker: MockerFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """이미 청크가 클라이언트로 나간(TTFB 이후) 상태에서는 포맷 에러라도 재시도하지 않고
+    fallback chunk를 이어붙인다."""
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    async def fake_midstream_format_err(prompt: str) -> Any:
+        yield {"data": "추천 도서를 찾아봤다냥...\n"}
+        raise RuntimeError("ValidationException: assistant message prefill")
+
+    mock_agent = MagicMock()
+    mock_agent.stream_async = fake_midstream_format_err
+    mock_agent.messages = []
+
+    mock_create_agent = mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    chunks = []
+    with caplog.at_level(logging.WARNING):
+        async for chunk in service.stream_chat(
+            session_id="sess-stream-no-retry-mid", message="코난 추천"
+        ):
+            chunks.append(chunk)
+
+    full_output = "".join(chunks)
+    assert "추천 도서를 찾아봤다냥..." in full_output
+    assert "냥냥... 서재 책장을 정리하던 중에 통신 연결이 잠시 끊겼다냥 🐾" in full_output
+    assert mock_create_agent.call_count == 1
+    assert "[FORMAT_COLLAPSE_RETRY]" not in caplog.text
+    assert "[BEDROCK_FALLBACK]" in caplog.text
+
+
+
 
 
