@@ -1,0 +1,20 @@
+# infra(dont-paw-get/infra)의 kube-prometheus-stack이 이 서비스의 /metrics를 스크레이핑하도록
+# 하는 ServiceMonitor. infra Prometheus는 serviceMonitorSelectorNilUsesHelmValues=false 라
+# 네임스페이스·라벨 셀렉터 제약이 없어, 아래 selector가 base Service에 매칭되기만 하면 된다.
+#
+# prod overlay에는 두지 않는다 — prod 클러스터에는 ServiceMonitor CRD(Prometheus Operator)가
+# 없어 base에 두면 ArgoCD sync가 실패한다. 네임스페이스는 overlay의 namespace: 지시가 주입한다.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: backend-discovery
+  labels:
+    app.kubernetes.io/name: backend-discovery
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend-discovery
+  endpoints:
+    - port: http          # base Service의 포트 이름 (port 80 → targetPort http=8000)
+      path: /metrics
+      interval: 30s

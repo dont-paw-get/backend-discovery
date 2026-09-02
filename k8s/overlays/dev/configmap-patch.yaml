@@ -16,3 +16,7 @@ data:
   OTEL_TRACES_SAMPLER: "parentbased_traceidratio"
   OTEL_TRACES_SAMPLER_ARG: "1.0"
   OTEL_RESOURCE_ATTRIBUTES: "deployment.environment=dev,service.namespace=dpyb"
+  # infra Collector는 traces 파이프라인만 받는다. 메트릭/로그 OTLP export는 끈다
+  # (메트릭은 /metrics + ServiceMonitor로, 로그는 stdout JSON + Alloy로 수집).
+  OTEL_METRICS_EXPORTER: "none"
+  OTEL_LOGS_EXPORTER: "none"

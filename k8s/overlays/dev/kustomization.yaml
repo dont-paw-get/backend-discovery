@@ -6,6 +6,8 @@ namespace: dpyb-discovery-dev
 
 resources:
   - ../../base
+  # dev 클러스터에만 있는 Prometheus Operator용 스크레이핑 설정 (prod overlay 제외)
+  - servicemonitor.yaml
 
 # 개발은 1개만
 replicas:
