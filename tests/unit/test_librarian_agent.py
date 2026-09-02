@@ -99,6 +99,8 @@ def test_librarian_system_prompt_contains_structured_markdown_template() -> None
     assert "- **저자**:" in LIBRARIAN_SYSTEM_PROMPT
     assert "({페이지수}쪽)" in LIBRARIAN_SYSTEM_PROMPT
     assert "- **추천 이유**:" in LIBRARIAN_SYSTEM_PROMPT
+    assert "- **장르**:" in LIBRARIAN_SYSTEM_PROMPT
+    assert "MYSTERY_THRILLER" in LIBRARIAN_SYSTEM_PROMPT
     assert "search_books" in LIBRARIAN_SYSTEM_PROMPT
     assert "권수" in LIBRARIAN_SYSTEM_PROMPT
     assert "쪽수" in LIBRARIAN_SYSTEM_PROMPT
