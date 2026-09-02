@@ -7,7 +7,13 @@ from discovery.domain.orchestrator.librarian_response import (
     SwitchToSuggestion,
 )
 
-__all__ = ["ChatRequest", "ChatResponse", "LibraryBookCard", "SwitchToSuggestion"]
+__all__ = [
+    "ChatRequest",
+    "ChatResponse",
+    "LibraryBookCard",
+    "RecommendedBookCard",
+    "SwitchToSuggestion",
+]
 
 
 class LibraryBookCard(BaseModel):
@@ -29,6 +35,27 @@ class LibraryBookCard(BaseModel):
         examples=["READING"],
     )
     progress: int | None = Field(default=None, description="독서 진행률 (0~100 %)", examples=[88])
+
+
+class RecommendedBookCard(BaseModel):
+    """도서 추천 카드 구조화 응답 스키마 (클라이언트 '책 등록' 자동입력 연동용).
+
+    `message`(마크다운 텍스트)의 `### 📖` 블록에서 파싱된 필드를 그대로 노출한다.
+    저자명과 쪽수를 분리된 필드로 제공하여, 클라이언트가 `- **저자**: {name} ({page}쪽)`
+    형태의 문자열을 직접 파싱할 필요가 없게 한다(파싱 실패 시 필드가 함께 뒤섞이는
+    문제를 구조적으로 방지).
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    title: str = Field(description="도서 제목", examples=["세계 경영학 필독서 50"])
+    author: str | None = Field(
+        default=None, description="저자명 (쪽수 제외)", examples=["톰 버틀러 보던"]
+    )
+    page_count: int | None = Field(
+        default=None, description="총 페이지 수 (쪽수 확인 불가 시 null)", examples=[548]
+    )
+    reason: str | None = Field(default=None, description="추천 이유")
 
 
 class ChatRequest(BaseModel):
@@ -103,4 +130,9 @@ class ChatResponse(BaseModel):
         default=None,
         validation_alias=AliasChoices("library_books", "libraryBooks"),
         description="조회된 사용자 서재 도서 카드 목록 (선택).",
+    )
+    recommended_books: list[RecommendedBookCard] | None = Field(
+        default=None,
+        validation_alias=AliasChoices("recommended_books", "recommendedBooks"),
+        description="추천된 도서 카드 목록 (선택). `message`의 `### 📖` 블록에서 파싱됨.",
     )

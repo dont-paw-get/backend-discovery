@@ -4,7 +4,11 @@
 결과 마크다운의 도서 블록 수와 서두 보존 동작을 결과 검증 우선 원칙으로 검증한다.
 """
 
-from discovery.domain.librarian.post_processor import truncate_books_by_count
+from discovery.domain.librarian.post_processor import (
+    parse_recommended_books_from_markdown,
+    sanitize_html_tags,
+    truncate_books_by_count,
+)
 
 SAMPLE_THREE_BOOKS = """요청하신 따뜻한 힐링 소설 3권을 추천해 드립니다.
 
@@ -95,3 +99,71 @@ def test_truncate_empty_markdown() -> None:
     # 빈 문자열 처리
     assert truncate_books_by_count("", count=1) == ""
     assert truncate_books_by_count("   ", count=1) == "   "
+
+
+
+# ---------------------------------------------------------------------------
+# parse_recommended_books_from_markdown / sanitize_html_tags
+# (CLIAR-229: 저자/쪽수 구조화 분리 및 HTML 태그 노출 방어)
+# ---------------------------------------------------------------------------
+
+SAMPLE_TWO_BOOKS_WITH_PAGE_COUNT = """세계 경영학 필독서를 추천해드릴게요.
+
+### 📖 세계 경영학 필독서 50
+- **저자**: 톰 버틀러 보던 (548쪽)
+- **추천 이유**: 경영학의 핵심 고전들을 압축적으로 정리한 명저입니다.
+
+### 📖 좋은 전략 나쁜 전략
+- **저자**: 리처드 루멜트
+- **추천 이유**: 전략의 본질을 꿰뚫는 실무 지침서입니다."""
+
+
+def test_parse_recommended_books_separates_author_and_page_count() -> None:
+    # 저자 필드에 쪽수가 섞여 들어가지 않고 별도 정수 필드로 분리되어야 한다.
+    books = parse_recommended_books_from_markdown(SAMPLE_TWO_BOOKS_WITH_PAGE_COUNT)
+
+    assert len(books) == 2
+    assert books[0]["title"] == "세계 경영학 필독서 50"
+    assert books[0]["author"] == "톰 버틀러 보던"
+    assert "쪽" not in (books[0]["author"] or "")
+    assert books[0]["page_count"] == 548
+    assert books[0]["reason"] == "경영학의 핵심 고전들을 압축적으로 정리한 명저입니다."
+
+
+def test_parse_recommended_books_handles_missing_page_count() -> None:
+    # 쪽수가 없는 도서는 page_count가 None이어야 하고 저자명은 그대로 보존된다.
+    books = parse_recommended_books_from_markdown(SAMPLE_TWO_BOOKS_WITH_PAGE_COUNT)
+
+    assert books[1]["title"] == "좋은 전략 나쁜 전략"
+    assert books[1]["author"] == "리처드 루멜트"
+    assert books[1]["page_count"] is None
+
+
+def test_parse_recommended_books_returns_empty_list_when_no_book_headers() -> None:
+    # ### 📖 헤딩이 없는 일반 텍스트는 빈 리스트를 반환한다.
+    plain_text = "안녕하세요! 오늘 날씨가 좋네요."
+    assert parse_recommended_books_from_markdown(plain_text) == []
+    assert parse_recommended_books_from_markdown("") == []
+
+
+def test_parse_recommended_books_skips_block_without_title() -> None:
+    # 헤딩은 있지만 제목이 비어 있는 비정형 블록은 건너뛴다.
+    malformed = "### 📖 \n- **저자**: 홍길동\n"
+    assert parse_recommended_books_from_markdown(malformed) == []
+
+
+def test_sanitize_html_tags_removes_br_variants() -> None:
+    # <br>, <br/>, <br />, 대소문자 변형까지 모두 개행으로 정규화되어야 한다.
+    raw = "안녕하세요<br>반갑습니다<br/>또 만나요<BR /><Br>끝."
+    result = sanitize_html_tags(raw)
+
+    assert "<br" not in result.lower()
+    assert "안녕하세요" in result
+    assert "반갑습니다" in result
+
+
+def test_sanitize_html_tags_noop_when_no_html() -> None:
+    # HTML 태그가 없는 텍스트는 그대로 반환된다.
+    clean_text = "일반적인 마크다운 텍스트입니다.\n\n### 📖 도서 제목"
+    assert sanitize_html_tags(clean_text) == clean_text
+    assert sanitize_html_tags("") == ""

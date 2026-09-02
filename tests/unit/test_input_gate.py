@@ -109,7 +109,7 @@ async def test_orchestrator_chat_bypasses_llm_on_invalid_input() -> None:
     )
     service._build_agent = MagicMock()  # type: ignore[method-assign]
 
-    response_text, switch_to, signals, library_books = await service.chat(
+    response_text, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="sess-invalid",
         message="ㅁㄴㅇㄹ",
     )

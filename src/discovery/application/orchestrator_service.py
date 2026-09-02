@@ -16,14 +16,18 @@ from typing import Any
 
 from strands import Agent
 
-from discovery.api.schemas.chat import LibraryBookCard
+from discovery.api.schemas.chat import LibraryBookCard, RecommendedBookCard
 from discovery.application.librarian_service import (
     extract_chunk_from_event,
     format_history_for_strands,
 )
 from discovery.core.config import Settings
 from discovery.core.observability import log_agent_metrics
-from discovery.domain.librarian.post_processor import extract_text_from_message
+from discovery.domain.librarian.post_processor import (
+    extract_text_from_message,
+    parse_recommended_books_from_markdown,
+    sanitize_html_tags,
+)
 from discovery.domain.orchestrator.agent import create_orchestrator_agent
 from discovery.domain.orchestrator.fallback import get_llm_fallback_message
 from discovery.domain.orchestrator.input_gate import evaluate_input_gate
@@ -79,6 +83,17 @@ def extract_fallback_text(agent: Agent) -> str:
                 elif isinstance(tr_content, str) and tr_content.strip():
                     return tr_content.strip()
     return ""
+
+
+def _build_recommended_book_cards(response_text: str) -> list[RecommendedBookCard] | None:
+    """최종 응답 텍스트에서 `### 📖` 도서 블록을 파싱하여 구조화 카드 목록으로 변환한다.
+
+    파싱 결과가 없으면(도서 추천 응답이 아니었거나 파싱 실패) `None`을 반환한다.
+    """
+    parsed = parse_recommended_books_from_markdown(response_text)
+    if not parsed:
+        return None
+    return [RecommendedBookCard(**book) for book in parsed]
 
 
 class OrchestratorService:
@@ -169,6 +184,7 @@ class OrchestratorService:
         SwitchToSuggestion | None,
         LibrarianSignals | None,
         list[LibraryBookCard] | None,
+        list[RecommendedBookCard] | None,
     ]:
         """단일 턴 동기 대화 응답을 생성하고 세션 히스토리 및 메타를 갱신한다."""
         start_time = time.perf_counter()
@@ -203,7 +219,7 @@ class OrchestratorService:
                 metrics_summary=None,
                 direct_metrics={"total_duration_ms": duration_ms, "safety_gate_triggered": True},
             )
-            return safety_response, None, None, None
+            return safety_response, None, None, None, None
 
         # Task 4: 비정상 입력 게이트 (자모/숫자/이모지 결정론적 우회)
         input_gate_response = evaluate_input_gate(message, meta.get("librarian_id"))
@@ -222,7 +238,7 @@ class OrchestratorService:
                 metrics_summary=None,
                 direct_metrics={"total_duration_ms": duration_ms, "input_gate_triggered": True},
             )
-            return input_gate_response, None, None, None
+            return input_gate_response, None, None, None, None
 
         switch_to_holder: list[SwitchToSuggestion] = []
         signals_holder: list[LibrarianSignals] = []
@@ -343,6 +359,8 @@ class OrchestratorService:
         library_books: list[LibraryBookCard] | None = (
             list(library_books_holder) if library_books_holder else None
         )
+        response_text = sanitize_html_tags(response_text)
+        recommended_books = _build_recommended_book_cards(response_text)
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         log_agent_metrics(
@@ -354,7 +372,7 @@ class OrchestratorService:
             metrics_summary=orchestrator_metrics,
             direct_metrics={"total_duration_ms": duration_ms},
         )
-        return response_text, switch_to, signals, library_books
+        return response_text, switch_to, signals, library_books, recommended_books
 
     async def get_initial_meta(
         self,
@@ -619,7 +637,7 @@ class OrchestratorService:
 
         await self._session_store.append_turn(session_id, {"role": "user", "content": message})
         await self._session_store.append_turn(
-            session_id, {"role": "assistant", "content": response_text}
+            session_id, {"role": "assistant", "content": sanitize_html_tags(response_text)}
         )
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)

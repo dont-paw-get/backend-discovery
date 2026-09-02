@@ -60,7 +60,7 @@ async def test_orchestrator_service_chat(mocker: MockerFixture) -> None:
         tools=[mock_tool],
     )
 
-    response, switch_to, signals, library_books = await service.chat(
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="sess-orch-1", message="도서 추천해줘"
     )
 
@@ -210,7 +210,7 @@ async def test_orchestrator_service_chat_with_coordinates_and_switch_to(
         librarian_tool=mock_librarian_tool,
     )
 
-    response, switch_to, signals, library_books = await service.chat(
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="sess-switch-1",
         message="시 추천해줘",
         latitude=37.5665,
@@ -532,7 +532,7 @@ async def test_orchestrator_service_chat_splices_recommendation_card_when_intro_
         settings=settings,
     )
 
-    response, switch_to, signals, library_books = await service.chat(
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="sess-splice-rec",
         message="책 추천해줘",
     )
@@ -616,7 +616,7 @@ async def test_orchestrator_service_chat_with_library_tool(mocker: MockerFixture
         library_tool=mock_library_tool,
     )
 
-    response, switch_to, signals, library_books = await service.chat(
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="sess-lib-1",
         message="내 서재 책 있어?",
         auth_token="Bearer test-jwt-xyz",
@@ -773,7 +773,7 @@ async def test_orchestrator_service_chat_hybrid_recommendation_populates_library
         library_tool=mock_library_tool,
     )
 
-    response, switch_to, signals, library_books = await service.chat(
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="sess-hybrid-1",
         message="내 서재에 있는 책이랑 비슷한 새로운 책 추천해줘",
         auth_token="Bearer test-jwt-xyz",
@@ -820,7 +820,7 @@ async def test_orchestrator_service_chat_handles_bedrock_exception_gracefully_fo
     )
 
     with caplog.at_level(logging.ERROR):
-        response, switch_to, signals, library_books = await service.chat(
+        response, switch_to, signals, library_books, recommended_books = await service.chat(
             session_id="sess-err-cat",
             message="책 추천해줘",
         )
@@ -867,7 +867,7 @@ async def test_orchestrator_service_chat_handles_bedrock_exception_gracefully_fo
     )
 
     with caplog.at_level(logging.ERROR):
-        response, switch_to, signals, library_books = await service.chat(
+        response, switch_to, signals, library_books, recommended_books = await service.chat(
             session_id="sess-err-stork",
             message="경제 서적 추천해줘",
         )
@@ -1240,7 +1240,7 @@ async def test_chat_skips_tail_consult_if_consult_called_during_turn(
         librarian_tool=mock_librarian_tool,
     )
 
-    response, switch_to, signals, library_books = await service.chat(
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="sess-dedup",
         message="안녕",
     )
@@ -1290,7 +1290,7 @@ async def test_chat_executes_tail_consult_if_not_called_during_turn(
         librarian_tool=mock_librarian_tool,
     )
 
-    response, switch_to, signals, library_books = await service.chat(
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="sess-library-only",
         message="나 책 뭐 있어?",
     )

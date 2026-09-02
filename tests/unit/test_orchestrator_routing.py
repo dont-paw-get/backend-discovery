@@ -87,7 +87,7 @@ async def test_orchestrator_routes_to_recommend_books_tool(mocker: MockerFixture
     )
 
     # 도서 추천 질의 실행
-    response, switch_to, signals, library_books = await service.chat(
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="test-sess", message="따뜻한 힐링 소설 추천해줘"
     )
 
@@ -150,7 +150,7 @@ async def test_orchestrator_routes_to_consult_librarian_stub(mocker: MockerFixtu
         tools=[mock_recommend_tool.as_tool(), librarian_tool.as_tool()],
     )
 
-    response, switch_to, signals, library_books = await service.chat(
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="test-sess-2", message="사서님과 이야기하고 싶어요"
     )
 
@@ -217,7 +217,7 @@ async def test_orchestrator_routes_to_search_my_library_tool(mocker: MockerFixtu
         library_tool=mock_library_tool,
     )
 
-    response, switch_to, signals, library_books = await service.chat(
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="test-sess-my-library",
         message="내 서재에 김영하 책 있어?",
         auth_token="Bearer test-token",

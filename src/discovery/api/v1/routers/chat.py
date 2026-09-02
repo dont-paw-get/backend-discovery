@@ -92,7 +92,7 @@ async def chat(
         )
 
     try:
-        answer, switch_to, signals, library_books = await service.chat(
+        answer, switch_to, signals, library_books, recommended_books = await service.chat(
             session_id=session_id,
             message=request_body.message,
             librarian_id=request_body.librarian_id,
@@ -111,4 +111,5 @@ async def chat(
         switch_to=switch_to,
         signals=signals,
         library_books=library_books,
+        recommended_books=recommended_books,
     )
