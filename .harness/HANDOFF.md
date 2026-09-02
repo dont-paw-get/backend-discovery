@@ -912,3 +912,45 @@
 1. **dev 배포 후 재현 실측 필요**: "약 N쪽" 등 근사치가 나오는 도서로 재현해 최종 `page_count`가 알라딘 실측값으로 교체되는지 확인. `libraryBook`(이미 서재에 등록된 경우) 실제 응답 스키마가 `book`과 동일한지 실측(현재는 가정으로 구현, `model_validator`로 `libraryBook`→`book` 정규화만 해둔 상태). `book_metadata_api_url` 무인증 호출이 401/403 없이 성공하는지 확인 — 실패 시 `Authorization` 패스스루 추가 필요(설계상 이미 안전하게 처리되지만 추가하면 커버리지 개선).
 2. 사용자 승인 시 커밋 생성(`[CLIAR-237]` 태그), push 및 `develop` 대상 PR 생성.
 3. CLIAR-216(QA기반 최적화b) 착수.
+
+
+
+## 2026-09-02 — CLIAR-237 커밋·PR·머지·dev 실측 완료, 팀원 API 요청 및 CloudFront 504 트러블슈팅
+- CLIAR-237(도서 추천 페이지수 알라딘 실조회 검증) 코드를 CLIAR-237 관련 파일만 골라 커밋(`6b5f85d`)하고 push, PR #40(`develop` 대상) 생성. 이후 사용자가 PR을 머지하고 dev에 배포됨(`origin/develop`이 `b6f23f4`/`9aab13d`로 갱신된 것을 확인).
+- **dev 실측 결과 (`kubectl logs`)**: CLIAR-237 로직이 실제로 정상 동작함을 확인 — 추천 응답에 `<!-- isbn: ... -->` 주석이 파싱되고 `book_metadata_client`가 알라딘 조회를 시도. 다만 **`book_metadata_api_url` 무인증 호출이 401을 반환**함(선결 결정과 다름). CLIAR-237의 graceful degradation 설계 덕분에 401이어도 전체 응답이 깨지지 않고 LLM 생성값을 그대로 유지하는 것으로 안전하게 동작함 — 설계가 정확히 의도한 대로 방어 역할을 했다.
+- **더 근본적인 발견**: LLM이 ISBN 자체를 못 찾아 주석을 통째로 생략하는 경우가 실측상 빈번함(재현: "백야행", "유리 세공" 등에서 `page_count: null`). 사용자가 이 문제의 본질(제목/저자를 알면 ISBN은 항상 존재하는데 LLM이 웹검색만으로 못 찾는 게 구조적 결함)을 정확히 짚었고, **팀원(backend-book)에게 "제목+저자로 알라딘 검색 → 최상단 결과의 isbn, totalPages 반환" 신규 API를 요청**함(2026-09-02, 스펙 미확정 — swagger 완성되면 다음 세션에 공유 예정).
+- **별개로 dev에서 504 Gateway Timeout 이슈 발견 및 원인 분석**: 사용자가 "미스터리 스릴러 책 추천해줘" 요청 시 브라우저에서 정확히 30.02초에 504(CloudFront `via`/`x-cache` 헤더로 CloudFront가 만들어낸 에러임을 확인, 백엔드 문제 아님). `kubectl logs` 실측으로 `recommend_books` 하나가 17~26초, 오케스트레이터 총합 32~41초 걸리는 것을 재현 확인(CLIAR-171 이후에도 여전히 이 정도 걸림). `strands_metrics.total_duration`(6~13초)과 wall-clock(`total_duration_ms`, 32~41초) 사이 10초 이상 간극의 정확한 원인은 미확인(Bedrock 크로스리전 프로필 네트워크 latency로 추정하나 확정 아님).
+  - 사용자가 CloudFront Origin Response Timeout을 30초 → 60초로 변경했으나 처음엔 재현됨(설정 미전파 추정) → 이후 재테스트에서 "넘어온다"고 확인, 이번 세션은 완화된 것으로 보고 종료. **근본 원인(추천 응답이 왜 20초 넘게 걸리는지)은 해결되지 않았고, CloudFront 타임아웃을 늘린 건 임시방편**임을 명확히 인지한 상태.
+- **아직 커밋하지 않은 미완료 계획**: "도서 추천 카드 장르 필드 추가"(이전 세션에서 계획 초안 작성, 사용자 컨펌 대기 — 이번 세션에서 진행 없음, `.harness/PLAN.md`에 그대로 유지). 워킹 트리에 `.harness/ARCHITECTURE.md`(CLIAR-171 관련 LLM 파라미터 설명 정정)와 `.harness/BACKLOG.md`(전환 후 추천 미연계 이슈 종결 기록)가 CLIAR-237과 무관한 이전 세션 변경으로 여전히 미커밋 상태로 남아있음.
+- 크레딧 절약을 위해 세션을 여기서 종료. `.harness/PLAN.md`에 두 개의 새 진행 중 섹션(제목/저자 API 대기, CloudFront 504) 추가.
+
+### 다음 세션이 할 일 (우선순위 순)
+1. **최우선**: 사용자가 팀원에게 요청한 "제목+저자 → isbn/totalPages" 신규 API의 swagger를 받으면, `.harness/PLAN.md`의 "[진행 중 · 팀원 API 대기]" 섹션 체크리스트대로 확인 후 `BookMetadataClient` 확장 및 프롬프트 재검토 진행. 티켓 번호를 사용자에게 확인(CLIAR-237 후속 연장인지 새 티켓인지).
+2. `.harness/PLAN.md`의 "[진행 중 · 원인 미해결] dev 504" 섹션 — CloudFront 설정이 실제로 "Deployed"인지, 60초보다 오래 걸리는 요청(예: count=5 요청)에서도 안전한지 재검증. 근본적으로 `recommend_books` 20초대 레이턴시를 줄이는 작업(CLIAR-158 Task 3~5 또는 신규 스파이크)이 필요함을 사용자와 논의.
+3. `.harness/ARCHITECTURE.md`/`BACKLOG.md`의 미커밋 변경사항(CLIAR-237과 무관)을 별도로 커밋할지 사용자에게 확인.
+4. "도서 추천 카드 장르 필드 추가" 계획 초안 — 사용자 컨펌 여부 재확인 후 진행 여부 결정.
+5. CLIAR-216(QA기반 최적화b)은 위 작업들 이후 순서 그대로 대기.
+
+
+
+## 2026-09-02 — CLIAR-237 후속: 제목·저자 기반 알라딘 조회 API(`by-title-author`) 연동, ISBN 경로 전면 제거
+- 브랜치: `CLIAR-237-Page-Count-Aladin-Verification` (연장, 새 브랜치 분기 없음 — 사용자 확정).
+- 이전 세션에서 팀원(backend-book)에게 요청했던 "제목+저자로 알라딘 검색" API의 실제 스펙(`GET /api/v1/books/search/by-title-author`)을 전달받아 계획을 확정하고 구현을 완료했다. 스펙은 예상과 다르게 `alreadyRegistered`/`libraryBook` 분기가 없는 단순한 `{"book": {...} | 미포함}` 구조였다(서재 등록 여부를 확인하지 않는 순수 외부 검색).
+- 사용자가 4가지를 확정: (1) ISBN 주석 경로를 유지하지 않고 신규 API로 완전 전환, (2) 쿼리 파라미터명(`title`/`author`) 재확인 없이 진행, (3) 인증 헤더는 이번 범위에서 추가하지 않음(빠른 배포·실측 우선), (4) 새 티켓 분리 없이 CLIAR-237 브랜치 그대로 사용.
+- 구현 내용:
+  - `domain/orchestrator/book_metadata_response.py`: `BookSearchByTitleAuthorResponse`(`book: BookMetadata | None`, `total_pages`/`isbn` property) 신설. 기존 `BookMetadataSearchResponse`(ISBN 조회용)는 그대로 유지.
+  - `domain/orchestrator/tools/book_metadata_client.py`: `fetch_by_title_author(title, author) -> int | None` 구현. 재시도 로직 없이 어떤 실패(네트워크 오류/4xx/5xx/교집합 없음)든 예외 없이 `None` 반환(graceful degradation).
+  - `domain/orchestrator/tools/recommend_tool.py`: `_verify_page_counts`를 ISBN 주석 파싱 대신 마크다운에서 파싱한 title/author로 `fetch_by_title_author`를 호출하는 방식으로 재작성.
+  - `domain/librarian/agent.py`: `LIBRARIAN_SYSTEM_PROMPT`(cat/stork)에서 `<!-- isbn: ... -->` 라인과 규칙 8번(ISBN 표기 지침) 삭제.
+  - `domain/librarian/post_processor.py`: `RecommendedBookFields.isbn`, `_ISBN_COMMENT_PATTERN`, `_extract_isbn`, `strip_isbn_comments` 등 죽은 코드 전부 제거.
+  - **구현 중 발견한 부수 버그**: `_AUTHOR_LINE_PATTERN` 정규식이 "약 300쪽"처럼 근사치 수식어가 붙은 쪽수를 인식하지 못해 저자명에 그대로 섞이는 문제가 재현됨(테스트 실패로 발견). 정규식을 보강해 "약"/"여" 등 수식어가 있어도 쪽수 숫자만 분리하도록 수정 완료.
+- 재시도 로직 관련 조타(steering) 논의: 사용자가 "교집합이 없어도 200으로 응답하는 이유가 멈추지 않기 위한 것 같은데 재시도를 추가하면 어떨까"라고 제안. 검토 결과 이미 `fetch_by_title_author`가 모든 실패 케이스에서 예외 없이 `None`을 반환해 전체 응답이 막히지 않는 구조(graceful degradation)를 갖추고 있어, "멈추지 않는다"는 목표는 이미 충족됨을 확인. 사용자가 최종적으로 재시도 없는 단순한 구조를 선택했다(실제 도서 존재 여부를 검증하는 별도 에이전트는 복잡도가 커서 이번 범위 제외, 우선 배포 후 실측 우선).
+- 검증: `ruff check .`, `mypy .`, `pytest -m "not integration"`(246건) 전체 통과 확인.
+- `.harness/PLAN.md`에서 완료 섹션을 정리(Task 1~6 제거, Task 7만 "dev 실측 대기"로 잔존), `.harness/STATE.md`에 단계 요약 추가, `.harness/DECISIONS.md` 최상단에 결정 기록.
+- 커밋·push는 하지 않았다. git 변경사항(소스 5개 파일, 테스트 3개 파일, `.harness/*` 5개 문서)이 모두 미커밋 상태다.
+
+### 다음 세션이 할 일
+1. 커밋 여부 확인 — 사용자 승인 시 Task 단위로 나누어 커밋(`[CLIAR-237]` 태그, 변경 파일이 많지 않아 1~2개 커밋으로 묶는 것도 검토 가능, 사용자 지시 필요).
+2. dev 배포 후 "백야행", "유리 세공" 등 기존에 `page_count: null`로 남던 사례를 재현하여 title/author 경로가 실제로 정확한 페이지수를 채우는지 확인(`kubectl logs`).
+3. 무인증 호출이 401을 반환하면(CLIAR-237 ISBN 경로 전례와 동일할 가능성), `Authorization` 패스스루 추가 여부를 사용자와 논의(이번 세션에서는 "나중에 하자"로 명시적으로 보류함).
+4. PLAN.md에 대기 중인 "[계획 초안 · 사용자 확인 대기] 도서 추천 카드 장르(16개 표준) 필드 추가"는 여전히 사용자 컨펌 대기 상태 — 이번 세션에서 다루지 않음.
