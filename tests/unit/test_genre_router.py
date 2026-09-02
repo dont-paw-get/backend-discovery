@@ -43,9 +43,7 @@ async def test_classify_genre_success(app: FastAPI, client: AsyncClient) -> None
     )
 
     payload = {
-        "title": "클린 아키텍처",
-        "author": "로버트 C. 마틴",
-        "raw_category": "국내도서 > 컴퓨터/모바일 > 프로그래밍",
+        "isbn": "COMPUTER_IT",
     }
     response = await client.post("/api/v1/classify-genre", json=payload)
     assert response.status_code == 200
@@ -56,8 +54,10 @@ async def test_classify_genre_success(app: FastAPI, client: AsyncClient) -> None
 
 
 @pytest.mark.asyncio
-async def test_classify_genre_with_isbn_success(app: FastAPI, client: AsyncClient) -> None:
-    """isbn이 포함된 정상 요청 시 200 OK와 함께 분류된 장르 응답을 반환한다."""
+async def test_classify_genre_with_numeric_isbn_success(
+    app: FastAPI, client: AsyncClient
+) -> None:
+    """숫자 ISBN 요청 시 200 OK와 함께 분류된 장르 응답을 반환한다."""
     mock_settings = Settings(
         redis_url="redis://localhost:6379/0",
         llm_provider="mock",
@@ -70,15 +70,12 @@ async def test_classify_genre_with_isbn_success(app: FastAPI, client: AsyncClien
 
     payload = {
         "isbn": "9788966263769",
-        "title": "파이썬 코딩의 기술",
-        "author": "브렛 슬라킨",
-        "raw_category": "국내도서 > 컴퓨터/모바일 > 프로그래밍 언어 > 파이썬",
     }
     response = await client.post("/api/v1/classify-genre", json=payload)
     assert response.status_code == 200
 
     data = response.json()
-    assert data["genre"] == StandardGenre.COMPUTER_IT.value
+    assert data["genre"] == StandardGenre.NONE.value
     assert data["confidence"] == 1.0
 
 
@@ -98,9 +95,7 @@ async def test_classify_genre_custom_mock_service(app: FastAPI, client: AsyncCli
     app.dependency_overrides[get_genre_classifier_service] = lambda: DummyGenreService()
 
     payload = {
-        "title": "듄",
-        "author": "프랭크 허버트",
-        "raw_category": "소설",
+        "isbn": "9788934972464",
     }
     response = await client.post("/api/v1/classify-genre", json=payload)
     assert response.status_code == 200
@@ -111,22 +106,28 @@ async def test_classify_genre_custom_mock_service(app: FastAPI, client: AsyncCli
 
 
 @pytest.mark.asyncio
-async def test_classify_genre_validation_error_missing_title(client: AsyncClient) -> None:
-    """title 필드가 누락되었을 때 422 Unprocessable Entity를 반환한다."""
+async def test_classify_genre_validation_error_missing_isbn(client: AsyncClient) -> None:
+    """isbn 필드가 누락되었을 때 422 Unprocessable Entity를 반환한다."""
+    payload: dict[str, str] = {}
+    response = await client.post("/api/v1/classify-genre", json=payload)
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_classify_genre_validation_error_empty_isbn(client: AsyncClient) -> None:
+    """isbn 필드가 빈 문자열일 때 422 Unprocessable Entity를 반환한다."""
     payload = {
-        "author": "저자명만 있음",
-        "raw_category": "카테고리만 있음",
+        "isbn": "",
     }
     response = await client.post("/api/v1/classify-genre", json=payload)
     assert response.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_classify_genre_validation_error_empty_title(client: AsyncClient) -> None:
-    """title 필드가 빈 문자열일 때 422 Unprocessable Entity를 반환한다."""
+async def test_classify_genre_validation_error_whitespace_isbn(client: AsyncClient) -> None:
+    """isbn 필드가 공백 문자열일 때 422 Unprocessable Entity를 반환한다."""
     payload = {
-        "title": "",
-        "author": "저자명",
+        "isbn": "   ",
     }
     response = await client.post("/api/v1/classify-genre", json=payload)
     assert response.status_code == 422

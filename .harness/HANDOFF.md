@@ -824,3 +824,17 @@
 2. dev 배포 후 Tempo에서 `{ resource.service.name = "backend-discovery" }` 조회, librarian → discovery 호출로 단일 Trace 연결 확인, Loki 로그 `trace_id`가 Tempo Trace ID와 일치하는지 확인(보고서 12·13절 참고).
 3. Alloy 수집 파이프라인에서 `trace_id`/`span_id`가 Loki **label로 승격되지 않도록** 확인(인프라 측).
 4. CLIAR-158 Task 3~5(캐싱/reasoning/전후 비교표) 실측이 여전히 미완 — dev 배포 시 함께 확인 권장.
+
+
+## 2026-09-02 — CLIAR-235 도서 표준 장르 분류 API의 ISBN 단일 요청 필드 개편 완료
+- 브랜치: `CLIAR-235-Genre-Classification-ISBN-Only` (`develop`에서 분기)
+- 도서 등록 및 OCR 파이프라인에서 고유 식별자인 `isbn`만을 기준으로 도서를 식별하고 16개 표준 장르 분류를 수행하도록 `POST /api/v1/classify-genre` API를 개편했다:
+  - Task 1: `docs/api/openapi.yaml` 및 `src/discovery/api/schemas/genre.py`의 `BookClassificationRequest`에서 불필요한 `title`, `author`, `raw_category` 필드를 제거하고 `isbn: str` 단일 필수 필드로 변경 (`@field_validator`로 공백 전용 문자열 422 거부).
+  - Task 2: `src/discovery/domain/genre/classifier.py`의 `GENRE_CLASSIFIER_SYSTEM_PROMPT` 및 `build_classification_prompt(isbn: str)`를 ISBN 전용 분석 및 16개 표준 장르 분류 지침으로 정돈.
+  - Task 3: `src/discovery/application/genre_classifier_service.py`의 `_classify_mock` 및 `classify_genre`를 ISBN 단일 요청으로 간소화하고, `src/discovery/api/v1/routers/genre.py` 라우터 docstring 갱신.
+  - Task 4: `tests/unit/test_genre_classifier.py` 및 `tests/unit/test_genre_router.py` 단위 테스트 갱신 (정상 ISBN, 숫자 ISBN, 공백/빈 문자열 422 검증). 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 226건 전체 통과.
+  - Task 5: `docs/api/decisions/0002-book-genre-classification.md` (ADR 0002) 갱신, `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/DECISIONS.md`, `.harness/ARCHITECTURE.md`, `.harness/HANDOFF.md` 하네스 산출물 동기화 완료.
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 `CLIAR-235` 커밋 생성 (`[CLIAR-235]` 태그 사용), push 및 `develop` 대상 PR 생성.
+2. `develop` 머지 후 `CLIAR-216-Prompt-Guardrails` 브랜치 분기하여 `CLIAR-216 (QA기반 최적화b: 공통 가드레일 리팩터 및 프롬프트 고도화)` 착수.

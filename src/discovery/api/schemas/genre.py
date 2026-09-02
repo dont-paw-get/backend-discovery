@@ -1,6 +1,6 @@
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class StandardGenre(str, Enum):
@@ -29,14 +29,20 @@ class BookClassificationRequest(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    isbn: str = Field(default="", description="국제표준도서번호 (ISBN)", examples=["9788966263769"])
-    title: str = Field(..., min_length=1, description="도서 제목", examples=["파이썬 코딩의 기술"])
-    author: str = Field(default="", description="저자명", examples=["브렛 슬라킨"])
-    raw_category: str = Field(
-        default="",
-        description="알라딘/OCR 원본 카테고리 문자열",
-        examples=["국내도서 > 컴퓨터/모바일 > 프로그래밍 언어 > 파이썬"],
+    isbn: str = Field(
+        ...,
+        min_length=1,
+        description="국제표준도서번호 (10자리 또는 13자리 ISBN)",
+        examples=["9788966263769"],
     )
+
+    @field_validator("isbn")
+    @classmethod
+    def validate_isbn(cls, v: str) -> str:
+        cleaned = v.strip()
+        if not cleaned:
+            raise ValueError("ISBN은 공백일 수 없습니다.")
+        return cleaned
 
 
 class BookClassificationResponse(BaseModel):
