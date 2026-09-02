@@ -83,7 +83,7 @@ async def test_orchestrator_chat_bypasses_llm_on_crisis() -> None:
     )
     service._build_agent = MagicMock()  # type: ignore[method-assign]
 
-    response_text, switch_to, signals, library_books = await service.chat(
+    response_text, switch_to, signals, library_books, recommended_books = await service.chat(
         session_id="sess-crisis",
         message="너무 힘들어서 죽고 싶어요",
     )

@@ -237,6 +237,14 @@ components:
             $ref: '#/components/schemas/LibraryBookCard'
           nullable: true
           description: 조회된 사용자 서재 도서 카드 목록 (선택)
+        recommended_books:
+          type: array
+          items:
+            $ref: '#/components/schemas/RecommendedBookCard'
+          nullable: true
+          description: >-
+            추천된 도서 카드 목록 (선택, 동기 응답만 제공). `message`의 `### 📖` 마크다운
+            블록을 파싱하여 저자명과 쪽수를 분리된 필드로 제공한다.
 
     LibraryBookCard:
       type: object
@@ -268,6 +276,30 @@ components:
           type: integer
           nullable: true
           description: 독서 진행률 (0~100 %)
+
+    RecommendedBookCard:
+      type: object
+      required:
+        - title
+      properties:
+        title:
+          type: string
+          description: 도서 제목
+          example: 세계 경영학 필독서 50
+        author:
+          type: string
+          nullable: true
+          description: 저자명 (쪽수 제외)
+          example: 톰 버틀러 보던
+        page_count:
+          type: integer
+          nullable: true
+          description: 총 페이지 수 (쪽수 확인 불가 시 null)
+          example: 548
+        reason:
+          type: string
+          nullable: true
+          description: 추천 이유
           example: 88
 
     StandardGenre:
