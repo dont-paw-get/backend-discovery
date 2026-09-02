@@ -827,6 +827,20 @@
 
 
 
+## 2026-09-02 — CLIAR-235 도서 표준 장르 분류 API의 ISBN 단일 요청 필드 개편 완료
+- 브랜치: `CLIAR-235-Genre-Classification-ISBN-Only` (`develop`에서 분기)
+- 도서 등록 및 OCR 파이프라인에서 고유 식별자인 `isbn`만을 기준으로 도서를 식별하고 16개 표준 장르 분류를 수행하도록 `POST /api/v1/classify-genre` API를 개편했다:
+  - Task 1: `docs/api/openapi.yaml` 및 `src/discovery/api/schemas/genre.py`의 `BookClassificationRequest`에서 불필요한 `title`, `author`, `raw_category` 필드를 제거하고 `isbn: str` 단일 필수 필드로 변경 (`@field_validator`로 공백 전용 문자열 422 거부).
+  - Task 2: `src/discovery/domain/genre/classifier.py`의 `GENRE_CLASSIFIER_SYSTEM_PROMPT` 및 `build_classification_prompt(isbn: str)`를 ISBN 전용 분석 및 16개 표준 장르 분류 지침으로 정돈.
+  - Task 3: `src/discovery/application/genre_classifier_service.py`의 `_classify_mock` 및 `classify_genre`를 ISBN 단일 요청으로 간소화하고, `src/discovery/api/v1/routers/genre.py` 라우터 docstring 갱신.
+  - Task 4: `tests/unit/test_genre_classifier.py` 및 `tests/unit/test_genre_router.py` 단위 테스트 갱신 (정상 ISBN, 숫자 ISBN, 공백/빈 문자열 422 검증). 정적 분석(`ruff`, `mypy`) 100% 통과 및 단위 테스트 226건 전체 통과.
+  - Task 5: `docs/api/decisions/0002-book-genre-classification.md` (ADR 0002) 갱신, `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/DECISIONS.md`, `.harness/ARCHITECTURE.md`, `.harness/HANDOFF.md` 하네스 산출물 동기화 완료.
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 `CLIAR-235` 커밋 생성 (`[CLIAR-235]` 태그 사용), push 및 `develop` 대상 PR 생성.
+2. `develop` 머지 후 `CLIAR-216-Prompt-Guardrails` 브랜치 분기하여 `CLIAR-216 (QA기반 최적화b: 공통 가드레일 리팩터 및 프롬프트 고도화)` 착수.
+
+
 ## 2026-09-02 — CLIAR-229 완료(PR #37) 및 CLIAR-236(고도화 후 자잘한 버그 수정) 원인 실측·계획 확정
 - CLIAR-229(추천 카드 구조화 필드 `RecommendedBookCard` + `sanitize_html_tags`)를 `CLIAR-229-Recommendation-Card-Structuring` 브랜치에서 완료. 커밋 2건(코드+ADR 0008/문서), push 및 PR #37(`develop` 대상) 생성 완료. 머지는 사용자 승인 대기 중.
 - 프론트팀이 `recommended_books` 구조화 필드 연동(`RegisterBook.jsx`, `bookExtractor.js`, `chatApi.js`) 및 `<br>` 렌더러 정규화(`MarkdownRenderer.jsx`, `LibrarianCursor.jsx`)를 완료했다고 보고함(코드는 직접 확인 못 함, 계약 필드명만 대조 확인 — `recommendedBooks` camelCase 키로는 응답이 안 나간다는 점을 프론트에 정정 전달함).
@@ -865,4 +879,3 @@
 ### 다음 세션이 할 일 (CLIAR-216 착수)
 1. 사용자 승인 시 `CLIAR-236-Post-Optimization-Bug-Fixes` 커밋 생성 (`[CLIAR-236]` 태그, push 전 변경 파일/diff 제시), push 및 `develop` 대상 PR 생성.
 2. `develop` 머지 후 `CLIAR-216-Prompt-Guardrails` 브랜치 분기하여 `CLIAR-216 (QA기반 최적화b: 공통 가드레일 리팩터 및 프롬프트 고도화)` 착수.
-

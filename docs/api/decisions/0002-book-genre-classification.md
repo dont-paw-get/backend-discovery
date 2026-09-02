@@ -11,10 +11,11 @@
 ## 결정 사항
 1. **경량 REST API 엔드포인트 신설 및 확장**:
    - `POST /api/v1/classify-genre`
-   - 요청: `BookClassificationRequest` (`isbn: str = ""` (선택), `title: str`, `author: str = ""`, `raw_category: str = ""`)
+   - 요청: `BookClassificationRequest` (`isbn: str`)
    - 응답: `BookClassificationResponse` (`genre: StandardGenre`, `confidence: float = 1.0`)
    - 호출 주체: `backend-book` (도서 저장 서버가 OCR 텍스트/ISBN 추출 후 장르 분류 호출)
-   - 2026-08-29 업데이트: `isbn` 필드를 선택으로 추가하여, 도서 고유 식별자가 제공될 경우 LLM 프롬프트에 우선 분석 단서로 제공하고 미제공 시 기존 필드로 fallback 처리.
+   - 2026-08-29 업데이트: `isbn` 필드를 선택으로 추가하여, 도서 고유 식별자가 제공될 경우 LLM 프롬프트에 우선 분석 단서로 제공.
+   - 2026-09-02 업데이트 [CLIAR-235]: 요청 스키마를 `isbn` 단일 필드로 간소화. 도서 등록 및 OCR 파이프라인에서 고유 식별자인 ISBN만으로 도서를 식별하고 16개 표준 장르 분류를 수행하도록 단일화 (`title`, `author`, `raw_category` 필드 제거).
 
 2. **분류 엔진 및 모델**:
    - AWS Bedrock Claude 3 Haiku (`anthropic.claude-3-haiku-20240307-v1:0`)를 활용하여 제로샷(Zero-shot) 정밀 프롬프트 분류 수행.

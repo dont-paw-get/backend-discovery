@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 GENRE_CLASSIFIER_SYSTEM_PROMPT = """당신은 도서 메타데이터를 분석하여
 표준 장르로 정확하게 분류하는 전문 사서 AI입니다.
-주어진 도서 ISBN(선택), 제목(title), 저자(author), 원본 카테고리(raw_category) 정보를 종합 분석하여,
+주어진 도서의 국제표준도서번호(ISBN) 정보를 바탕으로 해당 도서를 식별하고,
 반드시 아래 정의된 16개 표준 장르 Enum(genre_type) 중 가장 적합한 1개를 선택하세요.
 
 
@@ -34,13 +34,11 @@ GENRE_CLASSIFIER_SYSTEM_PROMPT = """당신은 도서 메타데이터를 분석�
 16. NONE: 위 장르에 해당하지 않거나 도서 정보가 부족하여 식별 불가능한 경우
 
 [분류 원칙]
-1. ISBN이 제공된 경우, 해당 도서의 고유 식별 정보와
-   raw_category(알라딘/OCR 원본 카테고리)의 명확한 단서를 최우선으로 고려하세요.
-2. raw_category가 모호하거나 없더라도, 제목(title)과 저자(author)의 특성을 파악하여
-   가장 가까운 표준 장르 Enum을 도출하세요.
-3. 소설 중에서 세부 장르(SF, 판타지, 로맨스, 미스터리/스릴러) 구분이 뚜렷하지 않은
+1. 주어진 ISBN을 바탕으로 해당 도서의 고유 정보를 식별하고
+   주제/분야를 파악하여 가장 적합한 표준 장르 Enum을 도출하세요.
+2. 소설 중에서 세부 장르(SF, 판타지, 로맨스, 미스터리/스릴러) 구분이 뚜렷하지 않은
    일반 문학이나 고전문학 등은 'LITERARY_FICTION'으로 분류하세요.
-4. 어떤 범주에도 명확히 부합하지 않거나 도서 정보가 너무 부족한 경우 'NONE'으로 분류하세요.
+3. 어떤 범주에도 명확히 부합하지 않거나 도서 정보가 식별 불가능한 경우 'NONE'으로 분류하세요.
 
 [출력 형식]
 반드시 다른 설명이나 마크다운 코드블록 없이, 오직 아래의 유효한 JSON 형식 단 1개만 출력하세요:
@@ -48,21 +46,13 @@ GENRE_CLASSIFIER_SYSTEM_PROMPT = """당신은 도서 메타데이터를 분석�
 """
 
 
-def build_classification_prompt(
-    title: str,
-    author: str = "",
-    raw_category: str = "",
-    isbn: str = "",
-) -> str:
+def build_classification_prompt(isbn: str) -> str:
     """도서 장르 분류를 위한 LLM 사용자 프롬프트를 생성한다."""
-    isbn_line = f"- ISBN: {isbn}\n" if isbn else ""
     return (
         f"도서 정보:\n"
-        f"{isbn_line}"
-        f"- 제목: {title}\n"
-        f"- 저자: {author if author else '정보 없음'}\n"
-        f"- 원본 카테고리: {raw_category if raw_category else '정보 없음'}\n\n"
-        f"위 도서를 분석하여 16개 표준 장르 Enum 중 가장 적합한 1개와 신뢰도를 JSON으로 반환하세요."
+        f"- ISBN: {isbn.strip()}\n\n"
+        f"위 도서의 ISBN을 바탕으로 도서를 분석하여 "
+        f"16개 표준 장르 Enum 중 가장 적합한 1개와 신뢰도를 JSON으로 반환하세요."
     )
 
 

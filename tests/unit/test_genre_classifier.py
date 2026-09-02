@@ -17,36 +17,16 @@ from discovery.domain.genre.classifier import (
 
 
 def test_build_classification_prompt() -> None:
-    """프롬프트 빌더가 도서 제목, 저자, 원본 카테고리를 올바르게 포함하는지 검증한다."""
-    prompt = build_classification_prompt(
-        title="파이썬 코딩의 기술",
-        author="브렛 슬라킨",
-        raw_category="국내도서 > 컴퓨터/모바일",
-    )
-    assert "파이썬 코딩의 기술" in prompt
-    assert "브렛 슬라킨" in prompt
-    assert "국내도서 > 컴퓨터/모바일" in prompt
-    assert "ISBN" not in prompt
+    """프롬프트 빌더가 도서 ISBN을 올바르게 포함하는지 검증한다."""
+    prompt = build_classification_prompt(isbn="9788966263769")
+    assert "9788966263769" in prompt
+    assert "ISBN" in prompt
 
 
-def test_build_classification_prompt_with_isbn() -> None:
-    """ISBN이 전달되었을 때 프롬프트에 ISBN 정보가 올바르게 포함되는지 검증한다."""
-    prompt = build_classification_prompt(
-        title="파이썬 코딩의 기술",
-        author="브렛 슬라킨",
-        raw_category="국내도서 > 컴퓨터/모바일",
-        isbn="9788966263769",
-    )
-    assert "ISBN: 9788966263769" in prompt
-    assert "파이썬 코딩의 기술" in prompt
-
-
-def test_build_classification_prompt_empty_optional_fields() -> None:
-    """저자나 원본 카테고리, ISBN이 비어 있을 때 기본 문구가 들어가는지 검증한다."""
-    prompt = build_classification_prompt(title="제목만 있는 책")
-    assert "제목만 있는 책" in prompt
-    assert "정보 없음" in prompt
-    assert "ISBN" not in prompt
+def test_build_classification_prompt_strips_whitespace() -> None:
+    """프롬프트 빌더가 ISBN 앞뒤 공백을 안전하게 제거하는지 검증한다."""
+    prompt = build_classification_prompt(isbn="  9788966263769  ")
+    assert "- ISBN: 9788966263769" in prompt
 
 
 @pytest.mark.parametrize(
@@ -165,28 +145,23 @@ async def test_genre_classifier_service_mock_mode(mock_settings: Settings) -> No
     """Mock 모드에서 규칙 기반 분류가 정상 동작하는지 검증한다."""
     service = GenreClassifierService(settings=mock_settings)
 
-    # 1. raw_category 기반 분류
-    req1 = BookClassificationRequest(
-        title="어떤 책",
-        author="홍길동",
-        raw_category="국내도서 > IT > 프로그래밍",
-    )
+    # 1. ISBN 내 장르 키워드 매칭
+    req1 = BookClassificationRequest(isbn="COMPUTER_IT")
     res1 = await service.classify_genre(req1)
     assert res1.genre == StandardGenre.COMPUTER_IT
     assert res1.confidence == 1.0
 
-    # 2. 제목 기반 분류
-    req2 = BookClassificationRequest(
-        title="삼국지 역사 기행",
-        author="나관중",
-    )
+    # 2. ISBN 내 한글 장르 키워드 매칭
+    req2 = BookClassificationRequest(isbn="역사")
     res2 = await service.classify_genre(req2)
     assert res2.genre == StandardGenre.HISTORY
+    assert res2.confidence == 1.0
 
-    # 3. 매칭 없는 경우 NONE
-    req3 = BookClassificationRequest(title="xyz 123 abc")
+    # 3. 매칭 없는 일반 숫자 ISBN인 경우 NONE
+    req3 = BookClassificationRequest(isbn="9788966263769")
     res3 = await service.classify_genre(req3)
     assert res3.genre == StandardGenre.NONE
+    assert res3.confidence == 1.0
 
 
 @pytest.mark.asyncio
@@ -208,12 +183,7 @@ async def test_genre_classifier_service_bedrock_mode(
     )
 
     service = GenreClassifierService(settings=bedrock_settings)
-    req = BookClassificationRequest(
-        isbn="9788934972464",
-        title="코스모스",
-        author="칼 세이건",
-        raw_category="자연과학",
-    )
+    req = BookClassificationRequest(isbn="9788934972464")
     res = await service.classify_genre(req)
 
     assert res.genre == StandardGenre.SCIENCE
@@ -231,7 +201,7 @@ async def test_genre_classifier_service_exception_fallback(
     )
 
     service = GenreClassifierService(settings=bedrock_settings)
-    req = BookClassificationRequest(title="코스모스")
+    req = BookClassificationRequest(isbn="9788934972464")
     res = await service.classify_genre(req)
 
     assert res.genre == StandardGenre.NONE
