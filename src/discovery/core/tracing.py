@@ -45,8 +45,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_SERVICE_NAME = "backend-discovery"
 
-# Kubernetes probe 등 트레이싱 대상에서 제외할 URL (부분 문자열/정규식 매칭).
-_EXCLUDED_URLS = "health,healthz,readyz,livez"
+# Kubernetes probe 및 Prometheus 스크레이핑 경로 — 트레이싱 대상에서 제외 (부분 문자열/정규식 매칭).
+_EXCLUDED_URLS = "health,healthz,readyz,livez,metrics"
 
 # --- 민감 정보 스크러빙 정책 -------------------------------------------------
 

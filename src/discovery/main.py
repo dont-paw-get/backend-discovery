@@ -12,13 +12,14 @@ OTLP exporter를 붙인다. 미설정(로컬)에서도 앱은 정상 기동한�
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from discovery.api.v1.routers.chat import router as chat_router
 from discovery.api.v1.routers.genre import router as genre_router
 from discovery.core.config import get_settings
 from discovery.core.logging import configure_json_logging
+from discovery.core.metrics import PrometheusMiddleware, render_latest
 from discovery.core.tracing import configure_tracing, instrument_fastapi_app
 from discovery.infrastructure.cache.redis_client import create_redis_client
 
@@ -62,10 +63,18 @@ def create_app() -> FastAPI:
         expose_headers=["X-Session-Id", "X-Signals", "X-Switch-To", "X-Library-Books"],
     )
 
+    # Prometheus HTTP 메트릭 (Micrometer 호환). 전체 요청 처리 시간을 재도록 최외곽에 둔다.
+    app.add_middleware(PrometheusMiddleware)
+
     @app.get("/health", tags=["Health"])
     @app.get("/api/v1/health", tags=["Health"])
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/metrics", include_in_schema=False)
+    async def metrics() -> Response:
+        body, content_type = render_latest()
+        return Response(content=body, media_type=content_type)
 
     app.include_router(chat_router, prefix="/api/v1")
     app.include_router(genre_router, prefix="/api/v1")
