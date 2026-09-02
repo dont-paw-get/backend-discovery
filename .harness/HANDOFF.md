@@ -879,3 +879,36 @@
 ### 다음 세션이 할 일 (CLIAR-216 착수)
 1. 사용자 승인 시 `CLIAR-236-Post-Optimization-Bug-Fixes` 커밋 생성 (`[CLIAR-236]` 태그, push 전 변경 파일/diff 제시), push 및 `develop` 대상 PR 생성.
 2. `develop` 머지 후 `CLIAR-216-Prompt-Guardrails` 브랜치 분기하여 `CLIAR-216 (QA기반 최적화b: 공통 가드레일 리팩터 및 프롬프트 고도화)` 착수.
+
+
+
+## 2026-09-02 — dpyb-discovery-dev Bedrock Sonnet 5 ValidationException(top_p deprecated / assistant prefill) 조사: 이미 수정·배포됨(코드 변경 없음)
+- 트리거: dev의 Tempo/Loki에서 최근 24시간 동안 Sonnet 5(`global.anthropic.claude-sonnet-5`, `ConverseStream`, http 400) 호출이 두 종류 ValidationException으로 실패한다는 보고 — (a) `top_p is deprecated for this model`, (b) `This model does not support assistant message prefill. The conversation must end with a user message.` `[BEDROCK_FALLBACK] stream_chat failed`/`chat invoke failed` 로그 동반. `[INITIAL_META_TIMEOUT]` 후 fast stream bypass 및 루트 span 31초 지연 함께 보고됨.
+- **조사 결론: 요청된 코드 수정 2건이 이미 저장소·dev 배포 이미지 모두에 반영되어 있고, 현재 파드에서는 재현되지 않는다. 이번 세션은 코드 변경 없이 검증만 수행했다.**
+  - (a) top_p/temperature: `create_orchestrator_agent`/`create_librarian_agent`(`domain/orchestrator/agent.py`, `domain/librarian/agent.py`)와 `genre_classifier_service.py`의 `BedrockModel`은 `model_id`/`region_name`/`max_tokens`만 전달한다. Strands 1.26 `BedrockModel.format_request`는 `inferenceConfig`에 `topP`/`temperature`를 값이 None이 아닐 때만 넣으므로(`if value is not None`), 현재 코드는 두 파라미터를 아예 전송하지 않는다. `top_k`도 미전송. → CLIAR-171 핫픽스(PR #34/#35)로 이미 제거 완료. grep으로 전 소스에 잔존 top_p/temperature 샘플링 파라미터 없음 확인(나머지 매치는 날씨 temperature·docstring).
+  - (b) assistant prefill: CLIAR-236에서 `is_tool_call_format_error`(패턴: "assistant message prefill", "must end with a user message") + `chat`/`stream_chat` 양쪽에 에이전트 재생성 후 1회 재시도(`[FORMAT_COLLAPSE_RETRY]`)가 이미 배선되어 있다. 스트리밍은 TTFB 이전에만 재시도.
+- **배포 상태 확인**: `k8s/overlays/dev/kustomization.yaml`의 `newTag`와 실제 실행 파드(`backend-discovery-7f5747648d-*`) 이미지가 모두 `97a15b530562...`(= 현재 develop HEAD, CLIAR-236)로 일치. 즉 보고된 24시간 창의 ValidationException은 이 수정이 배포되기 전 옛 이미지에서 발생한 스테일 로그로 판단된다. 현재 파드(기동 후 ~30분) 로그에는 top_p/prefill/ValidationException/BEDROCK_FALLBACK 항목이 전무하고 최근 chat 요청이 모두 success_rate 1.0으로 정상 책 카드를 렌더링한다.
+- **라이브 200 확인**: 클러스터 내부에서 `POST /api/v1/chat`(`{"message":"안녕! 오늘 날씨 어때?","stream":false}`, `Authorization: Bearer dummy-smoke-test-token`) 호출 → HTTP 200, 정상 cat 페르소나 응답 + signals 반환(약 9.3초). fallback 문구 아님. 직후 로그 재스캔에도 신규 에러 없음.
+- **남은 실제 이슈는 ValidationException이 아니라 레이턴시**: 스트리밍 로그에서 `recommend_books`가 호출되는 턴의 `ttfb_ms`가 34초까지 관측됨(예: total 40초). 원인은 `get_initial_meta`(1.5초 Fail-Fast로 정상 동작 중)가 아니라, 오케스트레이터가 `recommend_books` 도구를 호출할 때 하위 `create_librarian_agent`가 Tavily 2회 검색 + Sonnet 5 생성으로 ~26초를 소비하고 그동안 상위 스트림이 첫 토큰을 못 내보내는 2단 버퍼링 구조 때문. 이는 이미 백로그에 있는 "직결 스트리밍(Direct Streaming Pipeline)" 과제 범위이며 이번 보고의 ValidationException과는 별개다. `[INITIAL_META_TIMEOUT]` 로그 자체는 사서 프리페치가 1.5초 안에 못 끝났을 때의 정상적 bypass 신호다.
+- 문서 동기화: `ARCHITECTURE.md` 기술 스택 표의 stale한 `temperature=0.5, top_p=0.9` 표기를 실제 코드(파라미터 미전송)에 맞게 정정. 코드/`PLAN.md`/`STATE.md` 단계 변경 없음(신규 완료 단계가 없어 STATE 갱신 대상 아님).
+
+### 다음 세션이 할 일
+1. 레이턴시가 실사용 문제로 판단되면 백로그의 "직결 스트리밍 파이프라인" 과제를 티켓화해 착수(하위 추천 에이전트 토큰 직결 중계 + `### 📖` N+1 조기 중단). 트레이싱(CLIAR-203)으로 개선 전/후 TTFB 비교.
+2. Tempo에서 ValidationException 스팬의 타임스탬프가 `97a15b53...` 이미지 롤아웃 시각 이전인지 최종 확인(스테일 여부 확정). 만약 롤아웃 이후에도 top_p 에러가 관측되면 그때는 Strands 버전 업그레이드/`additional_request_fields` 경유 주입 여부를 다시 조사(현재 코드 경로에는 없음).
+
+
+
+## 2026-09-02 — CLIAR-237 도서 추천 총 페이지수 알라딘 실조회 검증 완료
+- 브랜치: `CLIAR-237-Page-Count-Aladin-Verification` (`develop`에서 분기)
+- 배경: dev 재현으로 LLM+Tavily 웹검색이 페이지수를 "약 300쪽"처럼 부정확하게 생성하는 문제를 확인. 사용자가 `backend-book`에 이미 알라딘 연동 API(`GET /api/v1/books/search?isbn=...`)가 있음을 알려주고 실제 응답 예시(`book.totalPages: 160`)를 공유해, 정규식 완화(임시 미봉책)가 아니라 알라딘 실조회로 검증하는 근본 해결(A안)로 확정.
+- 구현 중 설계를 한 번 바꿨다: 원래 계획은 `OrchestratorService.chat`의 `recommended_books` 조립 시점(동기 경로)에서 검증하는 것이었으나, ISBN 내부 주석(`<!-- isbn: ... -->`)이 스트리밍 청크에 실시간으로 그대로 노출되는 문제를 구현 중 발견했다. 이를 근본적으로 막기 위해 `RecommendBooksTool.recommend()`(하위 추천 에이전트 도구 반환 지점)에서 검증과 주석 제거를 모두 끝내는 방식으로 전환했다 — `OrchestratorService`는 전혀 수정하지 않았고 오히려 더 단순한 설계가 됐다.
+- 신설: `domain/orchestrator/book_metadata_response.py`(`BookMetadata`, `BookMetadataSearchResponse` — `libraryBook`을 `book`으로 정규화), `domain/orchestrator/tools/book_metadata_client.py`(`BookMetadataClient.fetch_total_pages`, `Authorization` 헤더 없이 호출, 실패 시 예외 없이 `None`).
+- 수정: `domain/librarian/agent.py`(CAT/STORK 프롬프트에 `<!-- isbn: ... -->` 규칙 및 근사치 표현 금지 강화), `domain/librarian/post_processor.py`(`RecommendedBookFields.isbn`, ISBN 파싱, `strip_isbn_comments`), `domain/orchestrator/tools/recommend_tool.py`(`_verify_page_counts`, `_replace_page_count_for_title`로 저자 줄 쪽수 표기 교체), `core/config.py`/`.env.example`(`book_metadata_api_url`, `book_metadata_timeout_seconds`), `api/deps.py`(`get_book_metadata_client` 배선).
+- `docs/api/openapi.yaml`의 `RecommendedBookCard.page_count` description만 정확도 문구로 보강(필드 자체 계약은 불변이라 ADR 불필요로 판단).
+- 검증: 단위 테스트 19건 신규(ISBN 파서·`strip_isbn_comments` 6건, `BookMetadataClient` 6건 신규 파일, `RecommendBooksTool` 페이지수 검증 3건 + 회귀 없음), 전체 단위 247건 + 정적 분석(`ruff`/`mypy`) 100% 통과.
+- 커밋/push는 하지 않았다(사용자 승인 대기).
+
+### 다음 세션이 할 일
+1. **dev 배포 후 재현 실측 필요**: "약 N쪽" 등 근사치가 나오는 도서로 재현해 최종 `page_count`가 알라딘 실측값으로 교체되는지 확인. `libraryBook`(이미 서재에 등록된 경우) 실제 응답 스키마가 `book`과 동일한지 실측(현재는 가정으로 구현, `model_validator`로 `libraryBook`→`book` 정규화만 해둔 상태). `book_metadata_api_url` 무인증 호출이 401/403 없이 성공하는지 확인 — 실패 시 `Authorization` 패스스루 추가 필요(설계상 이미 안전하게 처리되지만 추가하면 커버리지 개선).
+2. 사용자 승인 시 커밋 생성(`[CLIAR-237]` 태그), push 및 `develop` 대상 PR 생성.
+3. CLIAR-216(QA기반 최적화b) 착수.

@@ -9,6 +9,7 @@ from discovery.application.genre_classifier_service import GenreClassifierServic
 from discovery.application.librarian_service import LibrarianService
 from discovery.application.orchestrator_service import OrchestratorService
 from discovery.core.config import get_settings
+from discovery.domain.orchestrator.tools.book_metadata_client import BookMetadataClient
 from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianTool
 from discovery.domain.orchestrator.tools.library_tool import SearchMyLibraryTool
 from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksTool
@@ -69,14 +70,23 @@ def get_book_search_tool(request: Request) -> BookSearchTool:
     )
 
 
+def get_book_metadata_client() -> BookMetadataClient:
+    """CLIAR-237: 추천 도서 페이지수를 알라딘 실조회로 검증하는 backend-book 서지 조회
+    클라이언트."""
+    settings = get_settings()
+    return BookMetadataClient(settings=settings)
+
+
 def get_recommend_books_tool(
     book_search_tool: BookSearchTool = Depends(get_book_search_tool),
+    book_metadata_client: BookMetadataClient = Depends(get_book_metadata_client),
 ) -> RecommendBooksTool:
     """도서 추천 에이전트 로컬 도구."""
     settings = get_settings()
     return RecommendBooksTool(
         book_search_tool=book_search_tool,
         settings=settings,
+        book_metadata_client=book_metadata_client,
     )
 
 

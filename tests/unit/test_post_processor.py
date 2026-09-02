@@ -7,6 +7,7 @@
 from discovery.domain.librarian.post_processor import (
     parse_recommended_books_from_markdown,
     sanitize_html_tags,
+    strip_isbn_comments,
     truncate_books_by_count,
 )
 
@@ -150,6 +151,57 @@ def test_parse_recommended_books_skips_block_without_title() -> None:
     # 헤딩은 있지만 제목이 비어 있는 비정형 블록은 건너뛴다.
     malformed = "### 📖 \n- **저자**: 홍길동\n"
     assert parse_recommended_books_from_markdown(malformed) == []
+
+
+SAMPLE_BOOK_WITH_ISBN = """### 📖 어린 왕자
+- **저자**: 앙투안 드 생텍쥐페리 (약 160쪽)
+- **추천 이유**: 어른을 위한 동화로도 사랑받는 고전입니다.
+<!-- isbn: 9788932917245 -->"""
+
+SAMPLE_BOOK_WITHOUT_ISBN = """### 📖 넛지: 파이널 에디션
+- **저자**: 리처드 탈러, 캐스 선스타인
+- **추천 이유**: 행동경제학의 고전입니다."""
+
+
+def test_parse_recommended_books_extracts_isbn_comment() -> None:
+    # <!-- isbn: ... --> 내부 주석에서 ISBN을 정확히 추출해야 한다.
+    books = parse_recommended_books_from_markdown(SAMPLE_BOOK_WITH_ISBN)
+    assert len(books) == 1
+    assert books[0]["isbn"] == "9788932917245"
+
+
+def test_parse_recommended_books_isbn_none_when_comment_missing() -> None:
+    # ISBN 주석이 없으면 isbn 필드는 None이어야 한다.
+    books = parse_recommended_books_from_markdown(SAMPLE_BOOK_WITHOUT_ISBN)
+    assert len(books) == 1
+    assert books[0]["isbn"] is None
+
+
+def test_parse_recommended_books_ignores_invalid_isbn_length() -> None:
+    # 10자리/13자리가 아닌 숫자는 ISBN으로 인정하지 않는다.
+    malformed_isbn = (
+        "### 📖 테스트 도서\n- **저자**: 홍길동\n- **추천 이유**: 테스트\n"
+        "<!-- isbn: 12345 -->"
+    )
+    books = parse_recommended_books_from_markdown(malformed_isbn)
+    assert books[0]["isbn"] is None
+
+
+def test_strip_isbn_comments_removes_comment_line() -> None:
+    # 최종 사용자 응답에는 ISBN 주석이 절대 남아있으면 안 된다.
+    result = strip_isbn_comments(SAMPLE_BOOK_WITH_ISBN)
+    assert "<!-- isbn:" not in result
+    assert "### 📖 어린 왕자" in result
+
+
+def test_strip_isbn_comments_noop_when_no_comment() -> None:
+    # 주석이 없는 텍스트는 그대로 반환된다.
+    result = strip_isbn_comments(SAMPLE_BOOK_WITHOUT_ISBN)
+    assert result == SAMPLE_BOOK_WITHOUT_ISBN
+
+
+def test_strip_isbn_comments_handles_empty_string() -> None:
+    assert strip_isbn_comments("") == ""
 
 
 def test_sanitize_html_tags_removes_br_variants() -> None:
