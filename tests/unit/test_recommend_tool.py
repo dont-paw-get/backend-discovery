@@ -133,16 +133,16 @@ async def test_recommend_tool_truncates_surplus_books(mocker: MockerFixture) -> 
 
 
 # ---------------------------------------------------------------------------
-# CLIAR-237: 알라딘 실조회 페이지수 검증
+# CLIAR-237 후속: 제목·저자 기반 알라딘 조회로 페이지수 검증
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_recommend_verifies_page_count_via_book_metadata_client(
+async def test_recommend_verifies_page_count_via_title_author(
     mocker: MockerFixture,
 ) -> None:
-    # LLM이 "약 300쪽"처럼 근사치를 생성해도, ISBN 검증에 성공하면 정확한 값으로
-    # 교체되고 ISBN 주석은 최종 응답에서 제거되어야 한다.
+    # LLM이 "약 300쪽"처럼 근사치를 생성해도, 제목/저자 검증에 성공하면 정확한 값으로
+    # 교체되어야 한다.
     mock_search_tool = mocker.MagicMock()
     settings = Settings(
         redis_url="redis://localhost:6379",
@@ -154,8 +154,7 @@ async def test_recommend_verifies_page_count_via_book_metadata_client(
     raw_text = (
         "### 📖 돈의 심리학\n"
         "- **저자**: 모건 하우절 (약 300쪽)\n"
-        "- **추천 이유**: 재테크가 아니라 돈을 대하는 심리를 다룹니다.\n"
-        "<!-- isbn: 9791165341808 -->"
+        "- **추천 이유**: 재테크가 아니라 돈을 대하는 심리를 다룹니다."
     )
     mock_result = mocker.MagicMock()
     mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
@@ -166,7 +165,7 @@ async def test_recommend_verifies_page_count_via_book_metadata_client(
     )
 
     mock_metadata_client = mocker.MagicMock()
-    mock_metadata_client.fetch_total_pages = AsyncMock(return_value=352)
+    mock_metadata_client.fetch_by_title_author = AsyncMock(return_value=352)
 
     tool_instance = RecommendBooksTool(
         book_search_tool=mock_search_tool,
@@ -176,17 +175,19 @@ async def test_recommend_verifies_page_count_via_book_metadata_client(
 
     result_text = await tool_instance.recommend(query="돈에 관한 책 추천해줘", count=1)
 
-    mock_metadata_client.fetch_total_pages.assert_awaited_once_with("9791165341808")
+    mock_metadata_client.fetch_by_title_author.assert_awaited_once_with(
+        "돈의 심리학", "모건 하우절"
+    )
     assert "(352쪽)" in result_text
     assert "약 300쪽" not in result_text
-    assert "<!-- isbn:" not in result_text
 
 
 @pytest.mark.asyncio
 async def test_recommend_keeps_llm_value_when_metadata_lookup_fails(
     mocker: MockerFixture,
 ) -> None:
-    # 알라딘 조회가 실패(None)하면 LLM이 생성한 기존 값을 그대로 유지해야 한다.
+    # 알라딘 조회가 실패(None, 예: 교집합 없음)하면 LLM이 생성한 기존 값을 그대로
+    # 유지해야 한다.
     mock_search_tool = mocker.MagicMock()
     settings = Settings(
         redis_url="redis://localhost:6379",
@@ -198,8 +199,7 @@ async def test_recommend_keeps_llm_value_when_metadata_lookup_fails(
     raw_text = (
         "### 📖 돈의 심리학\n"
         "- **저자**: 모건 하우절 (약 300쪽)\n"
-        "- **추천 이유**: 재테크가 아니라 돈을 대하는 심리를 다룹니다.\n"
-        "<!-- isbn: 9791165341808 -->"
+        "- **추천 이유**: 재테크가 아니라 돈을 대하는 심리를 다룹니다."
     )
     mock_result = mocker.MagicMock()
     mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
@@ -210,7 +210,7 @@ async def test_recommend_keeps_llm_value_when_metadata_lookup_fails(
     )
 
     mock_metadata_client = mocker.MagicMock()
-    mock_metadata_client.fetch_total_pages = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_by_title_author = AsyncMock(return_value=None)
 
     tool_instance = RecommendBooksTool(
         book_search_tool=mock_search_tool,
@@ -222,14 +222,13 @@ async def test_recommend_keeps_llm_value_when_metadata_lookup_fails(
 
     # 검증 실패 시 기존 LLM 생성 표기를 그대로 보존한다(더 나쁜 값으로 덮어쓰지 않음).
     assert "약 300쪽" in result_text
-    assert "<!-- isbn:" not in result_text
 
 
 @pytest.mark.asyncio
-async def test_recommend_strips_isbn_comment_without_metadata_client(
+async def test_recommend_skips_verification_without_metadata_client(
     mocker: MockerFixture,
 ) -> None:
-    # book_metadata_client가 배선되지 않은 경우에도 ISBN 주석은 항상 제거되어야 한다.
+    # book_metadata_client가 배선되지 않은 경우 검증 없이 원본을 그대로 반환한다.
     mock_search_tool = mocker.MagicMock()
     settings = Settings(
         redis_url="redis://localhost:6379",
@@ -241,8 +240,7 @@ async def test_recommend_strips_isbn_comment_without_metadata_client(
     raw_text = (
         "### 📖 어린 왕자\n"
         "- **저자**: 앙투안 드 생텍쥐페리\n"
-        "- **추천 이유**: 어른을 위한 동화입니다.\n"
-        "<!-- isbn: 9788932917245 -->"
+        "- **추천 이유**: 어른을 위한 동화입니다."
     )
     mock_result = mocker.MagicMock()
     mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
@@ -255,10 +253,9 @@ async def test_recommend_strips_isbn_comment_without_metadata_client(
     tool_instance = RecommendBooksTool(
         book_search_tool=mock_search_tool,
         settings=settings,
-        # book_metadata_client 미배선 (기존 호환 경로)
+        # book_metadata_client 미배선
     )
 
     result_text = await tool_instance.recommend(query="동화책 추천해줘", count=1)
 
-    assert "<!-- isbn:" not in result_text
-    assert "### 📖 어린 왕자" in result_text
+    assert result_text == raw_text

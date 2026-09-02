@@ -1,13 +1,16 @@
-"""도서 서지 조회 API(GET /api/v1/books/search?isbn=...) 응답 DTO.
+"""도서 서지 조회 API 응답 DTO.
 
-backend-book이 알라딘 Open API를 실조회하여 반환하는 서지 정보 중, 이 티켓(CLIAR-237)
-에서는 `totalPages`만 사용한다. 응답은 다음 세 가지 형태로 올 수 있다:
+backend-book의 두 가지 서지 조회 엔드포인트에 대응한다:
 
-1. `alreadyRegistered=false` + `book`: 알라딘에서 신규 조회된 서지 정보.
-2. `alreadyRegistered=true` + `libraryBook`(추정, 실측 전): 사용자가 이미 서재에
-   등록한 도서라 알라딘 대신 저장된 데이터를 반환하는 경우.
-3. `book`/`libraryBook` 모두 없음: 알라딘에도 없어 서지 정보를 확인할 수 없는 경우
-   (수동 입력 폴백).
+1. `GET /api/v1/books/search?isbn=...` (`BookMetadataSearchResponse`) — ISBN 단건 조회.
+   서재에 이미 등록된 도서면 `alreadyRegistered=true` + `libraryBook`으로, 아니면
+   `alreadyRegistered=false` + `book`으로 응답한다. 현재 추천 파이프라인에서는 더 이상
+   호출하지 않지만(CLIAR-237 후속으로 title/author 기반 조회로 통일), 클라이언트
+   메서드(`fetch_total_pages`)는 향후 재사용 가능성을 위해 유지한다.
+2. `GET /api/v1/books/search/by-title-author` (`BookSearchByTitleAuthorResponse`) —
+   제목·저자 교집합 검색. 서재 등록 여부를 확인하지 않는 순수 외부 검색이라
+   `alreadyRegistered`/`libraryBook` 분기가 없고, 교집합이 없으면 `book` 필드 자체가
+   응답에서 생략된다.
 
 `libraryBook`의 정확한 필드명이 아직 실측되지 않았으므로, `book`과 동일한 스키마라고
 가정하고 방어적으로 파싱한다(`extra="ignore"` + 전 필드 옵셔널). 실제 필드명이 다르면
@@ -16,7 +19,7 @@ backend-book이 알라딘 Open API를 실조회하여 반환하는 서지 정보
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-__all__ = ["BookMetadata", "BookMetadataSearchResponse"]
+__all__ = ["BookMetadata", "BookMetadataSearchResponse", "BookSearchByTitleAuthorResponse"]
 
 
 class BookMetadata(BaseModel):
@@ -75,3 +78,30 @@ class BookMetadataSearchResponse(BaseModel):
         if self.book is None:
             return None
         return self.book.total_pages
+
+
+class BookSearchByTitleAuthorResponse(BaseModel):
+    """`GET /api/v1/books/search/by-title-author` 응답 DTO.
+
+    제목으로 1회, 저자로 1회 알라딘 검색을 수행해 교집합(isbn13 동일) 중 제목 검색
+    결과 기준 최상단 1권만 `book`으로 반환한다. 교집합이 없거나 한쪽 검색 결과가
+    없으면 `book` 필드 자체가 응답에서 생략된다(수동 입력 폴백 케이스).
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        from_attributes=True,
+        extra="ignore",
+    )
+
+    book: BookMetadata | None = Field(default=None)
+
+    @property
+    def total_pages(self) -> int | None:
+        """검색된 도서의 총 페이지 수. `book`이 없으면 `None`."""
+        return self.book.total_pages if self.book else None
+
+    @property
+    def isbn(self) -> str | None:
+        """검색된 도서의 ISBN. `book`이 없으면 `None`."""
+        return self.book.isbn if self.book else None
