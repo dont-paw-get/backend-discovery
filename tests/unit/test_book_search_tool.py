@@ -13,11 +13,81 @@ from discovery.infrastructure.search.book_search_tool import (
     NO_RESULTS,
     TAVILY_SEARCH_DEPTH,
     BookSearchTool,
+    sanitize_search_results,
 )
 
 
 def _fixed_now() -> datetime:
     return datetime(2026, 8, 21, 12, 0, 0, tzinfo=UTC)
+
+
+def test_sanitize_search_results_strips_raw_content_and_unnecessary_fields() -> None:
+    raw_results = [
+        {
+            "title": " 책 제목 1 ",
+            "url": "https://example.com/book1",
+            "content": "도서 설명 요약입니다.",
+            "raw_content": "<html><body>거대한 원본 웹페이지 HTML 텍스트...</body></html>",
+            "score": 0.95,
+            "images": ["https://example.com/img1.jpg"],
+        }
+    ]
+
+    sanitized = sanitize_search_results(raw_results)
+
+    assert len(sanitized) == 1
+    assert sanitized[0] == {
+        "title": "책 제목 1",
+        "url": "https://example.com/book1",
+        "content": "도서 설명 요약입니다.",
+    }
+    assert "raw_content" not in sanitized[0]
+    assert "score" not in sanitized[0]
+    assert "images" not in sanitized[0]
+
+
+def test_sanitize_search_results_truncates_long_content() -> None:
+    long_text = "가" * 600
+    raw_results = [
+        {
+            "title": "책 제목",
+            "url": "https://example.com",
+            "content": long_text,
+        }
+    ]
+
+    sanitized = sanitize_search_results(raw_results, max_content_length=400)
+
+    assert len(sanitized[0]["content"]) == 403  # 400 + "..."
+    assert sanitized[0]["content"].endswith("...")
+    assert sanitized[0]["content"].startswith("가" * 400)
+
+
+def test_sanitize_search_results_limits_max_results() -> None:
+    raw_results = [
+        {"title": f"책 {i}", "url": f"https://example.com/{i}", "content": "내용"}
+        for i in range(10)
+    ]
+
+    sanitized = sanitize_search_results(raw_results, max_results=5)
+
+    assert len(sanitized) == 5
+    assert sanitized[0]["title"] == "책 0"
+    assert sanitized[4]["title"] == "책 4"
+
+
+def test_sanitize_search_results_handles_invalid_or_none_values() -> None:
+    raw_results = [
+        "비정상 아이템",
+        {"title": None, "url": None, "content": None},
+        {"title": "정상 책", "url": "https://example.com", "content": "내용"},
+    ]
+
+    sanitized = sanitize_search_results(raw_results)
+
+    assert len(sanitized) == 2
+    assert sanitized[0] == {"title": "", "url": "", "content": ""}
+    assert sanitized[1] == {"title": "정상 책", "url": "https://example.com", "content": "내용"}
 
 
 @pytest.mark.asyncio
@@ -26,14 +96,14 @@ async def test_search_books_returns_cached_result_without_calling_tavily(
 ) -> None:
     tavily_client = mocker.AsyncMock()
     cache = mocker.AsyncMock()
-    cache.get.return_value = [{"title": "캐시된 결과"}]
+    cache.get.return_value = [{"title": "캐시된 결과", "url": "", "content": ""}]
     usage_limiter = mocker.AsyncMock()
 
     tool = BookSearchTool(tavily_client, cache, usage_limiter, now=_fixed_now)
 
     results = await tool.search_books("비 오는 날 소설")
 
-    assert results == [{"title": "캐시된 결과"}]
+    assert results == [{"title": "캐시된 결과", "url": "", "content": ""}]
     tavily_client.search.assert_not_called()
     usage_limiter.increment.assert_not_called()
 
@@ -43,7 +113,16 @@ async def test_search_books_calls_tavily_with_basic_depth_on_cache_miss(
     mocker: MockerFixture,
 ) -> None:
     tavily_client = mocker.AsyncMock()
-    tavily_client.search.return_value = {"results": [{"title": "새 결과"}]}
+    tavily_client.search.return_value = {
+        "results": [
+            {
+                "title": "새 결과",
+                "url": "https://example.com",
+                "content": "새 내용",
+                "raw_content": "거대 HTML",
+            }
+        ]
+    }
     cache = mocker.AsyncMock()
     cache.get.return_value = None
     usage_limiter = mocker.AsyncMock()
@@ -53,7 +132,7 @@ async def test_search_books_calls_tavily_with_basic_depth_on_cache_miss(
 
     results = await tool.search_books("따뜻한 소설")
 
-    assert results == [{"title": "새 결과"}]
+    assert results == [{"title": "새 결과", "url": "https://example.com", "content": "새 내용"}]
     tavily_client.search.assert_called_once_with("따뜻한 소설", search_depth=TAVILY_SEARCH_DEPTH)
     assert TAVILY_SEARCH_DEPTH == "basic"
 
@@ -63,7 +142,16 @@ async def test_search_books_caches_result_after_successful_search(
     mocker: MockerFixture,
 ) -> None:
     tavily_client = mocker.AsyncMock()
-    tavily_client.search.return_value = {"results": [{"title": "새 결과"}]}
+    tavily_client.search.return_value = {
+        "results": [
+            {
+                "title": "새 결과",
+                "url": "https://example.com",
+                "content": "새 내용",
+                "raw_content": "HTML",
+            }
+        ]
+    }
     cache = mocker.AsyncMock()
     cache.get.return_value = None
     usage_limiter = mocker.AsyncMock()
@@ -73,7 +161,8 @@ async def test_search_books_caches_result_after_successful_search(
 
     await tool.search_books("따뜻한 소설")
 
-    cache.set.assert_called_once_with("따뜻한 소설", [{"title": "새 결과"}])
+    expected_cached = [{"title": "새 결과", "url": "https://example.com", "content": "새 내용"}]
+    cache.set.assert_called_once_with("따뜻한 소설", expected_cached)
 
 
 @pytest.mark.asyncio

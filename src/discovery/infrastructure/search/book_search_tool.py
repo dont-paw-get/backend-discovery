@@ -15,7 +15,7 @@
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any
 
 from strands import tool
 from tavily import AsyncTavilyClient
@@ -27,6 +27,35 @@ logger = logging.getLogger(__name__)
 
 TAVILY_SEARCH_DEPTH = "basic"  # advanced는 절대 쓰지 않는다(크레딧 2배 소모).
 NO_RESULTS: list[dict[str, Any]] = []
+MAX_CONTENT_LENGTH = 400  # 도서 제목, 저자, 출판사, 쪽수 파악에 충분한 길이
+MAX_SEARCH_RESULTS = 5  # 상위 검색 결과 최대 개수
+
+
+def sanitize_search_results(
+    raw_results: list[Any],
+    *,
+    max_content_length: int = MAX_CONTENT_LENGTH,
+    max_results: int = MAX_SEARCH_RESULTS,
+) -> list[dict[str, Any]]:
+    """Tavily 원본 검색 결과에서 LLM 입력 토큰을 낭비하는 거대 필드(raw_content 등)를 제거하고,
+
+    도서 추천에 필수적인 title, url, content만 정제하여 반환한다.
+    """
+    sanitized: list[dict[str, Any]] = []
+    for item in raw_results[:max_results]:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title") or "").strip()
+        url = str(item.get("url") or "").strip()
+        content = str(item.get("content") or "").strip()
+        if len(content) > max_content_length:
+            content = content[:max_content_length].rstrip() + "..."
+        sanitized.append({
+            "title": title,
+            "url": url,
+            "content": content,
+        })
+    return sanitized
 
 
 class BookSearchTool:
@@ -71,7 +100,10 @@ class BookSearchTool:
         await self._usage_limiter.increment(now=now)
 
         raw_results = response.get("results", []) if isinstance(response, dict) else NO_RESULTS
-        results: list[dict[str, Any]] = cast(list[dict[str, Any]], raw_results)
+        if isinstance(raw_results, list):
+            results = sanitize_search_results(raw_results)
+        else:
+            results = NO_RESULTS
         await self._cache.set(query, results)
         return results
 
