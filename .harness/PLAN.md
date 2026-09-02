@@ -1,5 +1,30 @@
 # PLAN — backend-discovery
 
+## [코드 완료 · dev 배포/스크레이핑 확인 대기] 관측 인프라(dont-paw-get/infra) 연동 — dev 환경
+
+브랜치: `관측-인프라-연동` (티켓 없음 — 배포용 임시 작업, 커밋 `[CLIAR-XX]` 태그 생략, 사용자 확정 2026-09-02)
+
+**배경**: infra 저장소에 Prometheus/Grafana/Loki/Tempo + RCA Agent(Grafana 알림 → Discord 원인분석)가 dev 클러스터(`monitoring` ns)에 구축됨. infra의 "HTTP 5xx 에러율" / "p99 레이턴시" 알림이 동작하려면 이 서비스가 Prometheus HTTP 메트릭을 노출하고 ServiceMonitor로 스크레이핑돼야 한다.
+
+**서비스명**: `<SVC>` = `backend-discovery` (메트릭 `application` 태그 = `OTEL_SERVICE_NAME` = 트레이스 `service.name` = k8s 리소스명, 전부 동일).
+
+**구현 완료 (코드 세부는 `.harness/STATE.md`)**:
+- Task 1: `prometheus-client` 의존성 추가, `core/metrics.py`(순수 ASGI 미들웨어 + Micrometer 호환 `http_server_requests_seconds` 히스토그램, 버킷 60초까지, `application` 라벨 = `OTEL_SERVICE_NAME`), `main.py`에 미들웨어 + `GET /metrics` 배선.
+- Task 2: `k8s/overlays/dev/servicemonitor.yaml`(name `backend-discovery`, `port: http`, `path: /metrics`, `interval: 30s`) + dev kustomization resources 추가. prod overlay 미변경.
+- Task 3: `k8s/overlays/dev/configmap-patch.yaml`에 `OTEL_METRICS_EXPORTER=none` / `OTEL_LOGS_EXPORTER=none` 추가.
+- Task 4: 변경 없음 (`core/logging.py`가 이미 `trace_id`+`level` 출력).
+- Task 5: `core/tracing.py:_EXCLUDED_URLS`에 `metrics` 추가.
+- Task 6: **사용자 지시로 보류** — genre classifier 베어 모델 ID는 이번 범위에서 건드리지 않음.
+- 검증: `tests/unit/test_metrics.py` 3건 신규, 전체 254건 + `ruff`/`mypy` + `kubectl kustomize k8s/overlays/dev` 통과.
+
+**남은 작업 (dev 배포 후)**:
+- [ ] dev 배포 후 `/metrics`가 `http_server_requests_seconds_bucket`/`_count`/`_sum`을 `application="backend-discovery"` 라벨로 노출하는지 확인
+- [ ] Prometheus가 ServiceMonitor `backend-discovery`(`dpyb-discovery-dev`)로 실제 타깃을 잡고 스크레이핑하는지 `kubectl`/Prometheus targets에서 확인
+- [ ] infra 저장소에 회신: (1) `<SVC>`=`backend-discovery` (2) ServiceMonitor `backend-discovery` / `dpyb-discovery-dev` (3) Micrometer 이름 모방이라 알림 규칙 수정 불필요 — `http_server_requests_seconds_{count,bucket}`, 라벨 `method,uri,status,outcome,application` (4) 스크레이핑 확인 결과
+- [ ] (후속 검토) `/metrics`가 Ingress `path: /` 로 외부 노출됨 — dev 한정 수용, 필요 시 ingress 차단 또는 별도 포트 분리
+
+---
+
 ## [코드 구현 완료 · dev 실측 대기] CLIAR-244: 도서 추천 카드 장르(16개 표준) 필드 추가
 
 **배경 (2026-09-02, 스크린샷으로 재확인)**: 지금 프론트 상단 칩에 "미스터리"가 이미 표시되고 있으나, 이 값은 `ChatResponse.signals.genre_focus`(`backend-librarian`이 대화 분석으로 자유 판단한 `list[str] | str`, 코드로 확인: `librarian_response.py:58`)로 **16개 표준 `StandardGenre` Enum 매핑을 거치지 않은 값**이다. 사용자 요청: (1) 상단 칩에는 날씨/시간대/분위기만 남기고 장르 칩은 제거, (2) 대신 **각 도서 카드 내부**(저자 옆)에 그 도서의 실제 표준 장르를 표시, (3) "등록하기" 버튼 클릭 시 이 장르 값이 등록 요청 페이로드에 함께 실려야 함 — 즉 표시 이동이 아니라 `RecommendedBookCard`에 구조화 필드로 편입되어야 하는 문제.

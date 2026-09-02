@@ -33,6 +33,7 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 | 테스트 | pytest, pytest-asyncio, pytest-mock, testcontainers(redis), httpx |
 | 관측(트레이싱) | OpenTelemetry SDK 1.44 + OTLP HTTP/protobuf exporter, 자동 계측(FastAPI/redis/botocore/httpx), Strands 자체 agent span 활용. dev는 OTel Collector(`monitoring` ns) → Grafana Tempo |
 | 관측(로깅) | 표준 `logging` 기반 stdout JSON (`core/logging.py`), 각 로그에 `trace_id`/`span_id` 주입. Grafana Alloy가 컨테이너 stdout 수집 → Loki |
+| 관측(메트릭) | `prometheus-client` 기반 순수 ASGI 미들웨어(`core/metrics.py`)가 `GET /metrics`로 Micrometer 호환 히스토그램(`http_server_requests_seconds_*`) 노출. dev overlay의 ServiceMonitor(`backend-discovery`)로 kube-prometheus-stack이 스크레이핑. OTel MeterProvider는 미도입(pull 방식) |
 
 **2026-08-21 방향 전환으로 제거된 것**: PostgreSQL, pgvector, SQLAlchemy(async),
 asyncpg, Alembic, testcontainers(postgres). RDB로 남는 데이터가 없어 완전히
@@ -119,9 +120,13 @@ backend-discovery/
   ```
   `session_id`는 이 스토어가 생성하지 않는다. 호출자가 결정론적으로 발급해 주입한다.
 
-## 관측(Observability) — CLIAR-203
+## 관측(Observability) — CLIAR-203 + infra 연동
 
-목적: Trace + 구조화 로그 통합. Metrics/MeterProvider는 이번 범위 밖.
+목적: Trace + 구조화 로그 + Prometheus 메트릭을 infra(dont-paw-get/infra)의
+Grafana/Tempo/Loki/Prometheus 및 RCA Agent와 연동. 서비스명 `<SVC>`는 전부
+`backend-discovery`로 통일한다(메트릭 `application` 태그 = `OTEL_SERVICE_NAME` =
+트레이스 `service.name` = k8s 리소스명). OTel MeterProvider는 여전히 미도입 —
+메트릭은 Prometheus pull(`/metrics`) 방식.
 
 - **초기화 위치**: `core/tracing.py`의 `configure_tracing()`(idempotent)이 전역
   `TracerProvider`를 세팅한다. `OTEL_EXPORTER_OTLP_ENDPOINT`(또는 `_TRACES_ENDPOINT`)가
@@ -146,8 +151,21 @@ backend-discovery/
   활성 span의 `trace_id`(32 hex)/`span_id`(16 hex)를 JSON 필드로 주입(활성 span
   없으면 null). Loki label로 승격하지 않는다(고카디널리티). `observability.py`의
   구조화 메트릭 로그도 동일 필드를 포함한다.
-- **dev 환경변수**: `k8s/overlays/dev/configmap-patch.yaml` (Secret 아님).
-- **테스트**: `tests/unit/test_tracing.py`.
+- **Prometheus 메트릭**: `core/metrics.py`의 `PrometheusMiddleware`(순수 ASGI —
+  `BaseHTTPMiddleware`가 아니라서 스트리밍 응답도 마지막 body 청크까지 wall-clock
+  계측)가 요청마다 `http_server_requests_seconds` 히스토그램을 기록한다. 이름·구조를
+  Spring Micrometer(`_bucket`/`_count`/`_sum`, 라벨 `method`,`uri`,`status`,`outcome`,
+  `application`)와 일치시켜 infra의 5xx/p99 알림 규칙이 수정 없이 동작하게 한다.
+  버킷은 0.05~60초(LLM 응답 지연 대응). `uri`는 라우트 템플릿(미매칭 시 `"NO_ROUTE"`).
+  `/health`·`/api/v1/health`·`/metrics`는 계측 제외. `GET /metrics`가 `generate_latest()`를
+  서빙하며 `openapi.yaml`에는 넣지 않는다(ops 엔드포인트, `/health`와 동일 취급).
+  스크레이핑은 dev overlay의 ServiceMonitor `backend-discovery`(`port: http`,
+  `path: /metrics`, `interval: 30s`) — prod overlay에는 두지 않는다(CRD 부재).
+- **probe/스크레이핑 제외**: `_EXCLUDED_URLS = "health,healthz,readyz,livez,metrics"` —
+  트레이스 server span 생성을 SDK 단에서 막는다.
+- **dev 환경변수**: `k8s/overlays/dev/configmap-patch.yaml` (Secret 아님). traces만
+  OTLP export하고 `OTEL_METRICS_EXPORTER=none`/`OTEL_LOGS_EXPORTER=none`.
+- **테스트**: `tests/unit/test_tracing.py`, `tests/unit/test_metrics.py`.
 
 ## 외부 계약
 API wire 계약은 이 문서가 아니라 `docs/api/openapi.yaml`이 소유한다.

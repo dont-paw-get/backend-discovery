@@ -987,3 +987,26 @@
 2. push 및 PR 생성 (base: `develop`), 사용자 승인 후 진행.
 3. dev 배포 후 실제 추천 요청으로 `recommended_books[i].genre` 필드가 정상적으로 채워지는지 확인(`kubectl logs` 또는 실제 API 응답 확인).
 4. 위 "프론트엔드 전달 사항" 섹션을 프론트 담당자에게 전달.
+
+
+## 2026-09-02 — 관측 인프라(dont-paw-get/infra) 연동 (dev)
+- 브랜치: `관측-인프라-연동` (지라 티켓 없음 — 배포용 임시 작업. 사용자 지시로 브랜치 컨벤션·커밋 `[CLIAR-XX]` 태그 생략).
+- infra 저장소가 Prometheus/Grafana/Loki/Tempo + RCA Agent를 dev 클러스터(`monitoring` ns)에 구축했고, "HTTP 5xx 에러율"/"p99 레이턴시" 알림이 동작하려면 이 서비스가 Prometheus HTTP 메트릭을 노출하고 ServiceMonitor로 스크레이핑돼야 한다는 요청을 받았다. 조사 결과 트레이스(CLIAR-203)·JSON 로그는 이미 대부분 되어 있었고 **메트릭 노출만 미구현**이었다.
+- 사용자 확정 결정 3건(`AskUserQuestion`): (1) 티켓 없이 진행, (2) 메트릭 이름은 **Micrometer 모방**, (3) 구현은 **자체 경량 ASGI 미들웨어**. Task 6(genre classifier 베어 모델 ID 교체)은 사용자 지시로 **보류**.
+- 구현:
+  - `pyproject.toml`에 `prometheus-client>=0.21.0,<0.22.0` 추가, `uv lock`/`uv sync`(0.21.1 설치).
+  - `src/discovery/core/metrics.py` 신설 — 순수 ASGI `PrometheusMiddleware`(`BaseHTTPMiddleware`가 아니라서 스트리밍 응답도 마지막 body 청크까지 계측) + `http_server_requests_seconds` Histogram(라벨 `method,uri,status,outcome,application`, 버킷 0.05~60s). `application` = `os.environ["OTEL_SERVICE_NAME"]`(미설정 시 `backend-discovery`). `uri`는 라우트 매칭 후 `scope["endpoint"]` 존재 여부로 판단해 템플릿/`"NO_ROUTE"`. `/health`·`/api/v1/health`·`/metrics` 계측 제외. `render_latest()` → `generate_latest()` + `CONTENT_TYPE_LATEST`.
+  - `src/discovery/main.py` — `app.add_middleware(PrometheusMiddleware)`(CORS 다음 = 최외곽) + `GET /metrics`(`include_in_schema=False`).
+  - `src/discovery/core/tracing.py` — `_EXCLUDED_URLS`에 `metrics` 추가(`"health,healthz,readyz,livez,metrics"`).
+  - `k8s/overlays/dev/servicemonitor.yaml` 신설(`monitoring.coreos.com/v1`, name `backend-discovery`, selector `app.kubernetes.io/name=backend-discovery`, endpoint `port: http`/`path: /metrics`/`interval: 30s`) + `k8s/overlays/dev/kustomization.yaml` resources에 추가. **prod overlay 미변경**(prod엔 ServiceMonitor CRD 없음 → base에 두면 ArgoCD sync 실패).
+  - `k8s/overlays/dev/configmap-patch.yaml` — `OTEL_METRICS_EXPORTER: "none"`, `OTEL_LOGS_EXPORTER: "none"` 추가(기존 OTLP endpoint/protocol/service.name/sampler 유지, 스펙과 이미 일치).
+  - `tests/unit/test_metrics.py` 신설 3건: `/metrics` Micrometer 호환 히스토그램/`application` 라벨/`uri` 템플릿/`outcome`, probe·`/metrics` 자기 자신 미계측, 미매칭 경로 `NO_ROUTE`+`CLIENT_ERROR`.
+- 검증: `uv run ruff check .` / `uv run mypy .`(79 files) / `uv run pytest -m "not integration"`(254 passed) / `kubectl kustomize k8s/overlays/dev`(ServiceMonitor에 `namespace: dpyb-discovery-dev` 정상 주입 확인) 전부 통과.
+- 하네스 문서 동기화: `PLAN.md`(계획 → "코드 완료·dev 배포 대기"로 축약), `STATE.md`(단계 행 추가), `ARCHITECTURE.md`(기술 스택 표 + 관측 섹션), `DECISIONS.md`(최상단 행: Micrometer 모방/자체 미들웨어/dev overlay 한정/`OTEL_SERVICE_NAME` 파생 근거).
+- 커밋: 사용자 요청으로 이 세션에서 커밋 예정.
+
+### 다음 세션이 할 일
+1. dev 배포(develop 머지 or 이 브랜치 배포) 후 `/metrics`가 `http_server_requests_seconds_{bucket,count,sum}`을 `application="backend-discovery"`로 노출하는지, Prometheus가 ServiceMonitor `backend-discovery`(`dpyb-discovery-dev`) 타깃을 잡는지 `kubectl`/Prometheus targets에서 확인.
+2. infra 저장소에 회신: (1) `<SVC>`=`backend-discovery` (2) ServiceMonitor `backend-discovery` / `dpyb-discovery-dev` (3) Micrometer 이름 모방이라 알림 규칙 수정 불필요 — `http_server_requests_seconds_{count,bucket}`, 라벨 `method,uri,status,outcome,application` (4) 스크레이핑 확인 결과.
+3. (후속 검토) `/metrics`가 Ingress `path: /`로 외부 노출됨 — dev 한정 수용, 필요 시 ingress 차단/별도 포트.
+4. Task 6(genre classifier `anthropic.claude-3-haiku-20240307-v1:0` 베어 ID) — 배포 후 실제 401/거부 발생 시 `us.` inference profile로 교체 재검토.
