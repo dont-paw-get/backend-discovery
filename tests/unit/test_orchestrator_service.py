@@ -556,6 +556,73 @@ async def test_orchestrator_service_chat_with_library_tool(mocker: MockerFixture
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_service_chat_raises_library_auth_error_on_401(
+    mocker: MockerFixture,
+) -> None:
+    """backend-book이 401(위조/만료 토큰)을 반환하면 조용히 흡수하지 않고
+    LibraryAuthError를 발생시켜 라우터가 401로 전달할 수 있게 한다 (ADR 0007 2.2절)."""
+    from discovery.domain.orchestrator.tools.library_tool import LibraryAuthError
+
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_library_tool = mocker.MagicMock()
+
+    def fake_library_as_tool(**kwargs: Any) -> Any:
+        on_auth_failed = kwargs.get("on_auth_failed")
+
+        async def fake_tool_func(*args: Any, **tool_kwargs: Any) -> str:
+            if on_auth_failed:
+                on_auth_failed()
+            return "인증 정보가 유효하지 않아 서재를 조회할 수 없습니다."
+
+        return fake_tool_func
+
+    mock_library_tool.as_tool.side_effect = fake_library_as_tool
+
+    mock_agent = mocker.MagicMock()
+    mock_result = mocker.MagicMock()
+    mock_result.message = {
+        "role": "assistant",
+        "content": [{"text": "인증 정보가 유효하지 않아 서재를 조회할 수 없습니다."}],
+    }
+
+    async def fake_invoke(prompt: str) -> Any:
+        tool_fn = mock_library_tool.as_tool.call_args[1]["on_auth_failed"]
+        tool_fn()
+        return mock_result
+
+    mock_agent.invoke_async.side_effect = fake_invoke
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        library_tool=mock_library_tool,
+    )
+
+    with pytest.raises(LibraryAuthError):
+        await service.chat(
+            session_id="sess-auth-fail-1",
+            message="내 서재 책 있어?",
+            auth_token="Bearer forged.invalid.token",
+        )
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_service_chat_hybrid_recommendation_populates_library_books(
     mocker: MockerFixture,
 ) -> None:

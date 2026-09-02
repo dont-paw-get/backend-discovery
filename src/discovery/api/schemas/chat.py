@@ -1,6 +1,6 @@
 """대화(Chat) API 요청 및 응답 Pydantic 스키마."""
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from discovery.domain.orchestrator.librarian_response import (
     LibrarianSignals,
@@ -53,6 +53,14 @@ class ChatRequest(BaseModel):
         description="사용자 질문 또는 도서 추천 요청 메시지.",
         examples=["비 오는 날 읽기 좋은 잔잔한 일본 소설 추천해줘."],
     )
+
+    @field_validator("message")
+    @classmethod
+    def validate_message_not_blank(cls, v: str) -> str:
+        """공백만으로 이루어진 메시지를 422로 거부한다."""
+        if not v or not v.strip():
+            raise ValueError("메시지는 공백만으로 구성될 수 없습니다.")
+        return v
     latitude: float | None = Field(
         default=None,
         description="사용자 위도 (선택, 사서 날씨 큐레이션용).",

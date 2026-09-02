@@ -26,17 +26,22 @@ from discovery.core.observability import log_agent_metrics
 from discovery.domain.librarian.post_processor import extract_text_from_message
 from discovery.domain.orchestrator.agent import create_orchestrator_agent
 from discovery.domain.orchestrator.fallback import get_llm_fallback_message
+from discovery.domain.orchestrator.input_gate import evaluate_input_gate
 from discovery.domain.orchestrator.librarian_response import (
     LibrarianResponse,
     LibrarianSignals,
     SwitchToSuggestion,
 )
 from discovery.domain.orchestrator.library_response import LibraryBookItem
+from discovery.domain.orchestrator.safety_gate import evaluate_safety_gate
 from discovery.domain.orchestrator.tools.librarian_tool import (
     ConsultLibrarianTool,
     evaluate_local_persona_response,
 )
-from discovery.domain.orchestrator.tools.library_tool import SearchMyLibraryTool
+from discovery.domain.orchestrator.tools.library_tool import (
+    LibraryAuthError,
+    SearchMyLibraryTool,
+)
 from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksTool
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
 
@@ -104,6 +109,7 @@ class OrchestratorService:
         on_library_books: Callable[[list[LibraryBookItem]], None] | None = None,
         auth_token: str | None = None,
         prefetched_librarian: LibrarianResponse | None = None,
+        on_auth_failed: Callable[[], None] | None = None,
     ) -> Agent:
         strands_messages = format_history_for_strands(history)
         librarian_id = meta.get("librarian_id") or "cat"
@@ -134,6 +140,7 @@ class OrchestratorService:
                 self._library_tool.as_tool(
                     auth_token=auth_token,
                     on_books_fetched=on_library_books,
+                    on_auth_failed=on_auth_failed,
                 )
             )
 
@@ -179,10 +186,49 @@ class OrchestratorService:
         meta = await self._session_store.get_session_meta(session_id)
         history = await self._session_store.get_history(session_id)
 
+        # Task 3: 위기/자해 대응 안전 게이트 (결정론적 우회)
+        safety_response = evaluate_safety_gate(message, meta.get("librarian_id"))
+        if safety_response is not None:
+            await self._session_store.append_turn(session_id, {"role": "user", "content": message})
+            await self._session_store.append_turn(
+                session_id, {"role": "assistant", "content": safety_response}
+            )
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            log_agent_metrics(
+                phase="orchestrator",
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                mode="sync",
+                message_length=len(message),
+                metrics_summary=None,
+                direct_metrics={"total_duration_ms": duration_ms, "safety_gate_triggered": True},
+            )
+            return safety_response, None, None, None
+
+        # Task 4: 비정상 입력 게이트 (자모/숫자/이모지 결정론적 우회)
+        input_gate_response = evaluate_input_gate(message, meta.get("librarian_id"))
+        if input_gate_response is not None:
+            await self._session_store.append_turn(session_id, {"role": "user", "content": message})
+            await self._session_store.append_turn(
+                session_id, {"role": "assistant", "content": input_gate_response}
+            )
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            log_agent_metrics(
+                phase="orchestrator",
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                mode="sync",
+                message_length=len(message),
+                metrics_summary=None,
+                direct_metrics={"total_duration_ms": duration_ms, "input_gate_triggered": True},
+            )
+            return input_gate_response, None, None, None
+
         switch_to_holder: list[SwitchToSuggestion] = []
         signals_holder: list[LibrarianSignals] = []
         library_books_holder: list[LibraryBookCard] = []
         consult_called = False
+        auth_failed = False
 
         def on_librarian_response(res: LibrarianResponse) -> None:
             nonlocal consult_called
@@ -206,6 +252,10 @@ class OrchestratorService:
             library_books_holder.clear()
             library_books_holder.extend(cards)
 
+        def on_auth_failed() -> None:
+            nonlocal auth_failed
+            auth_failed = True
+
         agent = self._build_agent(
             history=history,
             session_id=session_id,
@@ -213,6 +263,7 @@ class OrchestratorService:
             on_librarian_response=on_librarian_response,
             on_library_books=on_library_books,
             auth_token=auth_token,
+            on_auth_failed=on_auth_failed,
         )
 
         orchestrator_metrics: dict[str, Any] | None = None
@@ -245,6 +296,12 @@ class OrchestratorService:
                 e,
             )
             response_text = get_llm_fallback_message(meta.get("librarian_id"))
+
+        # ADR 0007 2.2절: backend-book이 401(위조/만료 토큰)을 반환하면 조용히
+        # 흡수하지 않고 라우터가 401로 전달할 수 있도록 예외를 다시 던진다.
+        # (도구 실행 결과에 이미 안전한 문구가 담겨 있으므로 LLM 흐름 자체는 깨지지 않았다.)
+        if auth_failed:
+            raise LibraryAuthError("Library API authentication failed")
 
         # Task 2-1: 도구가 consult를 한 번도 호출하지 않았을 때만(예: 순수 서재 조회 등)
         # 잔여 호출 수행 (동기 경로는 기본 HTTP 타임아웃 유지)
@@ -379,9 +436,58 @@ class OrchestratorService:
         meta = await self._session_store.get_session_meta(session_id)
         history = await self._session_store.get_history(session_id)
 
+        # Task 3: 위기/자해 대응 안전 게이트 (결정론적 우회)
+        safety_response = evaluate_safety_gate(message, meta.get("librarian_id"))
+        if safety_response is not None:
+            await self._session_store.append_turn(session_id, {"role": "user", "content": message})
+            await self._session_store.append_turn(
+                session_id, {"role": "assistant", "content": safety_response}
+            )
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            log_agent_metrics(
+                phase="orchestrator",
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                mode="stream",
+                message_length=len(message),
+                metrics_summary=None,
+                direct_metrics={
+                    "ttfb_ms": duration_ms,
+                    "total_duration_ms": duration_ms,
+                    "safety_gate_triggered": True,
+                },
+            )
+            yield safety_response
+            return
+
+        # Task 4: 비정상 입력 게이트 (자모/숫자/이모지 결정론적 우회)
+        input_gate_response = evaluate_input_gate(message, meta.get("librarian_id"))
+        if input_gate_response is not None:
+            await self._session_store.append_turn(session_id, {"role": "user", "content": message})
+            await self._session_store.append_turn(
+                session_id, {"role": "assistant", "content": input_gate_response}
+            )
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            log_agent_metrics(
+                phase="orchestrator",
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                mode="stream",
+                message_length=len(message),
+                metrics_summary=None,
+                direct_metrics={
+                    "ttfb_ms": duration_ms,
+                    "total_duration_ms": duration_ms,
+                    "input_gate_triggered": True,
+                },
+            )
+            yield input_gate_response
+            return
+
         switch_to_holder: list[SwitchToSuggestion] = []
         library_books_holder: list[LibraryBookCard] = []
         consult_called = False
+        auth_failed = False
 
         if prefetched_librarian is not None and prefetched_librarian.switch_to is not None:
             switch_to_holder.append(prefetched_librarian.switch_to)
@@ -391,6 +497,10 @@ class OrchestratorService:
             consult_called = True
             if res.switch_to is not None and not switch_to_holder:
                 switch_to_holder.append(res.switch_to)
+
+        def on_auth_failed() -> None:
+            nonlocal auth_failed
+            auth_failed = True
 
         def on_library_books(books: list[LibraryBookItem]) -> None:
             cards = [
@@ -414,6 +524,7 @@ class OrchestratorService:
             on_library_books=on_library_books,
             auth_token=auth_token,
             prefetched_librarian=prefetched_librarian,
+            on_auth_failed=on_auth_failed,
         )
 
         full_response: list[str] = []
@@ -444,6 +555,18 @@ class OrchestratorService:
                 fallback_chunk = f"\n\n{fallback_chunk}"
             full_response.append(fallback_chunk)
             yield fallback_chunk
+
+        # ADR 0007 2.2절: backend-book이 401(위조/만료 토큰)을 반환하면 동기(chat)
+        # 경로는 예외로 전달해 라우터가 401을 반환할 수 있게 한다. 스트리밍 경로는
+        # StreamingResponse가 200 헤더를 먼저 확정하므로 상태 코드 전달이 구조적으로
+        # 불가능하다 — 도구가 반환한 안내 문구가 본문에 자연스럽게 포함되도록 둔다
+        # (auth_failed 플래그를 raise하지 않고 로그만 남긴다).
+        if auth_failed:
+            logger.warning(
+                "[LIBRARY_AUTH_FAILED] stream_chat cannot propagate 401 after headers sent "
+                "(session_id=%s)",
+                session_id,
+            )
 
         response_text = "".join(full_response)
         tool_result = extract_fallback_text(agent)
