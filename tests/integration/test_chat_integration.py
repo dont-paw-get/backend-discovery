@@ -79,6 +79,7 @@ async def test_multi_turn_chat_with_redis(
         resp1 = await client.post(
             "/api/v1/chat",
             json={"session_id": session_id, "message": "따뜻한 판타지 소설 추천해줘"},
+            headers={"Authorization": "Bearer test-jwt-token"},
         )
         assert resp1.status_code == 200
         assert resp1.json()["message"] == "추천 도서는 '달러구트 꿈 백화점'입니다."
@@ -87,6 +88,7 @@ async def test_multi_turn_chat_with_redis(
         resp2 = await client.post(
             "/api/v1/chat",
             json={"session_id": session_id, "message": "그 책 후속작도 있어?"},
+            headers={"Authorization": "Bearer test-jwt-token"},
         )
         assert resp2.status_code == 200
         assert resp2.json()["message"] == "2권도 이어서 읽어보세요."
