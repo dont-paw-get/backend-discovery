@@ -1,3 +1,11 @@
+"""FastAPI 애플리케이션 진입점.
+
+로깅: uvicorn 실행 시 애플리케이션 로거(discovery.*)의 기본 effective level이
+WARNING이라 `core/observability.py`의 계측 로그(logger.info)가 출력되지 않는다.
+CLIAR-158 계측을 실제로 관측하려면 INFO 레벨을 명시적으로 설정해야 한다.
+"""
+
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -8,6 +16,12 @@ from discovery.api.v1.routers.chat import router as chat_router
 from discovery.api.v1.routers.genre import router as genre_router
 from discovery.core.config import get_settings
 from discovery.infrastructure.cache.redis_client import create_redis_client
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logging.getLogger("discovery").setLevel(logging.INFO)
 
 
 @asynccontextmanager
