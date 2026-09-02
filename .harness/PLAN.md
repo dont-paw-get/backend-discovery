@@ -27,6 +27,34 @@
 - [ ] Task 4: 단위 테스트(파서, 스키마, fallback NONE 매칭) 추가 및 전체 회귀 확인
 - [ ] Task 5: dev 배포 후 실제 추천 요청으로 `genre` 필드 확인, 하네스 문서 동기화
 
+---
+
+## [코드 구현 완료 · dev 실측 대기] 제목·저자 기반 알라딘 조회 API 연동 (CLIAR-237 브랜치 연장)
+
+**배경**: CLIAR-237 dev 실측 결과 LLM이 ISBN을 못 찾아 `page_count: null`로 남는 사례가 빈번함을 확인해, 팀원(backend-book)에게 요청한 `GET /api/v1/books/search/by-title-author`(제목·저자 교집합 검색) API를 연동했다. ISBN 경로(`<!-- isbn: ... -->` 주석, `fetch_total_pages` 호출)는 완전히 제거하고 title/author 기반으로 통일했다(사용자 확정, 2026-09-02). 구현 완료 세부는 `.harness/STATE.md` 참고.
+
+**남은 작업**:
+- [ ] dev 배포 후 "백야행", "유리 세공" 등 기존에 `page_count: null`로 남던 사례 재현하여 title/author 경로 동작 확인
+
+---
+
+## [진행 중 · 원인 미해결] dev 환경 504 Gateway Timeout (CloudFront) — 도서 추천 응답 지연
+
+**배경 (2026-09-02 실측)**: 사용자가 dev(CloudFront `d1wab52ln5by5k.cloudfront.net`)에서 도서 추천 요청 시 브라우저에서 `504 Gateway Timeout`(정확히 30.02초)을 다수 재현. 응답 헤더에 `via: CloudFront`, `x-cache: Error from cloudfront`가 확인되어 **CloudFront가 오리진(ALB) 응답을 기다리다 자체적으로 타임아웃**시킨 것으로 확정(백엔드가 아니라 CloudFront가 504를 만들어냄).
+
+**로그로 확인된 실측 사실**:
+- `kubectl logs`로 확인한 실제 오케스트레이터 요청 소요시간: **32초, 39초, 40.6초, 41.3초** (모두 200 성공 응답이었으나 소요시간이 김).
+- 병목은 `recommend_books`(하위 추천 에이전트) 도구 하나가 17~26초를 씀(오케스트레이터 총 시간의 절반 이상).
+- `strands_metrics.total_duration`(LLM 사이클 실행시간 합산)은 6~13초인데, 우리가 감싼 wall-clock(`total_duration_ms`)은 그보다 10초 이상 더 큼 — Strands가 측정하지 않는 구간(에이전트/모델 객체 생성, Bedrock 크로스리전 프로필 자체의 네트워크 latency 등)에서 시간이 추가로 소모되는 것으로 추정되나 **정확한 원인 미확인**.
+- 사용자가 CloudFront의 Origin Response Timeout을 30초 → 60초로 변경한 뒤에도 504가 재현됨. 이후 CloudFront distribution이 "Deploying" 상태였을 가능성을 짚었고, 사용자가 "넘어온다"고 확인(재현 안 됨)해 이번 세션은 일단 완화된 것으로 보고 종료. **다만 재현이 사라진 게 설정 전파 완료 때문인지, 우연히 짧게 끝난 요청이었는지 확정 검증은 안 됨.**
+
+**다음 세션이 확인/진행할 것**:
+- [ ] CloudFront Origin Response Timeout이 실제로 60초로 "Deployed" 상태인지 재확인, 그리고 60초보다 오래 걸리는 요청(위 실측상 40초대는 자주 나옴)이 안전한지 몇 차례 더 재현 테스트
+- [ ] ALB idle timeout도 확인 필요(`k8s/base/ingress.yaml`에 명시적 어노테이션 없어 기본값 60초로 추정 — CloudFront보다 먼저 끊길 가능성은 낮으나 미확인)
+- [ ] **근본 해결(권장)**: `recommend_books` 도구의 17~26초 소요 자체를 줄이는 작업. CLIAR-158 Task 3~5(캐싱/reasoning 실측), 백로그의 "직결 스트리밍" 항목과 연계 검토. 지금처럼 타임아웃만 늘리는 건 임시방편이며, 요청이 더 길어지면(예: 5권 추천) 다시 504가 날 수 있음
+- [ ] 위 "총 시간 - Strands 사이클 시간 = 10초 이상 간극"의 정확한 원인 규명(에이전트 생성 오버헤드 vs Bedrock 네트워크 latency vs 다른 요인) — 세부 계측 지점 추가하여 실측
+
+---
 
 ## 진행 순서 (2026-09-01 확정)
 
@@ -152,8 +180,12 @@ support assistant message prefill. The conversation must end with a user message
 - [x] **Task 4: 검증 및 문서 동기화**
   - [x] 단위 테스트 19건 신규: ISBN 파서 3건 + `strip_isbn_comments` 3건(`test_post_processor.py`), `BookMetadataClient` 6건(`test_book_metadata_client.py`, 신규 파일), `RecommendBooksTool` 페이지수 검증 3건(`test_recommend_tool.py`).
   - [x] 정적 분석(`ruff`, `mypy`) 및 `pytest -m "not integration"` 247건 100% 통과(전체 회귀 없음).
-  - [ ] **(dev 배포 후 후속 실측)**: "약 300쪽" 등 근사치가 나오는 도서로 재현하여 최종 `page_count`가 알라딘 실측값으로 교체되는지 확인. `libraryBook` 실제 스키마가 `book`과 다른지, `book_metadata_api_url` 무인증 호출이 401/403 없이 성공하는지 확인.
+  - [x] **(dev 배포 후 실측 완료, 2026-09-02)**: PR #40 머지·dev 배포 확인. `kubectl logs`로 실제 요청에서 `<!-- isbn: ... -->` 파싱 및 `book_metadata_client` 호출(알라딘 API가 401 반환 — 무인증 호출이 거부됨, 아래 발견 사항 참고)이 정상적으로 트리거되는 것을 확인. graceful degradation도 의도대로 동작(401이어도 전체 응답 안 깨짐).
   - [x] API wire 계약 변경 없음(`RecommendedBookCard.page_count` 필드 자체는 그대로, description만 정확도 문구로 보강) — 새 ADR 불필요로 판단, `openapi.yaml`만 description 갱신.
+
+**dev 실측으로 발견된 후속 이슈 (별도 트랙, 코드 미착수)**:
+1. **`book_metadata_api_url` 무인증 호출이 401을 반환함** — 선결 결정("우선 Authorization 없이 호출")과 달리 실제로는 인증이 필요한 것으로 보임. 다만 CLIAR-237의 graceful degradation 설계 덕분에 전체 응답이 깨지지 않고 LLM 생성값을 그대로 유지하는 것으로 안전하게 처리됨(설계가 의도대로 방어 역할을 함). `Authorization` 패스스루 추가는 아래 2번 항목(팀원 신규 API)으로 대체될 가능성이 높아 즉시 조치하지 않음.
+2. **LLM이 ISBN 자체를 못 찾아 주석을 생략하는 경우가 실측상 빈번함** — "백야행", "유리 세공" 등 여러 사례에서 `page_count: null`로 남음(Tavily 검색 결과에 ISBN이 우연히 없으면 LLM이 통째로 생략). 사용자가 팀원에게 **"제목+저자로 알라딘 검색 → 최상단 결과의 isbn, totalPages 반환"** 하는 신규 API를 요청함(2026-09-02). API가 나오면 ISBN 주석 의존 없이 `BookMetadataClient`에 `fetch_by_title_author(title, author)` 메서드를 추가하는 방향으로 재설계 예정 — **다음 세션 최우선 작업**.
 
 **레이턴시 영향**: `backend-book` 조회는 동기 `chat` 응답 조립 후반(이미 `recommend_books` 완료 시점)에 추가되므로 스트리밍 TTFB에는 영향 없음. 다만 동기 경로의 총 응답 시간은 추천 권수만큼 조회가 늘어날 수 있어 `asyncio.gather`로 병렬화하고, 타임아웃을 짧게(예: 3초) 잡아 실패해도 전체 응답이 막히지 않게 한다.
 
