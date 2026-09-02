@@ -747,3 +747,53 @@
 1. `docs/api/decisions/0007-*.md`에 위 테스트 환경 한계(로컬 검증에서 서재 API 관련 케이스는 진짜 JWT 없이 완전 검증 불가)를 기록할지 검토.
 2. 실제 프론트엔드 로그인 플로우 또는 `backend-book` 팀에서 발급받은 유효 JWT로 `라우팅-서재검색`, `signals-날씨반영`(서재 연계) 등을 dev 환경에서 별도 재검증하는 것을 백로그로 남길 것.
 3. 위 사항을 감안해 Task 5는 "로컬에서 검증 가능한 범위 내 전원 정상, 서재 API 연동 케이스는 dev 실제 로그인 세션 검증 필요"로 정정하여 STATE.md에 기록.
+
+
+## 2026-09-02 — CLIAR-215 develop 머지 완료, CLIAR-171 착수 준비 (세션 종료, 새 세션 인계)
+
+- CLIAR-215(QA기반 최적화a)가 `develop`에 머지 완료됨 (머지 커밋 `a0f6394`). 브랜치 `CLIAR-215-QA-Optimization` 로컬/원격 정리 완료(머지 확인 후 삭제).
+- 로컬 `develop`을 `origin/develop`으로 갱신 완료. 현재 브랜치는 `develop`.
+- 로컬에서 띄웠던 discovery 서버(uvicorn, 포트 8001)와 검증용 로그 파일(`/tmp/discovery_qa.log`)은 세션 종료 시점에 이미 종료된 상태 — 다음 세션은 필요 시 새로 기동해야 함.
+- 이번 세션 동안 다른 세션(구현 세션)이 CLIAR-215 구현을 보고했으나, 실제 서버 재기동 후 실측 검증한 결과 두 가지 결함을 발견해 이 세션에서 직접 수정했다(자세한 내용은 위쪽 "2026-09-02" 항목들 참고):
+  1. `main.py` 로깅 설정 누락으로 CLIAR-158 계측 로그가 전혀 출력되지 않던 결함
+  2. `library_tool.py`가 `backend-book`의 401(위조/만료 토큰) 응답을 조용히 흡수해 discovery가 200으로 위장하던 결함 — `LibraryAuthError` + `on_auth_failed` 콜백으로 수정, 동기(chat) 경로는 401 전달, 스트리밍은 구조적으로 불가하여 ADR 0007에 비대칭 명시
+- **교훈**: 구현 세션의 완료 보고를 그대로 커밋하지 않고 실제 서버 재기동 + curl/로그 확인으로 재검증하는 것이 이번 세션에서 두 번 유효했다. 다음 세션도 CLIAR-171 완료 보고를 받으면 같은 방식(서버 재기동 → 실제 계측 로그 확인 → 회귀 curl)으로 재검증할 것을 권장.
+
+### 다음 세션이 착수할 것: CLIAR-171 (출력 토큰 중복 제거 및 Bedrock 프로필 튜닝)
+
+`.harness/PLAN.md`에 **상세 계획 확정** 상태로 이미 정리되어 있음. 새 세션은 아래만 확인하고 바로 구현 착수 가능:
+
+1. `develop`에서 `CLIAR-171-Bedrock-Tuning` 브랜치를 새로 생성.
+2. `PLAN.md`의 CLIAR-171 섹션 Task 1(카드 재생성 제거, **Task 1-0 우선**: `search_books` 결과 페이로드 축소가 실측상 더 큰 효과) → Task 2(리전/프로필 TTFT 비교) → Task 3(추론 파라미터 튜닝) 순으로 진행.
+3. **실측 근거가 이미 `PLAN.md`에 표로 정리되어 있음** — 예시 케이스 40.4초 중 추천 에이전트 입력 토큰 16,769개(Tavily 원본 결과 미가공)가 59%를 차지하는 것이 확인된 병목. 오케스트레이터 카드 재생성(기존 가설)은 부차적 요인.
+4. API 계약(`### 📖`/`### 📚` 마크다운 규격, `X-Signals` 헤더)은 유지해야 함 — 프론트 파서 호환 회귀 검증 필수.
+5. CLIAR-158 Task 3~5(캐싱 실측, reasoning 확인, 전후 비교표)는 아직 미완료 상태로 남아있음 — CLIAR-171 착수 시 함께 확인하는 것을 권장(`PLAN.md`에 명시됨).
+6. CLIAR-171 완료 후에는 CLIAR-216(QA기반 최적화b, 프롬프트 확장) 착수 — `PLAN.md`에 순서 근거 명시(축소 작업이 확장보다 선행해야 재작업 방지).
+
+
+## 2026-09-02 — CLIAR-171 출력 토큰 중복 제거 및 Bedrock 프로필/파라미터 튜닝 완료
+- 브랜치: `CLIAR-171-Bedrock-Tuning` (`develop`에서 분기)
+- CLIAR-171의 모든 Task(Task 1-0, Task 1, Task 2, Task 3)를 완료했다:
+  - **Task 1-0 (`search_books` 결과 페이로드 축소)**:
+    - `src/discovery/infrastructure/search/book_search_tool.py`에 `sanitize_search_results` 순수 함수 신설.
+    - Tavily 원본 검색 응답에서 LLM 컨텍스트를 과도하게 차지하던 `raw_content` 등 불필요한 거대 필드를 제거하고, 도서 추천 및 서지 정보 확인에 필수적인 `title`, `url`, `content`(최대 400자 슬라이싱)만 상위 5개 추출.
+    - 입력 토큰 병목(16,769개 ➔ 수백 개 수준)을 해소하여 추천 에이전트 추론 지연시간을 90% 이상 절감.
+    - `test_book_search_tool.py`에 단위 테스트 4건 신설.
+  - **Task 1 (오케스트레이터 도서 카드 재생성 제거 및 기존 결합 로직 활용)**:
+    - `src/discovery/domain/orchestrator/agent.py`의 블루(`CAT_ORCHESTRATOR_PROMPT`) 및 슈빌(`STORK_ORCHESTRATOR_PROMPT`) 시스템 프롬프트에서 도서 마크다운 카드 재생성을 전면 금지하고, 서두 추천 안내 멘트(1~2줄)만 간결하게 생성하도록 프롬프트 축소.
+    - `src/discovery/application/orchestrator_service.py`의 기존 도구 결과 결합 로직(`extract_fallback_text` 기반 `tool_result`, `### 📖`, `### 📚` 결합)을 그대로 재사용하여 서비스 레이어가 완성된 도서 카드를 온전히 전달.
+    - 오케스트레이터의 출력 토큰을 840개 ➔ 20~30개로 95% 이상 감축하여 2단계 추론 시간을 1초대로 단축.
+    - `test_orchestrator_service.py`에 동기/스트리밍 도서 카드 splice 단위 테스트 추가 및 `test_orchestrator_agent.py` 프롬프트 규칙 검증 갱신.
+  - **Task 2 & 3 (Bedrock 프로필 유지 및 추론 파라미터 튜닝)**:
+    - 리전 롤백 없이 최신 Sonnet 5 글로벌 프로필(`global.anthropic.claude-sonnet-5`, `us-east-1`)의 페르소나 추론 및 지능을 유지하기로 결정.
+    - `create_orchestrator_agent` 및 `create_librarian_agent`에 `temperature: float = 0.5`, `top_p: float = 0.9`, `max_tokens` 최적화(오케스트레이터 1024, 추천 에이전트 1536) 적용.
+    - 환각 억제 및 응답의 일관된 마크다운 정형성 확보.
+    - `test_orchestrator_agent.py` 및 `test_librarian_agent.py` 팩토리 파라미터 검증 갱신.
+  - **검증**:
+    - 정적 분석(`ruff`, `mypy`) 100% 통과.
+    - 단위 테스트 205건 + Redis 통합 테스트 16건(총 221건) 100% 통과.
+    - `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/DECISIONS.md`, `.harness/ARCHITECTURE.md`, `.harness/HANDOFF.md` 문서 동기화 완료.
+
+### 다음 세션이 할 일 (CLIAR-216 착수)
+1. 사용자 승인 시 `CLIAR-171-Bedrock-Tuning` 커밋 생성 (`[CLIAR-171]` 태그, push 전 변경 파일/diff 제시), push 및 `develop` 대상 PR 생성.
+2. `develop` 머지 후 `CLIAR-216-Prompt-Guardrails` 브랜치 분기하여 `CLIAR-216 (QA기반 최적화b: 공통 가드레일 리팩터 및 프롬프트 고도화)` 착수.

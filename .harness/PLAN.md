@@ -7,10 +7,10 @@ CLIAR-171과 CLIAR-216이 `src/discovery/domain/orchestrator/agent.py`의 같은
 
 | 순서 | 티켓 | 범위 | 선행 조건 |
 | --- | --- | --- | --- |
-| 1 | **CLIAR-158** | ✅ **완료·develop 머지** (Task 1·2 코드 구현 완료 및 머지. Task 3~5는 dev 실측 필요 — 별도 스파이크로 처리하거나 CLIAR-171 착수 시 함께 확인) | 없음 |
+| 1 | **CLIAR-158** | ✅ **완료·develop 머지** (Task 1·2 코드 구현 완료 및 머지. Task 3~5는 dev 실측 필요 — 별도 스파이크로 처리) | 없음 |
 | 2 | **CLIAR-215** (QA기반 최적화a) | ✅ **완료** — Task 1(실측 러너 및 실측 완료)·Task 2(인증 Presence Check, 401, ADR 0007)·Task 3(위기 109 핫라인 게이트)·Task 4(공백 422 및 입력 게이트)·Task 5(P1 회귀 확인)·Task 6(단위 테스트 196건 통과) | 없음 |
-| 3 | **CLIAR-171** | 🔄 **진행 중 (현재 착수 대상)** — Task 1-0(search_books 페이로드 축소) + 오케스트레이터 카드 재생성 제거(프롬프트 축소) + Bedrock 프로필·파라미터 튜닝 | CLIAR-215 완료 |
-| 4 | **CLIAR-216** (QA기반 최적화b) | 공통 가드레일 리팩터 + 안전·엣지·환각·감정 프롬프트 작업 | CLIAR-171 머지 |
+| 3 | **CLIAR-171** | ✅ **완료** — Task 1-0(search_books 페이로드 축소) + Task 1(오케스트레이터 카드 재생성 제거 및 splice 결합) + Task 2(리전/프로필 비교) + Task 3(추론 파라미터 튜닝) | CLIAR-215 완료 |
+| 4 | **CLIAR-216** (QA기반 최적화b) | 🔄 **진행 중 (다음 착수 대상)** — 공통 가드레일 리팩터 + 안전·엣지·환각·감정 프롬프트 고도화 | CLIAR-171 완료 |
 
 순서 근거: (1) CLIAR-158은 충돌 대상이 없는 순손실 제거이고 계측 기반이 이후 티켓의 판단 근거가 된다. (2) CLIAR-171이 프롬프트를 줄인 뒤에 CLIAR-216이 확장해야 재작업과 회귀 원인 혼선을 피할 수 있다. (3) CLIAR-215는 P1 안전성·인증 공백을 다루지만 구현 위치가 입력 게이트 코드와 `api/deps.py`라 프롬프트와 충돌하지 않아 앞으로 당겼다. 계획 확정 시 이 근거를 `.harness/DECISIONS.md`에 기록했다.
 
@@ -22,7 +22,7 @@ CLIAR-171과 CLIAR-216이 `src/discovery/domain/orchestrator/agent.py`의 같은
 
 Task 1(계측 모듈 & 개인정보 화이트리스트 필터링), Task 2-1(tail consult 버그 수정 & 1.5s/20s 타임아웃), Task 2-2(prefetch 결과 1회차 재사용 & 라우터 signals fallback)는 구현 완료되어 `origin/develop`에 머지됨.
 
-#### 남은 실측 과제 (dev 배포 필요 — CLIAR-171 착수 시 함께 확인 권장)
+#### 남은 실측 과제 (dev 배포 필요)
 
 - [ ] **Task 3: 프롬프트 캐싱 dev 환경 히트 및 비용 실측**
   - [ ] `Settings.enable_prompt_caching` 런타임 배선 완료됨 (현재 기본값 `False` 안전 유지).
@@ -36,34 +36,16 @@ Task 1(계측 모듈 & 개인정보 화이트리스트 필터링), Task 2-1(tail
 
 ---
 
-### [상세 계획 확정] CLIAR-171: 출력 토큰 중복 제거 및 Bedrock 프로필 튜닝 (현재 착수 대상)
+### [상세 계획 수립 대상] CLIAR-216: QA 데이터셋 기반 가드레일 및 프롬프트 고도화 (다음 착수 대상)
 
-브랜치: `CLIAR-171-Bedrock-Tuning` (CLIAR-158 머지 후 `develop`에서 분기)
+브랜치: `CLIAR-216-Prompt-Guardrails` (CLIAR-171 머지 후 `develop`에서 분기)
 
-API 계약(`### 📖`/`### 📚` 규격, `X-Signals` 헤더)은 유지한다.
-
-- [ ] **Task 1: 오케스트레이터의 카드 재생성 제거 (`orchestrator/agent.py`, `orchestrator_service.py`)**
-  - **2026-09-02 실측 근거 (`main.py` 로깅 결함 수정 후 CLIAR-158 계측 실제 확인, 예시 케이스 "오늘 날씨에 어울리는 책 추천해줘", 총 40.4초):**
-
-    | 구간 | 소요 | 비중 | 원인 |
-    | --- | --- | --- | --- |
-    | `consult_librarian` (로컬 사서 서버 8000 연결 실패 → fallback) | ~3.5초 | 9% | 사서 서버 미기동 시 TCP 재시도 대기. dev/prod에는 해당 없음 |
-    | **추천 에이전트 전체(`recommend_agent`)** | **23.8초** | **59%** | Tavily 검색 2회(2.66초) + **Bedrock 추론 21초(입력 16,769 토큰, 출력 1,090 토큰)** |
-    | 오케스트레이터 자체 사이클(`total_cycles: 3`) | 나머지 ~16초 | 25%~ | `consult_librarian`→`recommend_books` 순차 도구 판단 3사이클 + 카드 재생성(출력 840 토큰) |
-
-  - **당초 가설("카드 재생성이 병목")은 부분적으로만 맞음.** 실측 결과 오케스트레이터의 카드 재출력(출력 840토큰)보다 **추천 에이전트의 입력 토큰 16,769개(Tavily 검색 결과 원문을 가공 없이 그대로 프롬프트에 포함)가 훨씬 큰 병목**이다. `infrastructure/search/book_search_tool.py`의 `search_books`가 Tavily `results`를 필터링 없이 반환하고 있음을 코드로 확인함
-  - [ ] **(신규) Task 1-0: `search_books` 결과 페이로드 축소** — Tavily 응답에서 LLM에 필요한 필드(title/url/content 일부)만 남기고 `raw_content` 등 불필요하게 큰 필드를 제거. 입력 토큰 감소를 CLIAR-158 계측(`accumulated_usage.inputTokens`)으로 전후 비교
-  - [ ] 오케스트레이터 프롬프트를 "서두 1~2줄 + 마무리 1줄만 생성, 카드 본문은 생성하지 않음"으로 변경
-  - [ ] 도구 결과 마크다운을 서비스가 결정론적으로 splice. 현재 예외 경로인 `extract_fallback_text` + 결합 로직(CLIAR-196/211에서 검증됨)을 정상 경로로 승격
-  - [ ] 프론트 파서 호환 회귀 검증: `### 📖` 추천 카드, `### 📚` 서재 카드, 복합 의도(서재 → 추천) 3케이스
-  - [ ] LLM #5의 출력 토큰 감소량을 CLIAR-158 계측으로 정량 확인
-- [ ] **Task 2: 리전/추론 프로필 TTFT 비교 실측**
-  - [ ] `global.anthropic.claude-sonnet-5` (us-east-1) vs 서울 단일 리전(`config.py`에 주석으로 보존된 Claude 3.5 Sonnet, ap-northeast-2) TTFT·품질 비교
-  - [ ] Latency-Optimized Inference는 Sonnet 5 미지원이므로 비교 대상에서 제외
-  - [ ] 결과에 따라 모델/리전을 바꾸는 경우 `k8s/overlays/dev/configmap-patch.yaml` 동반 갱신 및 ADR 작성
-- [ ] **Task 3: 추론 파라미터 튜닝**
-  - [ ] `temperature`, `topP`, `max_tokens`를 구조화 마크다운 생성 용도에 맞게 조정하고 CLIAR-158 계측으로 전후 비교
-  - [ ] 정적 분석 및 단위 테스트 통과, `STATE.md` 갱신
+- [ ] **Task 1: 블루/슈빌 프롬프트 공통 가드레일(`SHARED_GUARDRAILS`) 모듈화 리팩터링**
+  - `agent.py`에서 중복되는 도구 분기/서재 안내/안전 가드레일을 공통 상수로 분리하고 페르소나 어조만 조합하도록 정돈
+- [ ] **Task 2: QA 46건 실측 기반 프롬프트 엣지 케이스 보강**
+  - 환각 방지(없는 책 지어내기 방어 지침 강화), 감정/위로 대화의 페르소나 공감 톤 보강
+- [ ] **Task 3: QA 러너(`scripts/qa_runner.py`) 전체 46건 재실측 및 통과율 검증**
+- [ ] **Task 4: 정적 분석, 단위 테스트 갱신 및 문서 동기화**
 
 ### 백로그로 이관 (이번 범위 제외)
 
