@@ -34,7 +34,7 @@
 | CLIAR-213 단순 날씨/일상 대화 의도 분기 및 과잉 도서 추천 방어 가드레일 | ✅ 완료 | 블루/슈빌 오케스트레이터 프롬프트에 `[단순 인사 / 날씨 질문 / 일상 대화]` 분기를 신설하여 날씨 질문 시 `consult_librarian`만 1회 호출하고 도서 추천/서재 조회를 엄격 차단, `[명시적 도서 추천 질문]`으로 도서 추천 연쇄 호출 한정. 단위 테스트 143건 및 정적 분석 100% 통과 |
 | CLIAR-158 순손실 제거 및 레이턴시 계측 | 🔄 진행 중 | Task 1(core/observability.py 구조화 로그 및 TTFB/소요시간/Strands metrics 계측, input_params 필터링 개인정보 방어)·Task 2-1(tail consult 조건식 버그 수정, 스트리밍 1.5s 가드 및 동기 타임아웃 보존)·Task 2-2(get_initial_meta 전량 반환 및 스트리밍 첫 consult 도구 재사용으로 중복 제거, 라우터 signals fallback) 구현 완료. Task 3(캐싱 히트)·Task 4(Reasoning 토큰)·Task 5(전후 비교표)는 dev 배포 후 실측 대기 |
 | CLIAR-215 QA기반 최적화a (안전성·인증·입력 게이트) | ✅ 완료 | Task 1(QA 46건 실측 러너 작성 및 실측 완료, main.py 로깅 수정)·Task 2(인증 Presence Check `require_authorization_header` 의존성 + `backend-book` 401을 `LibraryAuthError`/`on_auth_failed` 콜백으로 전파하여 위조 토큰도 401 반환하도록 보강, ADR 0007 작성)·Task 3(자해/위기 대응 109 핫라인 결정론적 안전 게이트 `safety_gate.py`, LLM 우회로 레이턴시 ~10ms, DECISIONS 예외 기록)·Task 4(`ChatRequest` 공백 422 validator 및 `input_gate.py` 자모/숫자/이모지 결정론적 우회, LLM 우회로 레이턴시 ~10ms)·Task 5(401 수정 반영 후 재실측하여 인증 2건 401 확정 확인. 서재 API 연동 케이스는 로컬에 유효 JWT가 없어 완전 검증 불가 — dev 환경 실제 로그인 세션 재검증 필요로 백로그화, 나머지 P1/P2/P3 회귀 없음)·Task 6(단위 테스트 200건 100% 통과 및 하네스 동기화) 모두 완료. 동기(`chat`) 경로는 401 전달, 스트리밍(`stream_chat`) 경로는 `StreamingResponse` 구조적 제약으로 401 전달 불가(안내 문구로 대체) — ADR 0007 2.2절에 명시 |
-| CLIAR-171 출력 토큰 중복 제거 및 Bedrock 프로필 튜닝 | ✅ 완료 | Task 1-0(`sanitize_search_results`로 `search_books`에서 `raw_content` 등 거대 필드 제거 및 400자 슬라이싱으로 입력 16,769토큰 병목 해소)·Task 1(블루/슈빌 오케스트레이터 프롬프트에서 도서 카드 재출력 금지 및 서두 멘트만 생성하도록 축소하여 기존 서비스 레이어 결합 로직 활용)·Task 2(Sonnet 5 글로벌 프로필 유지 결정)·Task 3(추론 파라미터 `temperature=0.5`, `top_p=0.9`, `max_tokens` 1024/1536 튜닝) 모두 완료. 정적 분석 100% 통과, 단위 테스트 205건 + Redis 통합 테스트 16건 전체 통과 |
+| CLIAR-171 출력 토큰 중복 제거 및 Bedrock 프로필 튜닝 | ✅ 완료(배포 후 핫픽스 2건 반영) | Task 1-0(`sanitize_search_results`로 `search_books`에서 `raw_content` 등 거대 필드 제거 및 400자 슬라이싱으로 입력 16,769토큰 병목 해소)·Task 1(블루/슈빌 오케스트레이터 프롬프트에서 도서 카드 재출력 금지 및 서두 멘트만 생성하도록 축소하여 기존 서비스 레이어 결합 로직 활용)·Task 2(Sonnet 5 글로벌 프로필 유지 결정)·Task 3(추론 파라미터 튜닝) 완료 후 dev 배포에서 `temperature`/`top_p`가 Claude Sonnet 5에서 모두 deprecated임이 실측으로 확인되어 두 파라미터를 완전히 제거(PR #34, #35, `max_tokens`만 유지). 정적 분석 100% 통과, 단위 테스트 205건 + Redis 통합 테스트 16건 전체 통과, dev 재배포 후 정상 응답 확인 |
 
 
 
@@ -43,3 +43,5 @@
 
 
 
+
+| CLIAR-229 도서 추천 카드 구조화 및 출력 HTML 태그 노출 방어 | ✅ 완료 | Task 1(`RecommendedBookCard` 스키마 및 `ChatResponse.recommended_books` 동기 응답 전용 필드 추가, `parse_recommended_books_from_markdown` 파서로 저자/쪽수 정규식 분리)·Task 2(`sanitize_html_tags`로 `<br>` 변종 태그를 개행으로 정규화, `chat`/`stream_chat` 세션 히스토리 저장 시 적용)·Task 3(단위 테스트 12건 신규, 전체 단위 212건 + 통합 16건 통과, ADR 0008 작성) 모두 완료. 스트리밍 경로는 헤더 확정 시점 제약으로 `recommended_books` 미제공(동기 `chat`만 제공) |
