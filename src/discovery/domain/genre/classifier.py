@@ -9,13 +9,11 @@ from discovery.api.schemas.genre import BookClassificationResponse, StandardGenr
 
 logger = logging.getLogger(__name__)
 
-GENRE_CLASSIFIER_SYSTEM_PROMPT = """당신은 도서 메타데이터를 분석하여
-표준 장르로 정확하게 분류하는 전문 사서 AI입니다.
-주어진 도서의 국제표준도서번호(ISBN) 정보를 바탕으로 해당 도서를 식별하고,
-반드시 아래 정의된 16개 표준 장르 Enum(genre_type) 중 가장 적합한 1개를 선택하세요.
-
-
-[16개 표준 장르 Enum 목록]
+# 16개 표준 장르 Enum 설명 블록. 장르 분류 API(GENRE_CLASSIFIER_SYSTEM_PROMPT)와
+# 추천 에이전트 프롬프트(domain/librarian/agent.py) 양쪽에서 동일한 Enum 정의를
+# 공유하기 위해 별도 상수로 분리했다(CLIAR-244) — 두 곳에서 각각 다른 설명 문구를
+# 유지하면 향후 장르가 추가/변경될 때 한쪽만 갱신되는 drift 위험이 있다.
+STANDARD_GENRE_ENUM_DESCRIPTION = """[16개 표준 장르 Enum 목록]
 1. SCIENCE_FICTION: SF, 공상과학, 사이버펑크, 스페이스 오페라 등
 2. FANTASY: 판타지, 무협, 다크판타지, 어반판타지, 로맨스판타지 등
 3. ROMANCE: 로맨스, 순정, 연애소설 등
@@ -31,7 +29,15 @@ GENRE_CLASSIFIER_SYSTEM_PROMPT = """당신은 도서 메타데이터를 분석�
 13. ARTS: 미술, 음악, 디자인, 사진, 건축, 영화/드라마/공연, 만화(기법), 공예 등
 14. RELIGION: 기독교, 불교, 가톨릭, 이슬람교, 종교일반, 신앙/명상 등
 15. COMPUTER_IT: 프로그래밍, 개발, IT교양, 컴퓨터공학, 인공지능/데이터, 네트워크/보안 등
-16. NONE: 위 장르에 해당하지 않거나 도서 정보가 부족하여 식별 불가능한 경우
+16. NONE: 위 장르에 해당하지 않거나 도서 정보가 부족하여 식별 불가능한 경우"""
+
+GENRE_CLASSIFIER_SYSTEM_PROMPT = f"""당신은 도서 메타데이터를 분석하여
+표준 장르로 정확하게 분류하는 전문 사서 AI입니다.
+주어진 도서의 국제표준도서번호(ISBN) 정보를 바탕으로 해당 도서를 식별하고,
+반드시 아래 정의된 16개 표준 장르 Enum(genre_type) 중 가장 적합한 1개를 선택하세요.
+
+
+{STANDARD_GENRE_ENUM_DESCRIPTION}
 
 [분류 원칙]
 1. 주어진 ISBN을 바탕으로 해당 도서의 고유 정보를 식별하고
@@ -42,7 +48,7 @@ GENRE_CLASSIFIER_SYSTEM_PROMPT = """당신은 도서 메타데이터를 분석�
 
 [출력 형식]
 반드시 다른 설명이나 마크다운 코드블록 없이, 오직 아래의 유효한 JSON 형식 단 1개만 출력하세요:
-{"genre": "<16개 표준 장르 Enum 영문 대문자>", "confidence": <0.0 ~ 1.0 실수>}
+{{"genre": "<16개 표준 장르 Enum 영문 대문자>", "confidence": <0.0 ~ 1.0 실수>}}
 """
 
 

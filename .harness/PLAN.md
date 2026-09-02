@@ -1,31 +1,16 @@
 # PLAN — backend-discovery
 
-## [계획 초안 · 사용자 확인 대기] 도서 추천 카드 장르(16개 표준) 필드 추가
+## [코드 구현 완료 · dev 실측 대기] CLIAR-244: 도서 추천 카드 장르(16개 표준) 필드 추가
 
-**배경**: 2026-09-02 사용자 지적 — 추천 응답(`RecommendedBookCard`)에 장르 필드가 없어 프론트가 등록 화면에서 장르를 자동 채울 수 없다. 실제 추천 도서의 장르를 기존 `StandardGenre`(ERD 16개 표준 Enum, `backend-book`의 `genre_type`과 1:1 동기화됨) 규격에 맞춰 내려주기로 확정.
+**배경 (2026-09-02, 스크린샷으로 재확인)**: 지금 프론트 상단 칩에 "미스터리"가 이미 표시되고 있으나, 이 값은 `ChatResponse.signals.genre_focus`(`backend-librarian`이 대화 분석으로 자유 판단한 `list[str] | str`, 코드로 확인: `librarian_response.py:58`)로 **16개 표준 `StandardGenre` Enum 매핑을 거치지 않은 값**이다. 사용자 요청: (1) 상단 칩에는 날씨/시간대/분위기만 남기고 장르 칩은 제거, (2) 대신 **각 도서 카드 내부**(저자 옆)에 그 도서의 실제 표준 장르를 표시, (3) "등록하기" 버튼 클릭 시 이 장르 값이 등록 요청 페이로드에 함께 실려야 함 — 즉 표시 이동이 아니라 `RecommendedBookCard`에 구조화 필드로 편입되어야 하는 문제.
 
-**핵심 제약**: 기존 `POST /api/v1/classify-genre`(`GenreClassifierService`)는 CLIAR-235에서 **ISBN 전용**으로 개편되어 title/author 입력을 받지 않는다. 그런데 추천 카드(`RecommendedBookCard`)에는 ISBN이 없다(Tavily 웹 검색 결과 기반이라 ISBN을 안정적으로 확보하기 어려움). 따라서 classify-genre 엔드포인트를 그대로 호출하는 방식은 불가능하고, **추천 에이전트가 도서를 생성하는 시점에 장르까지 함께 판단하게** 해야 한다.
+**핵심 제약**: 기존 `POST /api/v1/classify-genre`(`GenreClassifierService`)는 CLIAR-235에서 **ISBN 전용**으로 개편되어 title/author 입력을 받지 않는다. 추천 카드(`RecommendedBookCard`)는 Tavily 웹검색 기반이라 ISBN을 안정적으로 확보하기 어렵다. 따라서 classify-genre 엔드포인트를 그대로 재호출하는 방식은 불가능하고, **추천 에이전트가 도서를 생성하는 시점에 장르까지 함께 판단하게** 해야 한다.
 
-**설계 방향 (제안)**:
-1. `LIBRARIAN_SYSTEM_PROMPT`(cat/stork 둘 다)의 마크다운 템플릿에 `- **장르**: {16개 Enum 중 하나}` 라인 추가. 프롬프트에 16개 Enum 목록을 명시하고, 반드시 그 중 하나(영문 대문자, 모르면 `NONE`)로만 작성하도록 지시(`GENRE_CLASSIFIER_SYSTEM_PROMPT`의 16개 항목 설명을 재사용/공유 상수화 검토).
-2. `post_processor.py`에 `_GENRE_LINE_PATTERN` 정규식 추가, `parse_recommended_books_from_markdown`이 장르 라인을 파싱.
-3. 파싱된 원문 문자열은 `domain/genre/classifier.py`의 기존 순수 함수 `match_standard_genre`(이미 완화 매칭 로직 보유)로 `StandardGenre` Enum에 매핑 — 새 매칭 로직을 중복 구현하지 않고 재사용. LLM이 형식을 어겨도(예: "미스터리" 한글로만 씀) `match_standard_genre`가 완화 매칭.
-4. `RecommendedBookFields`(TypedDict)와 `RecommendedBookCard`(Pydantic)에 `genre: StandardGenre` 필드 추가(매칭 실패 시 `StandardGenre.NONE`).
-5. `truncate_books_by_count`는 블록 단위 자르기라 영향 없음(장르 라인이 블록 안에 포함되면 그대로 보존됨) — 확인만 하고 로직 변경 불필요할 가능성 높음.
-6. 적용 범위: `RecommendedBookCard`(추천, 동기 `chat`만 제공)에 한정. `LibraryBookCard`(내 서재 조회, `backend-book` 원본 데이터 그대로 전달)는 이번 범위 아님(서재 도서는 이미 backend-book이 자체 genre_type을 갖고 있을 가능성이 높아 discovery가 재분류할 필요가 없음 — 확인 필요 시 별도 논의).
-7. `docs/api/openapi.yaml`의 `RecommendedBookCard` 스키마에 `genre` 필드 추가(우선 반영 대상, AGENTS.md 동기화 규칙).
+**구현 완료 세부**: `.harness/STATE.md` 참고.
 
-**확인 필요 (사용자 컨펌 대기)**:
-- 스트리밍(`stream_chat`) 경로는 CLIAR-229 때 헤더 확정 시점 제약으로 `recommended_books` 자체를 제공하지 않기로 결정된 상태(동기 `chat`만 제공). 장르 필드도 동일하게 동기 경로에만 적용하면 되는지, 혹은 스트리밍 구조화 출력 자체를 이번에 재검토할지.
-- 티켓 번호 미정 — 신규 티켓 생성 여부 확인 필요.
-
-**남은 작업(컨펌 후 착수)**:
-- [ ] 티켓 번호 확정 및 `develop`에서 새 브랜치 분기
-- [ ] Task 1: `LIBRARIAN_SYSTEM_PROMPT`(cat/stork) 마크다운 템플릿에 장르 라인 추가
-- [ ] Task 2: `post_processor.py` 장르 파싱 + `match_standard_genre` 연동
-- [ ] Task 3: `RecommendedBookCard`/`RecommendedBookFields` 스키마에 `genre` 필드 추가, `openapi.yaml` 동기화
-- [ ] Task 4: 단위 테스트(파서, 스키마, fallback NONE 매칭) 추가 및 전체 회귀 확인
-- [ ] Task 5: dev 배포 후 실제 추천 요청으로 `genre` 필드 확인, 하네스 문서 동기화
+**남은 작업**:
+- [ ] dev 배포 후 실제 추천 요청으로 `recommended_books[i].genre` 필드가 채워지는지 확인
+- [ ] 프론트 전달 사항 정리 완료 (`.harness/HANDOFF.md` 참고)
 
 ---
 

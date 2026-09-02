@@ -1,6 +1,9 @@
 import re
 from typing import Any, TypedDict
 
+from discovery.api.schemas.genre import StandardGenre
+from discovery.domain.genre.classifier import match_standard_genre
+
 
 class RecommendedBookFields(TypedDict):
     """`### 📖` 마크다운 도서 블록에서 파싱한 구조화 필드."""
@@ -9,6 +12,7 @@ class RecommendedBookFields(TypedDict):
     author: str | None
     page_count: int | None
     reason: str | None
+    genre: StandardGenre
 
 
 _BOOK_BLOCK_PATTERN = re.compile(r"(?=(?:^|\n)### 📖)")
@@ -21,6 +25,7 @@ _AUTHOR_LINE_PATTERN = re.compile(
     r"-\s*\*\*저자\*\*:\s*(.+?)(?:\s*\([^)]*?(\d+)\s*여?\s*쪽[^)]*?\))?\s*$", re.MULTILINE
 )
 _REASON_LINE_PATTERN = re.compile(r"-\s*\*\*추천\s*이유\*\*:\s*(.+?)\s*$", re.MULTILINE)
+_GENRE_LINE_PATTERN = re.compile(r"-\s*\*\*장르\*\*:\s*(.+?)\s*$", re.MULTILINE)
 
 
 def parse_recommended_books_from_markdown(markdown: str) -> list[RecommendedBookFields]:
@@ -28,6 +33,8 @@ def parse_recommended_books_from_markdown(markdown: str) -> list[RecommendedBook
 
     - 저자와 쪽수를 분리한다: `- **저자**: {name} ({page}쪽)` → `author="{name}"`,
       `page_count={page}`. 쪽수가 없으면 `page_count=None`.
+    - `- **장르**: {문자열}` 라인이 있으면 `match_standard_genre`(완화 매칭)로
+      `StandardGenre` Enum에 매핑한다. 라인이 없거나 매핑에 실패하면 `StandardGenre.NONE`.
     - 파싱 실패(필수 필드 누락 등)한 블록은 결과에서 건너뛴다(원본 마크다운 텍스트는
       항상 `message` 필드로 별도 보존되므로 파싱 실패가 사용자 응답 자체를 깨뜨리지 않는다).
 
@@ -66,8 +73,22 @@ def parse_recommended_books_from_markdown(markdown: str) -> list[RecommendedBook
         if reason_match:
             reason = reason_match.group(1).strip() or None
 
+        genre = StandardGenre.NONE
+        genre_match = _GENRE_LINE_PATTERN.search(block)
+        if genre_match:
+            raw_genre = genre_match.group(1).strip()
+            mapped_genre = match_standard_genre(raw_genre) if raw_genre else None
+            if mapped_genre is not None:
+                genre = mapped_genre
+
         books.append(
-            RecommendedBookFields(title=title, author=author, page_count=page_count, reason=reason)
+            RecommendedBookFields(
+                title=title,
+                author=author,
+                page_count=page_count,
+                reason=reason,
+                genre=genre,
+            )
         )
     return books
 

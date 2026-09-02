@@ -954,3 +954,36 @@
 2. dev 배포 후 "백야행", "유리 세공" 등 기존에 `page_count: null`로 남던 사례를 재현하여 title/author 경로가 실제로 정확한 페이지수를 채우는지 확인(`kubectl logs`).
 3. 무인증 호출이 401을 반환하면(CLIAR-237 ISBN 경로 전례와 동일할 가능성), `Authorization` 패스스루 추가 여부를 사용자와 논의(이번 세션에서는 "나중에 하자"로 명시적으로 보류함).
 4. PLAN.md에 대기 중인 "[계획 초안 · 사용자 확인 대기] 도서 추천 카드 장르(16개 표준) 필드 추가"는 여전히 사용자 컨펌 대기 상태 — 이번 세션에서 다루지 않음.
+
+
+
+## 2026-09-02 — CLIAR-244: 도서 추천 카드 장르(16개 표준) 필드 추가
+- 브랜치: `CLIAR-244-Recommendation-Genre-Field` (`develop`에서 신규 분기, PR #41 머지 확인 후 최신 develop 기준).
+- 사용자가 스크린샷(블루 사서 챗 화면)으로 문제를 제시: 상단 시그널 칩에 "미스터리"가 표시되고 있으나, 코드 확인 결과 이 값은 `ChatResponse.signals.genre_focus`(사서가 대화 분석으로 자유 판단한 값)로 16개 표준 `StandardGenre` Enum과 무관함을 확인했다. 사용자가 원하는 것은 (1) 상단 칩에서 장르 제거(날씨/시간대/분위기만 유지), (2) 도서 카드 내부 저자 옆에 실제 표준 장르 표시, (3) 등록하기 클릭 시 그 장르가 페이로드에 포함.
+- "스트리밍이라 불가능한가?"라는 사용자 질문에 스트리밍과 동기 응답의 차이를 쉬운 비유로 설명(편지를 한 줄씩 부치기 vs 다 쓴 후 한번에 보내기)했고, 사용자가 등록하기 버튼은 이미 동기(`chat`, `stream: false`) 응답을 쓰고 있다고 확인해줘서 스트리밍 재검토 없이 진행 가능함을 확정했다.
+- 사용자가 지라 티켓 CLIAR-244를 직접 생성함(제목: "도서 추천시 장르도 함께 추출해 출력단에 추가").
+- 구현 완료:
+  - `domain/genre/classifier.py`: `STANDARD_GENRE_ENUM_DESCRIPTION` 상수를 신설하여 16개 Enum 설명 텍스트를 `GENRE_CLASSIFIER_SYSTEM_PROMPT`와 추천 프롬프트가 공유하도록 추출(f-string으로 JSON 예시 중괄호 이스케이프 확인 완료).
+  - `domain/librarian/agent.py`: `CAT_LIBRARIAN_PROMPT`/`STORK_LIBRARIAN_PROMPT` 마크다운 템플릿에 `- **장르**: {...}` 라인 및 규칙 8번(영문 대문자 Enum 값 강제, 확신 없으면 NONE) 추가.
+  - `domain/librarian/post_processor.py`: `_GENRE_LINE_PATTERN` 정규식 신설, `parse_recommended_books_from_markdown`이 장르 라인을 파싱해 `match_standard_genre`(기존 완화 매칭 함수 재사용)로 `StandardGenre` Enum에 매핑. 라인 없음/매핑 실패 시 `StandardGenre.NONE` 기본값. `RecommendedBookFields` TypedDict에 `genre: StandardGenre` 필드 추가.
+  - `api/schemas/chat.py`: `RecommendedBookCard`에 `genre: StandardGenre = StandardGenre.NONE` 필드 추가.
+  - `application/orchestrator_service.py`: `_build_recommended_book_cards`의 `RecommendedBookCard(...)` 생성 시 `genre=b["genre"]` 언패킹 추가.
+  - `docs/api/openapi.yaml`: `RecommendedBookCard` 스키마에 `genre`(기존 `StandardGenre` 스키마 `$ref` 재사용) 필드 추가.
+  - 단위 테스트 5건 신규: `test_post_processor.py` 4건(Enum 값 직접 매핑, 한글/별칭 완화 매핑, 라인 없음 시 NONE, 매핑 불가 시 NONE), `test_orchestrator_service.py` 1건(`chat` 최종 응답의 `recommended_books[i].genre`가 실제로 채워지는지 종단 검증). `test_librarian_agent.py`의 프롬프트 템플릿 검증 테스트에도 장르 관련 assert 추가.
+- 검증: `ruff check .`, `mypy .`, `pytest -m "not integration"`(251건) 전체 통과 확인.
+- `LibraryBookCard`(내 서재 조회)는 이번 범위에 포함하지 않았다(서재 도서는 `backend-book`이 이미 자체 `genre_type`을 갖고 있을 가능성이 높아 discovery가 재분류할 필요가 없다는 판단, 필요 시 별도 논의).
+- 커밋·push는 하지 않았다. git 변경사항(소스 5개 파일, 테스트 3개 파일, `openapi.yaml`, `.harness/*` 문서)이 모두 미커밋 상태다.
+
+### 프론트엔드 전달 사항 (dev 배포 후 전달할 내용, 이 레포 범위 밖)
+1. **상단 시그널 칩에서 장르 표시 제거**: `ChatResponse.signals.genre_focus`는 16개 표준 장르와 무관한 사서의 자유 판단 값이므로, 상단 칩은 날씨/시간대/분위기(`signals.weather`, `signals.time_of_day`, `signals.mood`)만 남기고 장르 칩을 빼는 것을 권장.
+2. **도서 카드 내부(저자 옆)에 표준 장르 표시**: 동기(`POST /api/v1/chat`, `stream: false`) 응답의 `recommended_books[i].genre` 필드(16개 표준 Enum 문자열, 예: `"MYSTERY_THRILLER"`, 매핑 실패/미확인 시 `"NONE"`)를 각 도서 카드의 저자 정보 옆에 표시.
+3. **등록하기 페이로드에 장르 포함**: "등록하기" 버튼 클릭 시 `backend-book` 등록 API로 보내는 요청에 해당 도서의 `recommended_books[i].genre` 값을 포함(필드명은 `backend-book`의 등록 API 스키마에 맞춰 프론트에서 매핑).
+4. **한글화 매핑은 프론트에 이미 있음(사용자 확인)** — 백엔드는 영문 Enum 값(`StandardGenre`)만 내려주고, 화면 표시용 한글 라벨 변환은 프론트가 기존 로직을 그대로 사용하면 됨.
+5. **스트리밍 경로는 미지원**: `stream: true`로 받는 응답에는 `recommended_books` 자체가 없음(CLIAR-229 결정, 헤더 확정 시점 제약). 등록하기가 동기 경로를 쓰고 있으므로 영향 없음.
+6. **API 계약**: `docs/api/openapi.yaml`의 `RecommendedBookCard` 스키마에 `genre` 필드가 추가됨(`StandardGenre` enum, 기본값 `NONE`).
+
+### 다음 세션이 할 일
+1. 커밋 여부 확인 — 사용자 승인 시 Task 단위로 커밋(`[CLIAR-244]` 태그).
+2. push 및 PR 생성 (base: `develop`), 사용자 승인 후 진행.
+3. dev 배포 후 실제 추천 요청으로 `recommended_books[i].genre` 필드가 정상적으로 채워지는지 확인(`kubectl logs` 또는 실제 API 응답 확인).
+4. 위 "프론트엔드 전달 사항" 섹션을 프론트 담당자에게 전달.

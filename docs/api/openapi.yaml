@@ -303,6 +303,13 @@ components:
           nullable: true
           description: 추천 이유
           example: 88
+        genre:
+          allOf:
+            - $ref: '#/components/schemas/StandardGenre'
+          description: >-
+            ERD 16개 표준 장르 Enum (genre_type). 추천 에이전트가 도서 생성 시점에
+            함께 판단한 값으로, 매핑 실패 또는 미확인 시 'NONE'.
+          default: NONE
 
     StandardGenre:
       type: string
