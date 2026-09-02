@@ -4,13 +4,14 @@ import urllib.parse
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from discovery.api.deps import get_orchestrator_service
+from discovery.api.deps import get_orchestrator_service, require_authorization_header
 from discovery.api.schemas.chat import ChatRequest, ChatResponse
 from discovery.application.orchestrator_service import OrchestratorService
 from discovery.domain.orchestrator.tools.librarian_tool import evaluate_local_persona_response
+from discovery.domain.orchestrator.tools.library_tool import LibraryAuthError
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
@@ -25,18 +26,25 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
                 "application/json": {},
                 "text/plain": {},
             },
-        }
+        },
+        401: {
+            "description": (
+                "인증 실패 (Authorization 헤더 누락/빈 값, "
+                "또는 서재 API가 위조·만료된 토큰으로 인증 실패를 반환한 경우)"
+            ),
+        },
     },
     summary="오케스트레이터 대화 (도서 추천, 서재 검색, 사서 상담)",
     description=(
         "자연어 질문으로 오케스트레이터에게 대화를 요청한다. "
         "의도에 따라 내 서재 도서 검색, 외부 도서 추천 또는 사서 에이전트로 라우팅되며, "
-        "이전 세션 ID를 전달하면 문맥을 유지한다."
+        "이전 세션 ID를 전달하면 문맥을 유지한다. "
+        "Authorization 헤더가 필수이며 누락 시 401을 반환한다."
     ),
 )
 async def chat(
     request_body: ChatRequest,
-    authorization: str | None = Header(default=None, alias="Authorization"),
+    authorization: str = Depends(require_authorization_header),
     service: OrchestratorService = Depends(get_orchestrator_service),
 ) -> Any:
     session_id = request_body.session_id.strip() if request_body.session_id else str(uuid.uuid4())
@@ -83,14 +91,20 @@ async def chat(
             headers=headers,
         )
 
-    answer, switch_to, signals, library_books = await service.chat(
-        session_id=session_id,
-        message=request_body.message,
-        librarian_id=request_body.librarian_id,
-        latitude=request_body.latitude,
-        longitude=request_body.longitude,
-        auth_token=authorization,
-    )
+    try:
+        answer, switch_to, signals, library_books = await service.chat(
+            session_id=session_id,
+            message=request_body.message,
+            librarian_id=request_body.librarian_id,
+            latitude=request_body.latitude,
+            longitude=request_body.longitude,
+            auth_token=authorization,
+        )
+    except LibraryAuthError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Library API authentication failed",
+        ) from e
     return ChatResponse(
         session_id=session_id,
         message=answer,

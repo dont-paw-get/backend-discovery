@@ -24,6 +24,14 @@ READING_STATUS_KO = {
 }
 
 
+class LibraryAuthError(Exception):
+    """서재 API(backend-book)가 인증 실패(401)를 반환했을 때 발생하는 예외.
+
+    LLM 도구 실행 경로를 거치면 예외 정보가 보존되지 않을 수 있으므로,
+    `on_auth_failed` 콜백을 통해 서비스 레이어에 직접 신호를 전달하는 데 사용한다.
+    """
+
+
 def format_books_for_llm(books: list[LibraryBookItem], query: str = "") -> str:
     """조회된 서재 도서 목록을 LLM이 분석하기 쉬운 정형 텍스트로 포맷팅한다."""
     if not books:
@@ -63,7 +71,9 @@ class SearchMyLibraryTool:
         reading_status: str | None = None,
         auth_token: str | None = None,
     ) -> list[LibraryBookItem]:
-        """서재 도서 API를 호출하고 전달된 조건으로 도서 목록을 필터링한다."""
+        # 라우터 수준에서 require_authorization_header로 401 차단되지만,
+        # 도구 직접 호출 등에서의 심층 방어(Defense in Depth)를 위해
+        # 안전하게 빈 리스트 반환을 보존한다.
         if not auth_token:
             logger.warning("auth_token is missing for search_my_library.")
             return []
@@ -130,10 +140,19 @@ class SearchMyLibraryTool:
 
                 return books
 
+            if response.status_code == 401:
+                # 위조/만료된 토큰: backend-book이 인증 실패를 명확히 알려준 경우.
+                # 빈 리스트로 조용히 흡수하지 않고 별도 예외로 알려 라우터가 401을
+                # 클라이언트에 전달할 수 있게 한다 (ADR 0007 2.2절).
+                logger.warning("Library API returned 401 (invalid/expired token)")
+                raise LibraryAuthError("Library API authentication failed")
+
             logger.warning(
                 "Library API returned status %d: %s", response.status_code, response.text
             )
             return []
+        except LibraryAuthError:
+            raise
         except Exception:
             logger.exception("Failed to connect to Library API at %s", url)
             return []
@@ -142,12 +161,16 @@ class SearchMyLibraryTool:
         self,
         auth_token: str | None = None,
         on_books_fetched: Callable[[list[LibraryBookItem]], None] | None = None,
+        on_auth_failed: Callable[[], None] | None = None,
     ) -> Any:
         """Strands 오케스트레이터 에이전트에 등록할 @tool 함수를 반환한다.
 
         인증 토큰은 서비스 레이어에서 클로저로 주입되어
         LLM은 검색 키워드 및 조건만 인자로 전달한다 (IDOR 방지).
         조회된 도서 목록은 on_books_fetched 콜백을 통해 서비스 레이어로 안전하게 수집된다.
+        backend-book이 401(인증 실패)을 반환하면 on_auth_failed 콜백으로 서비스
+        레이어에 신호를 전달한다 — LLM 에이전트 루프를 거치면 예외 정보가 보존되지
+        않을 수 있으므로 콜백으로 직접 알린다.
         """
 
         @tool(name="search_my_library")
@@ -169,12 +192,21 @@ class SearchMyLibraryTool:
                 reading_status: 독서 상태 필터 (선택,
                     'READING'=읽는중, 'COMPLETED'=완독, 'WISH'=읽고싶은책).
             """
-            books = await self.search(
-                query=query,
-                author=author or None,
-                reading_status=reading_status or None,
-                auth_token=auth_token,
-            )
+            try:
+                books = await self.search(
+                    query=query,
+                    author=author or None,
+                    reading_status=reading_status or None,
+                    auth_token=auth_token,
+                )
+            except LibraryAuthError:
+                if on_auth_failed is not None:
+                    try:
+                        on_auth_failed()
+                    except Exception:
+                        logger.exception("Failed to execute on_auth_failed callback")
+                return "인증 정보가 유효하지 않아 서재를 조회할 수 없습니다."
+
             if on_books_fetched is not None and books:
                 try:
                     on_books_fetched(books)

@@ -27,10 +27,10 @@ paths:
       parameters:
         - name: Authorization
           in: header
-          required: false
+          required: true
           schema:
             type: string
-          description: 사용자 JWT 인증 토큰 (Bearer <token>, 서재 도서 조회 시 필수)
+          description: 사용자 JWT 인증 토큰 (Bearer <token>, 필수. 누락 또는 빈 값 시 401 반환)
       requestBody:
         required: true
         content:
@@ -65,6 +65,8 @@ paths:
               schema:
                 type: string
                 description: 스트리밍 텍스트 청크 스트림
+        '401':
+          description: 인증 실패 (Authorization 헤더 누락 또는 빈 값)
         '422':
           description: 요청 유효성 검증 실패 (빈 메시지 등)
 
