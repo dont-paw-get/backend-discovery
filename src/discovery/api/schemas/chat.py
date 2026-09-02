@@ -2,6 +2,7 @@
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
+from discovery.api.schemas.genre import StandardGenre
 from discovery.domain.orchestrator.librarian_response import (
     LibrarianSignals,
     SwitchToSuggestion,
@@ -56,6 +57,12 @@ class RecommendedBookCard(BaseModel):
         default=None, description="총 페이지 수 (쪽수 확인 불가 시 null)", examples=[548]
     )
     reason: str | None = Field(default=None, description="추천 이유")
+    genre: StandardGenre = Field(
+        default=StandardGenre.NONE,
+        description="ERD 16개 표준 장르 Enum (genre_type). 추천 에이전트가 도서 생성 "
+        "시점에 함께 판단한 값으로, 매핑 실패 또는 미확인 시 'NONE'.",
+        examples=[StandardGenre.MYSTERY_THRILLER],
+    )
 
 
 class ChatRequest(BaseModel):

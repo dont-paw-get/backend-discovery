@@ -126,7 +126,11 @@ def _build_recommended_book_cards(response_text: str) -> list[RecommendedBookCar
         return None
     return [
         RecommendedBookCard(
-            title=b["title"], author=b["author"], page_count=b["page_count"], reason=b["reason"]
+            title=b["title"],
+            author=b["author"],
+            page_count=b["page_count"],
+            reason=b["reason"],
+            genre=b["genre"],
         )
         for b in parsed
     ]

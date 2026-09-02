@@ -554,6 +554,66 @@ async def test_orchestrator_service_chat_splices_recommendation_card_when_intro_
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_service_chat_returns_recommended_books_with_genre(
+    mocker: MockerFixture,
+) -> None:
+    # CLIAR-244: 최종 응답에 `- **장르**:` 라인이 포함되면 recommended_books[i].genre가
+    # 매핑된 StandardGenre로 채워져야 한다.
+    from discovery.api.schemas.genre import StandardGenre
+
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = MagicMock()
+    mock_result = MagicMock()
+    mock_result.message = {
+        "role": "assistant",
+        "content": [
+            {
+                "text": (
+                    "미스터리 소설을 추천해드릴게요.\n\n"
+                    "### 📖 살인자의 기억법\n"
+                    "- **저자**: 김영하 (269쪽)\n"
+                    "- **추천 이유**: 치매를 앓는 연쇄살인범의 시점으로 전개되는 소설입니다.\n"
+                    "- **장르**: MYSTERY_THRILLER"
+                )
+            }
+        ],
+    }
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mock_agent.messages = []
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
+        session_id="sess-genre-1",
+        message="미스터리 소설 추천해줘",
+    )
+
+    assert recommended_books is not None
+    assert len(recommended_books) == 1
+    assert recommended_books[0].title == "살인자의 기억법"
+    assert recommended_books[0].genre == StandardGenre.MYSTERY_THRILLER
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_service_chat_with_library_tool(mocker: MockerFixture) -> None:
     from discovery.domain.orchestrator.library_response import LibraryBookItem
 
