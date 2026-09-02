@@ -98,7 +98,6 @@ def create_librarian_agent(
     system_prompt: str | None = None,
     enable_prompt_caching: bool = False,
     max_tokens: int = 1536,
-    temperature: float = 0.5,
     top_p: float = 0.9,
 ) -> Agent:
     """추천 에이전트를 생성한다.
@@ -112,14 +111,13 @@ def create_librarian_agent(
         system_prompt: 사서 시스템 프롬프트.
         enable_prompt_caching: Bedrock 자동 프롬프트 캐싱 활성화 여부.
         max_tokens: 최대 출력 토큰 수 (도서 2권 카드 마크다운 생성에 최적화된 1536).
-        temperature: 샘플링 온도 (0.5로 정형화된 서지 정보 및 추천 이유 유도).
-        top_p: 누적 확률 샘플링 상한 (0.9).
+        top_p: 누적 확률 샘플링 상한 (0.9). `temperature`는 Claude Sonnet 5에서
+            deprecated되어 Bedrock이 ValidationException을 반환하므로 사용하지 않는다.
     """
     model_kwargs: dict[str, Any] = {
         "model_id": model_id,
         "region_name": region_name,
         "max_tokens": max_tokens,
-        "temperature": temperature,
         "top_p": top_p,
     }
     if enable_prompt_caching:
