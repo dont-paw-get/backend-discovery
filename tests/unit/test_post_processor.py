@@ -4,6 +4,7 @@
 결과 마크다운의 도서 블록 수와 서두 보존 동작을 결과 검증 우선 원칙으로 검증한다.
 """
 
+from discovery.api.schemas.genre import StandardGenre
 from discovery.domain.librarian.post_processor import (
     parse_recommended_books_from_markdown,
     sanitize_html_tags,
@@ -167,3 +168,57 @@ def test_sanitize_html_tags_noop_when_no_html() -> None:
     clean_text = "일반적인 마크다운 텍스트입니다.\n\n### 📖 도서 제목"
     assert sanitize_html_tags(clean_text) == clean_text
     assert sanitize_html_tags("") == ""
+
+
+
+# ---------------------------------------------------------------------------
+# CLIAR-244: 도서 추천 카드 장르(16개 표준) 필드 파싱
+# ---------------------------------------------------------------------------
+
+SAMPLE_BOOK_WITH_GENRE = """### 📖 명탐정 코난: 시한장치의 마천루
+- **저자**: 아오야마 고쇼
+- **추천 이유**: 코난 극장판의 시작을 알린 기념비적인 작품입니다.
+- **장르**: MYSTERY_THRILLER"""
+
+SAMPLE_BOOK_WITH_KOREAN_GENRE = """### 📖 넛지: 파이널 에디션
+- **저자**: 리처드 탈러, 캐스 선스타인
+- **추천 이유**: 행동경제학의 고전입니다.
+- **장르**: 경제/경영"""
+
+SAMPLE_BOOK_WITHOUT_GENRE_LINE = """### 📖 어린 왕자
+- **저자**: 앙투안 드 생텍쥐페리
+- **추천 이유**: 어른을 위한 동화로도 사랑받는 고전입니다."""
+
+SAMPLE_BOOK_WITH_UNKNOWN_GENRE = """### 📖 알 수 없는 책
+- **저자**: 홍길동
+- **추천 이유**: 테스트용 도서입니다.
+- **장르**: 이해할수없는텍스트123"""
+
+
+def test_parse_recommended_books_maps_genre_enum_value() -> None:
+    # LLM이 지침대로 영문 대문자 Enum 값을 그대로 작성한 경우 정확히 매핑되어야 한다.
+    books = parse_recommended_books_from_markdown(SAMPLE_BOOK_WITH_GENRE)
+    assert len(books) == 1
+    assert books[0]["genre"] == StandardGenre.MYSTERY_THRILLER
+
+
+def test_parse_recommended_books_maps_korean_genre_via_relaxed_matching() -> None:
+    # LLM이 지침을 어기고 한글/별칭으로 작성해도 match_standard_genre의 완화 매칭으로
+    # 정확한 Enum에 매핑되어야 한다.
+    books = parse_recommended_books_from_markdown(SAMPLE_BOOK_WITH_KOREAN_GENRE)
+    assert len(books) == 1
+    assert books[0]["genre"] == StandardGenre.BUSINESS_ECONOMICS
+
+
+def test_parse_recommended_books_defaults_to_none_when_genre_line_missing() -> None:
+    # 장르 라인 자체가 없으면 StandardGenre.NONE으로 기본값 처리되어야 한다.
+    books = parse_recommended_books_from_markdown(SAMPLE_BOOK_WITHOUT_GENRE_LINE)
+    assert len(books) == 1
+    assert books[0]["genre"] == StandardGenre.NONE
+
+
+def test_parse_recommended_books_defaults_to_none_when_genre_unmappable() -> None:
+    # 매핑 불가능한 임의의 텍스트는 예외 없이 StandardGenre.NONE으로 fallback되어야 한다.
+    books = parse_recommended_books_from_markdown(SAMPLE_BOOK_WITH_UNKNOWN_GENRE)
+    assert len(books) == 1
+    assert books[0]["genre"] == StandardGenre.NONE
