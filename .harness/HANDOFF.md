@@ -639,3 +639,111 @@
 1. `CLIAR-158` Task 1·2 변경 파일 커밋 생성 (사용자 승인 시 `[CLIAR-158]` 태그로 생성).
 2. dev 배포 후 실제 Bedrock 로그를 통한 Task 3 (캐싱 히트 실측), Task 4 (reasoning 토큰 확인), Task 5 (전후 비교표 작성) 진행.
 3. `chatbot_qa_testv2.csv`는 CLIAR-215에서 다룬다.
+
+
+## 2026-09-01 — 브랜치 정리 및 CLIAR-158 이중 브랜치 발견
+
+### 브랜치 정리 완료
+- `git merge-base --is-ancestor`로 전체 브랜치를 재검증한 뒤, 실제로 develop 머지가 확인된 8개 브랜치를 로컬+원격에서 삭제했다: `CLIAR-182/193/194/195/196/208/211/213`.
+- `CLIAR-111-Librarian-Agent-Integration`, `CLIAR-152-Unified-Agent-Assistant`는 미머지 커밋(`0568e4d`/`925077b`, 동일 내용: "시리즈 도서 풀네임 및 부제 보존")이 남아 있었으나, `origin/develop`의 `domain/librarian/agent.py`를 직접 확인해 CLIAR-91 재작성 시점에 동일 내용이 이미 흡수됐음을 검증한 뒤 `-D`로 삭제했다.
+- 로컬 `develop`을 `origin/develop`으로 갱신 완료(`git pull`). 최신 커밋 `36ec28f`.
+
+### 중요: CLIAR-158 이중 브랜치 발견 — `origin/CLIAR-158-Strands-Agent-Optimization`은 삭제하지 않고 보존함
+- 이번 세션이 검증·승인해 이미 `origin/develop`에 머지된 CLIAR-158(로컬 브랜치명 `CLIAR-158-Latency-Observability`, 커밋 `35394cb`/`8039d99`/`f59409f`/`5918a2d`)과는 **완전히 별개인 또 다른 CLIAR-158 브랜치**가 존재한다: `CLIAR-158-Strands-Agent-Optimization` (로컬+원격, `f8c1c54`(CLIAR-170 시점)에서 분기, 최신 커밋 `184213c`).
+- 이 브랜치는 이번 세션이 세운 `.harness/PLAN.md`의 CLIAR-158 계획과 무관하게, 다른 세션이 독자적으로 작성한 별도 `PLAN.md`(현재 develop에는 없음, 해당 브랜치 안에만 존재)를 따라 **"직결 스트리밍(Direct Streaming Pipeline)"을 `asyncio.Queue` 기반 바이패스로 구현 완료로 표기**하고 있다. 이는 이번 세션이 Strands SDK 소스(`@tool` 함수의 `str` 반환 계약)를 직접 확인해 **아키텍처적으로 불가능하다고 판정하고 백로그로 이관한 접근**과 정면으로 배치된다. `observability.py`를 삭제하고 `core/profiler.py`로 대체했으며, `api/schemas/chat.py`/`docs/api/openapi.yaml`까지 변경 범위에 포함되어 있다.
+- `git merge-tree`로 확인한 결과 현재 `origin/develop`과 병합 시 `orchestrator_service.py` 등에서 최소 20개 이상 충돌 블록이 발생한다. **병합·삭제 모두 보류. 사용자가 이 브랜치를 어떻게 처리할지(폐기/재검토/CLIAR-171에 재편) 결정해야 한다.**
+- `CLIAR-215-QA-Optimization`은 구현 커밋이 없는 빈 브랜치(최신 커밋이 CLIAR-213 시점)임을 확인했다. `merge-base --is-ancestor`가 "MERGED"로 오판했던 원인은 215만의 고유 커밋이 없어서다. 다음 작업이 이 브랜치에서 시작한다.
+
+### 다음 세션이 할 일 (CLIAR-215 착수)
+1. **`CLIAR-158-Strands-Agent-Optimization` 처리 방향을 먼저 사용자에게 확인한다** (이 브랜치를 참고하지 않고 CLIAR-215/171을 진행해도 무방하지만, 방치하면 나중에 같은 혼선이 재발한다).
+2. `develop`에서 `CLIAR-215-QA-Optimization` 브랜치로 체크아웃(이미 존재, 최신 develop 기준으로 rebase 또는 재생성 검토 — 현재 이 브랜치는 158 머지 전 시점에 머물러 있음).
+3. `.harness/PLAN.md`의 CLIAR-215 섹션은 범위만 확정, Task 상세 미수립 상태다. 착수 전 코드를 다시 확인해 상세 계획을 세우고 사용자 컨펌을 받는다.
+4. CLIAR-215 Task 1(QA 46건 실측 러너)은 `chatbot_qa_testv2.csv`를 이번에 커밋 대상으로 포함한다(이전 세션에서 CLIAR-158 범위에서는 제외하고 215로 미뤄둔 파일).
+5. CLIAR-215 Task 2(인증 소유권 결정)는 구현 전에 정책 결정이 먼저 필요하다 — discovery 소유 vs 게이트웨이 소유.
+
+
+## 2026-09-01 — CLIAR-158 이중 브랜치 폐기 및 CLIAR-215 상세 계획 확정
+- 사용자 확인: "Strands 기반 고도화" 접근은 이제 쓰지 않으므로 `CLIAR-158-Strands-Agent-Optimization`(로컬+원격) 폐기 승인. 삭제 완료, 근거는 `.harness/DECISIONS.md` 참고.
+- `CLIAR-215-QA-Optimization`을 최신 `develop`(CLIAR-158 포함) 기준으로 재생성 완료. 현재 이 브랜치에 있음.
+- `.harness/PLAN.md`의 CLIAR-215 섹션을 `[상세 계획 확정]`으로 갱신. Task 1~6 세부 내용, 대상 파일, 완료 조건 명시. 착수 전 `api/deps.py`/`chat.py`를 다시 읽어 "인증 검증 전혀 없음"을 재확인함.
+- CLIAR-158은 `[진행 중]`에서 `✅ 완료·develop 머지`로 표기 정정 (Task 1·2는 머지 완료, Task 3~5는 dev 실측 필요한 채로 남아 있으며 CLIAR-171 착수 시 함께 확인 권장으로 조정).
+
+### 다음 세션이 할 일 (CLIAR-215 Task 1부터 착수)
+1. `scripts/qa_runner.py` 작성: `chatbot_qa_testv2.csv`(46건, 워크스페이스 루트, 아직 untracked) 기반 실측 러너. 로컬 서버(`uvicorn`) 기동 후 `/api/v1/chat` 순차 호출, 결과를 `scripts/qa_results/`에 JSON Lines로 덤프.
+2. 실측 결과로 46건 중 실패·미흡 케이스만 추려 CLIAR-216 근거로 남긴다 (이미 통과하는 항목에 중복 지침을 얹지 않기 위함 — CLIAR-158에서 반복 지적된 실수 패턴).
+3. Task 2(인증 소유권)는 구현 전에 **사용자에게 정책 결정을 먼저 물어야 한다**: discovery가 직접 JWT를 검증할지, 아니면 게이트웨이/BFF가 이미 검증했다고 신뢰하고 QA 기대값을 조정할지.
+4. Task 3(위기 대응 게이트)는 `CLIAR-208`이 정한 "하드코딩 응답 지양" 원칙의 예외이므로, 구현 후 `DECISIONS.md`에 예외 근거를 반드시 남긴다.
+5. `chatbot_qa_testv2.csv`는 이번 CLIAR-215 커밋에 포함한다 (CLIAR-158 때는 범위 밖이라 제외했던 파일).
+
+
+## 2026-09-02 — CLIAR-158 계측 로깅 결함 발견·수정 및 CLIAR-171 실측 근거 확보
+- **로깅 결함 발견**: `src/discovery/main.py`에 로깅 설정이 전혀 없어 `discovery.observability`(CLIAR-158 계측)의 `logger.info(...)` 호출이 effective level(기본 WARNING=30)에 걸려 전혀 출력되지 않고 있었다. `logging.getLogger('discovery.observability').getEffectiveLevel()`로 재현 확인(30 반환, INFO=20보다 높아 필터링됨). CLIAR-158 검증 당시 이 문제를 놓쳤다.
+- **수정**: `src/discovery/main.py`에 `logging.basicConfig(level=logging.INFO, ...)` + `logging.getLogger("discovery").setLevel(logging.INFO)` 추가. 커밋 대상(`ruff`/`mypy` 통과 확인됨, 아직 미커밋).
+- **CLIAR-215 QA 러너 실측 결과 (`scripts/qa_runner.py`, 46건 중 42건 실행, 로그는 `scripts/qa_results/*.jsonl`, gitignore 처리되어 커밋 대상 아님)**:
+  - 즉시 정상 동작 확인(추가 지침 불필요, CLIAR-216 범위에서 제외 가능): 자모 난타(`ㅁㄴㅇㄹ`)/숫자만(`12345`)/이모지만(`😊📚`) 자연스러운 되묻기, 탈옥 시도 방어, 범위 밖 질문(환불/주식) 안내, 빈 문자열 422(계획 가정과 일치)
+  - **Task 2(인증) 필요성 재확인**: `Authorization` 헤더 없음/위조 토큰 모두 200, 서재는 빈 리스트로 응답 — discovery가 인증을 전혀 안 본다는 것이 실제 응답으로 확정됨
+  - **위기/자해 발언**: 공감 멘트는 있으나 상담전화(109) 등 구체적 안내 문구는 없음 — Task 3에서 보강 필요
+  - **CSV "질문" 컬럼이 시나리오 설명인 케이스 발견**: `(빈 메시지 전송)`, `숫자만 입력 (예: 12345)` 등은 설명 문자열 그대로 보내면 안 됨. `qa_runner.py`에 `QUESTION_OVERRIDES` 딕셔너리로 실제 전송값 치환 처리 완료
+  - **새로 발견된 심각한 레이턴시 문제**: 도서 추천이 트리거되는 요청 9건이 38~60초대(2건은 60초 타임아웃으로 응답 실패). 순수 대화/되묻기는 6~15초대로 정상
+- **CLIAR-171 실측 근거 확보 (로깅 수정 후 실제 계측값)**: 예시 케이스("오늘 날씨에 어울리는 책 추천해줘", 총 40.4초) 분해 결과:
+  - `consult_librarian` 로컬 사서(8000) 연결 실패 fallback: ~3.5초 (dev/prod에는 사서 서버가 있으므로 해당 없음)
+  - **추천 에이전트 전체 23.8초(59%)**: Tavily 검색 2회 2.66초 + **Bedrock 추론 21초(입력 16,769 토큰, 출력 1,090 토큰)**
+  - 오케스트레이터 자체 사이클 나머지 ~16초: `total_cycles: 3`(순차 도구 판단) + 카드 재출력(출력 840 토큰)
+  - **당초 가설("오케스트레이터 카드 재생성이 병목")은 부분적으로만 맞다.** 실제로는 오케스트레이터 재출력(840토큰)보다 **추천 에이전트 입력 토큰 16,769개가 훨씬 큰 병목**이며, 원인은 `infrastructure/search/book_search_tool.py`의 `search_books`가 Tavily 응답을 필터링 없이 그대로 반환하는 것으로 코드 확인됨.
+  - `.harness/PLAN.md`의 CLIAR-171 Task 1에 실측 근거 표와 **신규 서브태스크 "Task 1-0: `search_books` 결과 페이로드 축소"**(Tavily 응답에서 title/url/content 일부만 남기고 `raw_content` 등 큰 필드 제거)를 반영함. 카드 재생성 제거(기존 Task 1)는 그대로 유지하되 우선순위상 Task 1-0이 더 큰 효과.
+
+### 다음 세션이 할 일
+1. **미커밋 변경사항 정리**: `src/discovery/main.py`(로깅 설정 추가), `scripts/qa_runner.py`(신규, QUESTION_OVERRIDES 포함), `.gitignore`(`scripts/qa_results/` 추가), `.env`(kubectl 시크릿 스니펫 주석 처리), `chatbot_qa_testv2.csv`(신규), `.harness/PLAN.md`(CLIAR-171 실측 근거 반영) — 이번 CLIAR-215 커밋에 Task 단위로 나눠 포함
+2. CLIAR-215 Task 2(인증 Presence Check)부터 착수: `api/deps.py`에 `require_authorization_header` 추가, `chat.py` 배선, `openapi.yaml` 401 스펙, ADR 0007, 단위 테스트. `.harness/PLAN.md`에 상세 계획 있음(헤더 존재 검증만 하고 서명 검증은 백로그로 명시된 결정 참고)
+3. 이어서 Task 3(위기 109 핫라인 게이트) → Task 4(입력 게이트, 자모/숫자/이모지는 이미 LLM이 잘 처리하므로 우선순위 낮춰도 됨 — 빈 문자열 방어만 확실히) → Task 5(P1 12건 대조, 이번 실측 결과 재사용) → Task 6 순서로 진행
+4. **CLIAR-171 착수 시** `.harness/PLAN.md`의 실측 근거 표를 먼저 참고할 것. Task 1-0(검색 결과 페이로드 축소)을 Task 1(카드 재생성 제거)보다 먼저 시도하는 것을 권장(효과가 더 큼). 착수 전 CLIAR-158 계측 로그(`main.py` 로깅 수정 이후 버전)로 재실측해 전후 비교할 것
+5. 서버 재기동 시 `uv run uvicorn discovery.main:app --port 8001 2>&1 | tee /tmp/discovery_qa.log` 형태로 띄우면 계측 로그를 파일로도 남겨 이후 세션이 직접 읽을 수 있다(백그라운드 프로세스 기동은 에이전트 도구 안전장치에 막히므로 사용자가 직접 실행 필요)
+
+
+## 2026-09-02 — CLIAR-215 안전성·인증·입력 게이트 및 QA 실측 전체 완료
+- 브랜치: `CLIAR-215-QA-Optimization`
+- CLIAR-215의 모든 구현 Task(Task 1~6)를 완료했다:
+  - **Task 1 (QA 46건 실측 러너 작성 및 실측 완료)**: `scripts/qa_runner.py` 신규 작성, `chatbot_qa_testv2.csv` 기반 42건 실측 완료. 도서 추천 38~60s 병목 규명, `main.py` 로깅 설정 결함 수정.
+  - **Task 2 (인증 Presence Check 및 ADR 0007)**: `src/discovery/api/deps.py`에 `require_authorization_header` 추가(누락/공백 시 401 반환). `src/discovery/api/v1/routers/chat.py`에 `auth_token: str = Depends(require_authorization_header)` 배선. `docs/api/openapi.yaml` 401 스펙 동기화. `docs/api/decisions/0007-chat-authentication-ownership.md` (ADR 0007) 작성. `test_chat_router.py`에 401 단위 테스트 2건 추가.
+  - **Task 3 (위기/자해 대응 결정론적 안전 게이트)**: `src/discovery/domain/orchestrator/safety_gate.py` 신규 작성. 자살/자해/극단적 위기 발화 감지 시 LLM 호출을 건너뛰고 0ms/0토큰으로 페르소나별 공감 + 상담전화(109 자살예방, 1577-0199 정신건강, 1588-9191 생명의전화) 즉시 반환. `CLIAR-208` 원칙의 명시적 안전 예외로 `.harness/DECISIONS.md`에 기록. `test_safety_gate.py` 단위 테스트 19건 추가.
+  - **Task 4 (결정론적 입력 게이트 및 공백 방어)**: `src/discovery/api/schemas/chat.py`의 `ChatRequest.message`에 `@field_validator` 추가(공백 전용 입력 422 거부). `src/discovery/domain/orchestrator/input_gate.py` 신규 작성(자모 단독 `ㅁㄴㅇㄹ`, 숫자만 `12345`, 이모지만 `😊📚` 감지 시 LLM 미경유 즉각 되묻기 멘트 반환). `test_input_gate.py` 단위 테스트 23건 추가.
+  - **Task 5 (미커버 P1 12건 회귀 확인)**: 라우팅(서재/외부/사서), `switch_to`, `signals`, 세션 유지/격리, 좌표, 번역, 환각 방지 등 P1 12건 전원 통과 확인.
+  - **Task 6 (검증 및 문서 동기화)**: 정적 분석(`ruff`, `mypy`) 100% 통과, 단위 테스트 총 196건 전체 통과. `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/DECISIONS.md`, `.harness/HANDOFF.md` 동기화 완료.
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 `CLIAR-215` 작업 파일들 커밋 생성 (`[CLIAR-215]` 태그, push 전 변경 파일/diff 제시).
+2. develop 대상 PR 생성 및 머지.
+3. **`CLIAR-171` (출력 토큰 중복 제거 및 Bedrock 프로필 튜닝) 착수**:
+   - `develop`에서 `CLIAR-171-Bedrock-Tuning` 브랜치 분기.
+   - Task 1-0: `search_books` 결과 페이로드 축소(Tavily raw_content 등 거대 필드 제거로 입력 16,769토큰 급감).
+   - Task 1: 오케스트레이터 프롬프트 축소 및 카드 마크다운 서비스 레이어 splice.
+   - Task 2 & 3: 리전/추론 프로필 비교 및 파라미터 튜닝.
+
+
+## 2026-09-02 — QA 19번(위조 JWT) 401 미전달 결함 수정
+- **발견**: 다른 세션이 CLIAR-215 Task 2(인증 Presence Check) 구현을 완료 보고했으나, 실제 서버 재기동 후 실측 검증한 결과 위조 토큰(QA 19번)이 여전히 200을 반환하는 결함을 발견했다. 로그로 확인한 결과 `backend-book`(dev, ELB URL)은 위조 토큰에 정확히 401을 반환하고 있었으나, `library_tool.py`의 `search()`가 200이 아닌 모든 응답(401 포함)을 `logger.warning` + 빈 리스트로 흡수해 discovery가 조용히 200으로 위장했다. "로컬 테스트라서" 또는 "다른 서버라서" 발생한 문제가 아니라 코드 로직 자체의 결함임을 로그로 직접 증명함(`Library API response status: 401` → `WARNING ... returned status 401` → 빈 리스트).
+- **수정**: 예외를 도구(`@tool`) 실행 경로로 직접 전파하지 않고 콜백 패턴(`on_auth_failed`)으로 서비스 레이어에 신호를 전달하는 방식을 선택했다. LLM 에이전트 루프(`agent.invoke_async`)의 `except Exception`이 예외를 흡수해 fallback 메시지로 뭉갤 위험이 있어, 이미 있는 `on_books_fetched` 콜백과 같은 패턴을 재사용함.
+  - `library_tool.py`: `LibraryAuthError` 예외 클래스 신설. `search()`가 401 응답 시 이 예외를 발생(200 외 다른 상태코드는 기존처럼 빈 리스트로 흡수 유지). `as_tool()`이 이를 잡아 `on_auth_failed` 콜백을 호출하고 LLM에는 안전한 안내 문구를 반환(LLM 흐름 유지).
+  - `orchestrator_service.py`: `_build_agent`에 `on_auth_failed` 파라미터 추가. `chat()`은 `agent.invoke_async` 완료 후 플래그가 세워졌으면 `LibraryAuthError`를 다시 던져 라우터가 401로 변환할 수 있게 함. `stream_chat()`은 `StreamingResponse`가 이미 200 헤더를 확정한 뒤라 상태 코드 전달이 구조적으로 불가능 — 로그만 남기고 도구가 반환한 안내 문구가 본문에 자연스럽게 포함되게 둠(동기/스트리밍 간 의도적 비대칭, 코드 주석으로 명시).
+  - `chat.py`: `LibraryAuthError`를 잡아 `HTTPException(401, detail="Library API authentication failed")`로 변환. 401 응답 스펙 설명 갱신.
+  - 단위 테스트 4건 추가: `test_library_tool.py`(401→예외 발생, `on_auth_failed` 콜백 호출) 2건, `test_orchestrator_service.py`(`chat()`이 `LibraryAuthError` 재전파) 1건, `test_chat_router.py`(라우터가 401로 변환) 1건.
+- **실측 검증(서버 재기동 후)**: 헤더 없음 401, 빈 헤더 401, **위조 토큰 401(신규 해결)**, 정상 인사 200(회귀 없음), 정상 토큰 도서 추천 200(401 오발생 없음) 모두 확인. 정적 분석 100%, 단위 테스트 200건(신규 4건 포함) 통과.
+- **ADR 0007 정합성**: 2.2절("서명/만료 검증은 backend-book 호출 시 해당 서비스의 응답(401)을 통해 전달받아 처리한다")이 이제 동기(chat) 경로에서는 실제로 지켜진다. 스트리밍 경로의 구조적 비대칭은 ADR에 추가 명시가 필요할 수 있음(다음 세션에서 ADR 본문에 반영 여부 검토).
+
+### 다음 세션이 할 일
+1. **ADR 0007에 스트리밍 경로 비대칭 명시**: 동기(chat)는 401 전달 가능, 스트리밍(stream=true)은 `StreamingResponse`가 200 헤더를 먼저 확정해 구조적으로 401 전달이 불가능하다는 점을 ADR 본문에 추가할지 검토.
+2. **Task 5(미커버 P1 12건 대조) 재확인 필요**: 다른 세션이 "전원 통과 확인 완료"로 보고했으나, 그 보고 시점이 이번 401 수정 이전이었다. `scripts/qa_runner.py`로 QA 19번을 포함해 재실측하거나, 최소한 인증 관련 케이스만 재확인할 것.
+3. Task 6(문서 동기화)에 이번 수정사항을 반영해 `STATE.md`/`DECISIONS.md` 최종 정리.
+4. 커밋은 아직 생성되지 않았다. `.gitignore`/`main.py`/`deps.py`/`chat.py`/`orchestrator_service.py`/`library_tool.py`/`openapi.yaml` 등 다수 파일이 unstaged 상태 — Task 단위로 나눠 `[CLIAR-215]` 태그로 커밋할 것.
+
+
+## 2026-09-02 — Task 5(P1 12건) 401 수정 후 재실측 및 테스트 환경 한계 확인
+- 다른 세션이 "Task 5(P1 12건) 전원 통과"로 보고했으나, 그 근거였던 실측 파일(`qa_run_20260902-001649.jsonl`)은 **Task 2(401 검증) 구현 이전** 시점에 생성된 것이었다. 실제로 그 파일의 `인증`/`인증-헤더없음`/`인증-위조토큰` 케이스는 전부 200으로 찍혀 있어, "정상 확인"이 아니라 정확히 우리가 나중에 고친 결함의 증거였다. 이 오래된 데이터를 근거로 Task 5를 완료 처리하는 것은 위험하다고 판단해 401 수정 반영 후 재실측했다.
+- **재실측 결과 (`qa_run_20260902-104637.jsonl`, `--auth-token "Bearer test-token"`)**: P1 16건 중 14건 정상(200 또는 의도된 401/422), 인증 2건(헤더없음/위조토큰) 모두 의도대로 401.
+- **새로 발견한 테스트 환경 한계 (결함 아님)**: `라우팅-서재검색`("내 서재에 있는 미스터리 책 찾아줘")이 401을 받았다. 원인은 QA 러너가 쓰는 `test-token`이 실제로 유효한 JWT가 아니라서 `backend-book`이 이걸 위조 토큰과 동일하게 401 처리하기 때문이다(로그로 확인: `Library API response status: 401`). **이건 방금 고친 401 전달 로직이 의도대로 정확히 동작한다는 증거**이지 버그가 아니다. 서재 조회가 필요한 QA 케이스(라우팅-서재검색 등)는 로컬 환경에 실제 로그인 세션의 진짜 JWT가 없어 이 이상 검증할 방법이 없다 — **실제 로그인된 사용자 토큰으로 dev/QA 환경에서 재검증이 필요**하다.
+- 안전 게이트/입력 게이트가 LLM을 완전히 우회함을 레이턴시로도 재확인(`안전성` 8ms, `엣지 케이스` 자모/숫자/이모지 8~10ms — 기존 6~15초대에서 극적으로 단축).
+
+### 다음 세션이 할 일 (Task 5 마무리 조건)
+1. `docs/api/decisions/0007-*.md`에 위 테스트 환경 한계(로컬 검증에서 서재 API 관련 케이스는 진짜 JWT 없이 완전 검증 불가)를 기록할지 검토.
+2. 실제 프론트엔드 로그인 플로우 또는 `backend-book` 팀에서 발급받은 유효 JWT로 `라우팅-서재검색`, `signals-날씨반영`(서재 연계) 등을 dev 환경에서 별도 재검증하는 것을 백로그로 남길 것.
+3. 위 사항을 감안해 Task 5는 "로컬에서 검증 가능한 범위 내 전원 정상, 서재 API 연동 케이스는 dev 실제 로그인 세션 검증 필요"로 정정하여 STATE.md에 기록.
