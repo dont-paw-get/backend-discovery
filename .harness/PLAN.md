@@ -11,7 +11,8 @@ CLIAR-171과 CLIAR-216이 `src/discovery/domain/orchestrator/agent.py`의 같은
 | 2 | **CLIAR-215** (QA기반 최적화a) | ✅ **완료** — Task 1(실측 러너 및 실측 완료)·Task 2(인증 Presence Check, 401, ADR 0007)·Task 3(위기 109 핫라인 게이트)·Task 4(공백 422 및 입력 게이트)·Task 5(P1 회귀 확인)·Task 6(단위 테스트 196건 통과) | 없음 |
 | 3 | **CLIAR-171** | ✅ **완료** — Task 1-0(search_books 페이로드 축소) + Task 1(오케스트레이터 카드 재생성 제거 및 splice 결합) + Task 2(리전/프로필 비교) + Task 3(추론 파라미터 튜닝) | CLIAR-215 완료 |
 | 4 | **CLIAR-229** | ✅ **완료** — 도서 추천 카드 구조화 필드(`RecommendedBookCard`, 저자/쪽수 분리) + 출력 HTML 태그 노출 방어(`sanitize_html_tags`) | CLIAR-171 완료 |
-| 5 | **CLIAR-216** (QA기반 최적화b) | 🔄 **다음 착수 대상** — 공통 가드레일 리팩터 + 안전·엣지·환각·감정 프롬프트 고도화. 블루 스위치 후 서재 오분류(미재현) 엣지 케이스를 이 티켓 Task 2에 편입 | CLIAR-229 완료 |
+| 5 | **CLIAR-236** | ✅ **완료** — 고도화 후 자잘한 버그 수정: Claude Sonnet 5 도구 호출 포맷 붕괴(assistant message prefill ValidationException) 방어 재시도 로직 (`is_tool_call_format_error`, chat/stream_chat 1회 재시도 배선, 단위 테스트 6건) | CLIAR-229 완료 |
+| 6 | **CLIAR-216** (QA기반 최적화b) | 🔄 **다음 착수 대상** — 공통 가드레일 리팩터 + 안전·엣지·환각·감정 프롬프트 고도화. 블루 스위치 후 서재 오분류(미재현) 엣지 케이스를 이 티켓 Task 2에 편입 | CLIAR-236 완료 |
 
 순서 근거: (1) CLIAR-158은 충돌 대상이 없는 순손실 제거이고 계측 기반이 이후 티켓의 판단 근거가 된다. (2) CLIAR-171이 프롬프트를 줄인 뒤에 CLIAR-216이 확장해야 재작업과 회귀 원인 혼선을 피할 수 있다. (3) CLIAR-215는 P1 안전성·인증 공백을 다루지만 구현 위치가 입력 게이트 코드와 `api/deps.py`라 프롬프트와 충돌하지 않아 앞으로 당겼다. 계획 확정 시 이 근거를 `.harness/DECISIONS.md`에 기록했다.
 
@@ -50,7 +51,35 @@ Task 1(계측 모듈 & 개인정보 화이트리스트 필터링), Task 2-1(tail
 
 ---
 
-### [상세 계획 수립 대상] CLIAR-216: QA 데이터셋 기반 가드레일 및 프롬프트 고도화 (CLIAR-229 완료 후 착수)
+### [완료] CLIAR-236: 고도화 후 자잘한 버그 수정 (Claude Sonnet 5 도구 호출 포맷 붕괴 방어 재시도)
+
+브랜치: `CLIAR-236-Post-Optimization-Bug-Fixes` (`develop`에서 분기)
+
+**배경 (2026-09-02 dev 재현 및 로그 실측)**: CLIAR-171/CLIAR-229 배포 후 dev에서 슈빌(stork) 모드로 "명탐정 코난 추천해줘" 요청 → `switch_to`로 블루(cat)로 전환 제안 → 사용자가 전환 → 다음 요청("명탐정 코난 가장 유명한 에피소드 추천해줘" 계열, 3번째 `consult_librarian` 재호출 사이클)에서 다음 에러로 실패, 사서 fallback 문구("냥냥... 통신 연결이 잠시 끊겼다냥")가 노출됨:
+
+```
+ValidationException: The model returned the following errors: This model does not
+support assistant message prefill. The conversation must end with a user message.
+```
+
+**근본 원인**: `kubectl logs`로 실제 스트림 원문을 확인한 결과, Claude Sonnet 5가 `recommend_books` 도구를 호출할 때 정상적인 Bedrock Converse `toolUse` 콘텐츠 블록이 아니라 **XML 텍스트를 그대로 assistant 텍스트로 출력**했다(`<invoke name="recommend_books"><parameter name="query">...</parameter></invoke>`). Strands가 이를 tool_use로 인식하지 못해 다음 사이클에서 정상적인 user 응답(toolResult)이 이어지지 못하고 대화가 assistant로 끝난 상태가 되어 Bedrock이 검증 오류로 거부했다. `temperature`/`top_p` 파라미터를 완전히 제거(CLIAR-171 핫픽스, PR #34/#35)한 이후 Bedrock 기본 샘플링값을 쓰게 된 것이 이 포맷 붕괴 빈도에 영향을 줬을 가능성이 있으나(Sonnet 5는 두 파라미터 모두 미지원이라 되돌릴 수 없음), 확정된 인과관계는 아니며 모델의 확률적 오류로 간주한다.
+
+- [x] **Task 1: `chat`/`stream_chat`에 도구 호출 포맷 붕괴 재시도 로직 추가**
+  - [x] `ValidationException` 메시지에 "assistant message prefill" 또는 "must end with a user message"가 포함된 경우를 식별하는 헬퍼(`is_tool_call_format_error`, `TOOL_CALL_FORMAT_ERROR_PATTERNS`) 신설
+  - [x] 해당 예외가 감지되면, 오염된 `agent.messages`를 재사용하지 않고 **새 `Agent`를 세션 히스토리 기준으로 처음부터 재생성**하여 1회 재시도
+  - [x] 재시도도 실패하면 기존과 동일하게 `get_llm_fallback_message`로 폴백 (무한 재시도 방지, 최대 1회로 제한)
+  - [x] `chat`(동기)과 `stream_chat`(스트리밍) 양쪽에 동일 패턴 적용. 스트리밍은 첫 청크가 이미 전송된 이후 실패할 경우 재시도가 부분 응답과 섞이지 않도록 주의(첫 청크 전송 전 실패 시에만 재시도, 이미 청크가 나간 뒤에는 기존처럼 fallback chunk를 append)
+- [x] **Task 2: 재현 및 회귀 테스트**
+  - [x] `agent.invoke_async` 및 `agent.stream_async`가 특정 예외를 던지도록 mock하여 재시도 경로(성공/재시도 후 실패/TTFB 후 미재시도) 단위 테스트 6건 작성
+  - [x] 기존 `[BEDROCK_FALLBACK]` 관련 테스트 회귀 확인
+- [x] **Task 3: 검증 및 문서 동기화**
+  - [x] 정적 분석(`ruff`, `mypy`) 및 전체 단위 테스트(232건) 100% 통과
+  - [x] `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료
+  - [ ] **(dev 배포 후 후속 실측)**: dev 배포 후 동일 시나리오(사서 전환 후 연속 도구 호출) 재현 시 `[FORMAT_COLLAPSE_RETRY]` 로그 및 `format_retry_triggered` 메트릭 발생 여부 실측 확인, Bedrock 예외 메시지 문구 변동 모니터링
+
+---
+
+### [상세 계획 수립 대상] CLIAR-216: QA 데이터셋 기반 가드레일 및 프롬프트 고도화 (CLIAR-236 완료 후 착수)
 
 브랜치: `CLIAR-216-Prompt-Guardrails` (CLIAR-171 머지 후 `develop`에서 분기)
 
