@@ -23,7 +23,6 @@ def test_create_librarian_agent_uses_configured_model_id(
         model_id=CLAUDE_SONNET_5_MODEL_ID,
         region_name=None,
         max_tokens=1536,
-        top_p=0.9,
     )
 
 
@@ -36,7 +35,6 @@ def test_create_librarian_agent_passes_region_name(mocker: MockerFixture) -> Non
         model_id=CLAUDE_SONNET_5_MODEL_ID,
         region_name="us-east-1",
         max_tokens=1536,
-        top_p=0.9,
     )
 
 
@@ -53,7 +51,6 @@ def test_create_librarian_agent_with_prompt_caching(mocker: MockerFixture) -> No
         model_id=CLAUDE_SONNET_5_MODEL_ID,
         region_name="us-east-1",
         max_tokens=1536,
-        top_p=0.9,
         cache_config=CacheConfig(strategy="auto"),
         cache_tools="default",
     )

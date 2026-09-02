@@ -167,7 +167,6 @@ def create_orchestrator_agent(
     system_prompt: str | None = None,
     enable_prompt_caching: bool = False,
     max_tokens: int = 1024,
-    top_p: float = 0.9,
 ) -> Agent:
     """오케스트레이터 에이전트를 생성한다.
 
@@ -180,14 +179,17 @@ def create_orchestrator_agent(
         system_prompt: 명시적 시스템 프롬프트. None이면 librarian_id에 맞는 전용 프롬프트 주입.
         enable_prompt_caching: Bedrock 자동 프롬프트 캐싱 활성화 여부.
         max_tokens: 최대 출력 토큰 수 (서두 멘트 및 도구 라우팅에 최적화된 1024).
-        top_p: 누적 확률 샘플링 상한 (0.9). `temperature`는 Claude Sonnet 5에서
-            deprecated되어 Bedrock이 ValidationException을 반환하므로 사용하지 않는다.
+
+    Note:
+        `temperature`와 `top_p`는 Claude Sonnet 5에서 둘 다 deprecated되어
+        Bedrock이 ValidationException을 반환하므로 어느 것도 전달하지 않는다
+        (dev 실측으로 확인: `temperature` deprecated 확인 후 `top_p`만 남겼다가
+        재차 `top_p` deprecated 에러가 발생함).
     """
     model_kwargs: dict[str, Any] = {
         "model_id": model_id,
         "region_name": region_name,
         "max_tokens": max_tokens,
-        "top_p": top_p,
     }
     if enable_prompt_caching:
         model_kwargs["cache_config"] = CacheConfig(strategy="auto")
