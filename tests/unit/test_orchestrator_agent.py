@@ -25,7 +25,9 @@ def test_create_orchestrator_agent_uses_configured_model_id(
     bedrock_model_cls.assert_called_once_with(
         model_id=CLAUDE_SONNET_5_MODEL_ID,
         region_name=None,
-        max_tokens=2048,
+        max_tokens=1024,
+        temperature=0.5,
+        top_p=0.9,
     )
 
 
@@ -37,7 +39,9 @@ def test_create_orchestrator_agent_passes_region_name(mocker: MockerFixture) -> 
     bedrock_model_cls.assert_called_once_with(
         model_id=CLAUDE_SONNET_5_MODEL_ID,
         region_name="us-east-1",
-        max_tokens=2048,
+        max_tokens=1024,
+        temperature=0.5,
+        top_p=0.9,
     )
 
 
@@ -53,7 +57,9 @@ def test_create_orchestrator_agent_with_prompt_caching(mocker: MockerFixture) ->
     bedrock_model_cls.assert_called_once_with(
         model_id=CLAUDE_SONNET_5_MODEL_ID,
         region_name="us-east-1",
-        max_tokens=2048,
+        max_tokens=1024,
+        temperature=0.5,
+        top_p=0.9,
         cache_config=CacheConfig(strategy="auto"),
         cache_tools="default",
     )
@@ -108,7 +114,7 @@ def test_orchestrator_system_prompt_contains_rules() -> None:
     assert "서재 안내" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "### 📚" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "위임" in ORCHESTRATOR_SYSTEM_PROMPT
-    assert "count" in ORCHESTRATOR_SYSTEM_PROMPT or "권수" in ORCHESTRATOR_SYSTEM_PROMPT
+    assert "카드 본문 재작성 절대 금지" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "사서 분석 정보" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "과잉 사과 금지" in ORCHESTRATOR_SYSTEM_PROMPT
 

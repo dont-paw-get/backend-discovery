@@ -479,6 +479,81 @@ async def test_orchestrator_service_stream_chat_appends_tool_result_when_intro_o
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_service_chat_splices_recommendation_card_when_intro_only(
+    mocker: MockerFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = MagicMock()
+    mock_result = MagicMock()
+    mock_result.message = {
+        "role": "assistant",
+        "content": [{"text": "오늘 날씨에 딱 맞는 책을 골라봤다냥! 🐾"}],
+    }
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mock_agent.messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "toolResult": {
+                        "content": [
+                            {
+                                "text": (
+                                    "### 📖 불편한 편의점\n"
+                                    "- **저자**: 김호연 (268쪽)\n"
+                                    "- **추천 이유**: 따뜻한 위로를 주는 소설입니다."
+                                )
+                            }
+                        ],
+                    }
+                }
+            ],
+        }
+    ]
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+    )
+
+    response, switch_to, signals, library_books = await service.chat(
+        session_id="sess-splice-rec",
+        message="책 추천해줘",
+    )
+
+    expected = (
+        "오늘 날씨에 딱 맞는 책을 골라봤다냥! 🐾\n\n"
+        "### 📖 불편한 편의점\n"
+        "- **저자**: 김호연 (268쪽)\n"
+        "- **추천 이유**: 따뜻한 위로를 주는 소설입니다."
+    )
+    assert response == expected
+    assert "### 📖 불편한 편의점" in response
+    mock_session_store.append_turn.assert_has_awaits(
+        [
+            mocker.call("sess-splice-rec", {"role": "user", "content": "책 추천해줘"}),
+            mocker.call("sess-splice-rec", {"role": "assistant", "content": expected}),
+        ]
+    )
+
+
+@pytest.mark.asyncio
 async def test_orchestrator_service_chat_with_library_tool(mocker: MockerFixture) -> None:
     from discovery.domain.orchestrator.library_response import LibraryBookItem
 
