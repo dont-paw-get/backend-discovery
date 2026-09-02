@@ -7,6 +7,7 @@ from pytest_mock import MockerFixture
 from discovery.core.config import Settings
 from discovery.domain.orchestrator.library_response import LibraryBookItem
 from discovery.domain.orchestrator.tools.library_tool import (
+    LibraryAuthError,
     SearchMyLibraryTool,
     format_books_for_llm,
 )
@@ -149,6 +150,44 @@ async def test_search_http_error_graceful_fallback(
     tool = SearchMyLibraryTool(settings=settings, http_client=mock_client)
     res = await tool.search(query="테스트", auth_token="test-token")
     assert res == []
+
+
+@pytest.mark.asyncio
+async def test_search_401_raises_library_auth_error(
+    settings: Settings, mocker: MockerFixture
+) -> None:
+    """위조/만료된 토큰으로 backend-book이 401을 반환하면 조용히 흡수하지 않고
+    LibraryAuthError를 발생시킨다 (ADR 0007 2.2절)."""
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_resp = mocker.MagicMock(spec=httpx.Response)
+    mock_resp.status_code = 401
+    mock_resp.text = "Unauthorized"
+    mock_client.get.return_value = mock_resp
+
+    tool = SearchMyLibraryTool(settings=settings, http_client=mock_client)
+    with pytest.raises(LibraryAuthError):
+        await tool.search(query="테스트", auth_token="forged.invalid.token")
+
+
+@pytest.mark.asyncio
+async def test_as_tool_401_triggers_on_auth_failed_callback(
+    settings: Settings, mocker: MockerFixture
+) -> None:
+    """as_tool()이 LibraryAuthError를 잡아 on_auth_failed 콜백으로 전달하고,
+    LLM에는 안전한 안내 문구를 반환한다 (LLM 흐름을 깨지 않음)."""
+    tool = SearchMyLibraryTool(settings=settings)
+    mocker.patch.object(tool, "search", side_effect=LibraryAuthError("auth failed"))
+
+    auth_failed_holder: list[bool] = []
+
+    def on_auth_failed() -> None:
+        auth_failed_holder.append(True)
+
+    tool_fn = tool.as_tool(auth_token="forged.invalid.token", on_auth_failed=on_auth_failed)
+    result = await tool_fn(query="테스트")
+
+    assert auth_failed_holder == [True]
+    assert "인증" in result
 
 
 @pytest.mark.asyncio

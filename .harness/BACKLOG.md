@@ -3,6 +3,7 @@
 지금 하지 않지만 나중에 할 것.
 
 ## 기술 부채 / 후속 과제
+- [ ] **CLIAR-215 QA 케이스 중 서재 API 연동 항목(라우팅-서재검색, signals-날씨반영 등 내 서재 연계 추천) 재검증** — 로컬 검증 환경에는 유효한 JWT를 발급받을 방법이 없어 `qa_runner.py`가 쓰는 임의 토큰(`test-token`)도 `backend-book`이 401로 처리한다(2026-09-02 확인, 이는 CLIAR-215 Task 2에서 구현한 401 전달 로직이 정상 동작하는 증거이지 결함이 아님). 실제 프론트엔드 로그인 세션의 진짜 JWT 또는 `backend-book` 팀이 발급한 유효 토큰으로 dev 환경에서 재검증 필요.
 - [ ] Bedrock 모델 가용성 — Haiku 4.5/Sonnet 4 이상은 `kosa-edu-region-pol`로 전
   리전 차단 확인. Claude 3 Haiku, Claude 3.5 Sonnet은 사용 가능 확인됨. 현재
   기본값은 Haiku, 필요 시 Sonnet 3.5로 특정 기능 업그레이드 검토.

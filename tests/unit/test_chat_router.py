@@ -33,6 +33,7 @@ async def test_chat_json_response() -> None:
                     "latitude": 37.5665,
                     "longitude": 126.9780,
                 },
+                headers={"Authorization": "Bearer test-token-123"},
             )
 
         assert response.status_code == 200
@@ -48,7 +49,7 @@ async def test_chat_json_response() -> None:
             librarian_id=None,
             latitude=37.5665,
             longitude=126.9780,
-            auth_token=None,
+            auth_token="Bearer test-token-123",
         )
     finally:
         app.dependency_overrides.clear()
@@ -152,6 +153,7 @@ async def test_chat_json_response_with_switch_to() -> None:
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": "sess-test-stork", "message": "시 읽고 싶어"},
+                headers={"Authorization": "Bearer token-1"},
             )
 
         assert response.status_code == 200
@@ -177,6 +179,7 @@ async def test_chat_generates_session_id_if_empty() -> None:
             response = await client.post(
                 "/api/v1/chat",
                 json={"message": "질문"},
+                headers={"Authorization": "Bearer token-1"},
             )
 
         assert response.status_code == 200
@@ -199,6 +202,7 @@ async def test_chat_accepts_null_session_id() -> None:
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": None, "message": "질문"},
+                headers={"Authorization": "Bearer token-1"},
             )
 
         assert response.status_code == 200
@@ -255,6 +259,7 @@ async def test_chat_streaming_response() -> None:
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": "sess-stream-1", "message": "질문", "stream": True},
+                headers={"Authorization": "Bearer token-1"},
             )
 
         assert response.status_code == 200
@@ -293,6 +298,7 @@ async def test_chat_streaming_response_falls_back_to_local_signals_when_prefetch
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": "sess-stream-fallback", "message": "안녕", "stream": True},
+                headers={"Authorization": "Bearer token-1"},
             )
 
         assert response.status_code == 200
@@ -305,7 +311,6 @@ async def test_chat_streaming_response_falls_back_to_local_signals_when_prefetch
         app.dependency_overrides.clear()
 
 
-
 @pytest.mark.asyncio
 async def test_chat_validation_error_on_empty_message() -> None:
     mock_service = MagicMock()
@@ -316,6 +321,7 @@ async def test_chat_validation_error_on_empty_message() -> None:
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": "sess-1", "message": ""},
+                headers={"Authorization": "Bearer token-1"},
             )
 
         assert response.status_code == 422
@@ -335,6 +341,7 @@ async def test_chat_validation_accepts_up_to_2000_chars() -> None:
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": "sess-long-2000", "message": long_message},
+                headers={"Authorization": "Bearer token-1"},
             )
 
         assert response.status_code == 200
@@ -355,6 +362,7 @@ async def test_chat_validation_error_on_exceeding_2000_chars() -> None:
             response = await client.post(
                 "/api/v1/chat",
                 json={"session_id": "sess-too-long", "message": too_long_message},
+                headers={"Authorization": "Bearer token-1"},
             )
 
         assert response.status_code == 422
@@ -373,7 +381,7 @@ async def test_cors_expose_headers_configured() -> None:
             response = await client.post(
                 "/api/v1/chat",
                 json={"message": "안녕"},
-                headers={"Origin": "http://localhost:5173"},
+                headers={"Origin": "http://localhost:5173", "Authorization": "Bearer token-1"},
             )
 
         assert response.status_code == 200
@@ -383,6 +391,70 @@ async def test_cors_expose_headers_configured() -> None:
         assert "X-Signals" in exposed_list
         assert "X-Switch-To" in exposed_list
         assert "X-Library-Books" in exposed_list
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_chat_requires_authorization_header_missing_returns_401() -> None:
+    mock_service = MagicMock()
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={"message": "책 추천해줘"},
+            )
+
+        assert response.status_code == 401
+        data = response.json()
+        assert data["detail"] == "Authorization header is required"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_chat_requires_authorization_header_empty_returns_401() -> None:
+    mock_service = MagicMock()
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={"message": "책 추천해줘"},
+                headers={"Authorization": "   "},
+            )
+
+        assert response.status_code == 401
+        data = response.json()
+        assert data["detail"] == "Authorization header is required"
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_chat_returns_401_when_library_api_rejects_forged_token() -> None:
+    """위조/만료된 토큰으로 backend-book이 401을 반환하면 discovery도 401을 전달한다."""
+    from discovery.domain.orchestrator.tools.library_tool import LibraryAuthError
+
+    mock_service = MagicMock()
+    mock_service.chat = AsyncMock(side_effect=LibraryAuthError("Library API authentication failed"))
+
+    app.dependency_overrides[get_orchestrator_service] = lambda: mock_service
+
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/api/v1/chat",
+                json={"session_id": "sess-forged", "message": "내 서재에 있는 책 알려줘"},
+                headers={"Authorization": "Bearer forged.invalid.token"},
+            )
+
+        assert response.status_code == 401
+        data = response.json()
+        assert data["detail"] == "Library API authentication failed"
     finally:
         app.dependency_overrides.clear()
 

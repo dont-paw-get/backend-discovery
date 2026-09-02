@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from fastapi import Depends, Request
+from fastapi import Depends, Header, HTTPException, Request, status
 from tavily import AsyncTavilyClient
 
 from discovery.application.genre_classifier_service import GenreClassifierService
@@ -24,6 +24,21 @@ def get_now() -> datetime:
     AGENTS.md 테스트 원칙: 제어 불가능한 값(현재 시각)은 DI로 받아 결정론적으로 테스트한다.
     """
     return datetime.now(UTC)
+
+
+def require_authorization_header(
+    authorization: str | None = Header(default=None, alias="Authorization"),
+) -> str:
+    """Authorization 헤더 존재 검증 (Presence Check).
+
+    헤더가 누락되었거나 공백만 있는 경우 401 Unauthorized 예외를 발생시킨다.
+    """
+    if not authorization or not authorization.strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header is required",
+        )
+    return authorization.strip()
 
 
 def get_chat_session_store(request: Request) -> ChatSessionStore:

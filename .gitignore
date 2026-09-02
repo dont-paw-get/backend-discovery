@@ -10,3 +10,7 @@ __pycache__/
 .uv_cache/
 .uv/
 
+
+
+# CLIAR-215 QA 실측 러너 결과 (재실행마다 생성, 커밋 대상 아님)
+scripts/qa_results/
