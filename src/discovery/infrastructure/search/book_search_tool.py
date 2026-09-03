@@ -12,6 +12,7 @@
    원인은 로그로만 남긴다.
 """
 
+import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -20,10 +21,15 @@ from typing import Any
 from strands import tool
 from tavily import AsyncTavilyClient
 
+from discovery.core.cloudwatch_metrics import CloudWatchMetricsPublisher
 from discovery.infrastructure.search.result_cache import SearchResultCache
 from discovery.infrastructure.search.usage_limiter import SearchUsageLimiter
 
 logger = logging.getLogger(__name__)
+
+# CLIAR-276: fire-and-forget 캐시 이벤트 발행 태스크가 완료 전 GC로 취소되지 않도록
+# 강한 참조를 유지한다(orchestrator_service.py의 동일 패턴 참고).
+_background_cache_event_tasks: set[asyncio.Task[None]] = set()
 
 TAVILY_SEARCH_DEPTH = "basic"  # advanced는 절대 쓰지 않는다(크레딧 2배 소모).
 NO_RESULTS: list[dict[str, Any]] = []
@@ -68,11 +74,34 @@ class BookSearchTool:
         usage_limiter: SearchUsageLimiter,
         *,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
+        cloudwatch_publisher: CloudWatchMetricsPublisher | None = None,
     ) -> None:
         self._tavily_client = tavily_client
         self._cache = cache
         self._usage_limiter = usage_limiter
         self._now = now
+        self._cloudwatch_publisher = cloudwatch_publisher
+
+    def _publish_cache_event(self, *, hit: bool) -> None:
+        """CLIAR-276: 검색 캐시 히트/미스 1건을 CloudWatch에 fire-and-forget으로 발행한다.
+
+        `cloudwatch_publisher`가 없거나 비활성이면 아무 것도 하지 않는다(기존 동작 무변화).
+        """
+        publisher = self._cloudwatch_publisher
+        if publisher is None:
+            return
+
+        async def _publish() -> None:
+            try:
+                await publisher.publish_search_cache_event(hit=hit)
+            except Exception:
+                logger.warning(
+                    "[CLOUDWATCH_METRICS] Failed to publish search cache event", exc_info=True
+                )
+
+        task = asyncio.create_task(_publish())
+        _background_cache_event_tasks.add(task)
+        task.add_done_callback(_background_cache_event_tasks.discard)
 
     async def search_books(self, query: str) -> list[dict[str, Any]]:
         """자연어 질의로 도서 후보를 웹에서 검색한다.
@@ -84,7 +113,9 @@ class BookSearchTool:
         """
         cached = await self._cache.get(query)
         if cached is not None:
+            self._publish_cache_event(hit=True)
             return cached
+        self._publish_cache_event(hit=False)
 
         now = self._now()
         if await self._usage_limiter.is_limit_exceeded(now=now):

@@ -4,6 +4,7 @@ AGENTS.md 테스트 원칙: 반환값을 우선 검증한다. Tavily 실제 호�
 (AsyncTavilyClient 자체를 mocker로 대체).
 """
 
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -247,3 +248,64 @@ def test_as_tool_returns_strands_tool_with_search_books_name(mocker: MockerFixtu
 
     assert strands_tool.tool_spec["name"] == "search_books"
     assert "query" in strands_tool.tool_spec["inputSchema"]["json"]["properties"]
+
+
+
+# --- CLIAR-276: CloudWatch 검색 캐시 히트/미스 이벤트 발행 배선 검증 ---
+# `cloudwatch_publisher=None`(위 12건 전체)이 기존 동작 무변화를 이미 보증하므로,
+# 아래는 publisher가 주어졌을 때 정확히 hit/miss가 구분되어 발행되는지만 검증한다.
+
+
+@pytest.mark.asyncio
+async def test_search_books_publishes_cache_hit_event(mocker: MockerFixture) -> None:
+    tavily_client = mocker.AsyncMock()
+    cache = mocker.AsyncMock()
+    cache.get.return_value = [{"title": "캐시된 결과", "url": "", "content": ""}]
+    usage_limiter = mocker.AsyncMock()
+    publisher = mocker.MagicMock()
+    publisher.publish_search_cache_event = mocker.AsyncMock()
+
+    tool = BookSearchTool(
+        tavily_client, cache, usage_limiter, now=_fixed_now, cloudwatch_publisher=publisher
+    )
+
+    await tool.search_books("비 오는 날 소설")
+    await asyncio.sleep(0)
+
+    publisher.publish_search_cache_event.assert_awaited_once_with(hit=True)
+
+
+@pytest.mark.asyncio
+async def test_search_books_publishes_cache_miss_event(mocker: MockerFixture) -> None:
+    tavily_client = mocker.AsyncMock()
+    tavily_client.search.return_value = {"results": []}
+    cache = mocker.AsyncMock()
+    cache.get.return_value = None
+    usage_limiter = mocker.AsyncMock()
+    usage_limiter.is_limit_exceeded.return_value = False
+    publisher = mocker.MagicMock()
+    publisher.publish_search_cache_event = mocker.AsyncMock()
+
+    tool = BookSearchTool(
+        tavily_client, cache, usage_limiter, now=_fixed_now, cloudwatch_publisher=publisher
+    )
+
+    await tool.search_books("따뜻한 소설")
+    await asyncio.sleep(0)
+
+    publisher.publish_search_cache_event.assert_awaited_once_with(hit=False)
+
+
+@pytest.mark.asyncio
+async def test_search_books_without_publisher_does_not_raise(mocker: MockerFixture) -> None:
+    """cloudwatch_publisher=None이면 캐시 이벤트 발행 코드가 전혀 실행되지 않는다."""
+    tavily_client = mocker.AsyncMock()
+    cache = mocker.AsyncMock()
+    cache.get.return_value = [{"title": "캐시된 결과", "url": "", "content": ""}]
+    usage_limiter = mocker.AsyncMock()
+
+    tool = BookSearchTool(tavily_client, cache, usage_limiter, now=_fixed_now)
+
+    results = await tool.search_books("비 오는 날 소설")
+
+    assert results == [{"title": "캐시된 결과", "url": "", "content": ""}]

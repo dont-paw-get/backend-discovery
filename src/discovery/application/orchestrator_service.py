@@ -21,8 +21,10 @@ from discovery.application.librarian_service import (
     extract_chunk_from_event,
     format_history_for_strands,
 )
+from discovery.core.cloudwatch_metrics import CloudWatchMetricsPublisher
 from discovery.core.config import Settings
 from discovery.core.observability import log_agent_metrics
+from discovery.core.pricing import estimate_cost_usd
 from discovery.domain.librarian.post_processor import (
     extract_text_from_message,
     parse_recommended_books_from_markdown,
@@ -50,6 +52,10 @@ from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksToo
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
 
 logger = logging.getLogger(__name__)
+
+# CLIAR-276: asyncio.create_task로 던진 fire-and-forget 태스크가 완료 전에 GC되어
+# 예기치 않게 취소되는 것을 막기 위한 강한 참조 집합. 완료 시 콜백으로 스스로 제거한다.
+_background_tasks: set[asyncio.Task[None]] = set()
 
 # Bedrock Converse API에서 Claude 도구 호출 포맷 붕괴 시 발생하는 ValidationException 패턴
 TOOL_CALL_FORMAT_ERROR_PATTERNS: tuple[str, ...] = (
@@ -136,6 +142,49 @@ def _build_recommended_book_cards(response_text: str) -> list[RecommendedBookCar
     ]
 
 
+def _publish_cloudwatch_usage_metrics(
+    publisher: CloudWatchMetricsPublisher | None,
+    model_id: str,
+    metrics_summary: dict[str, Any] | None,
+) -> None:
+    """CLIAR-276: 요청 1건의 토큰 사용량을 CloudWatch에 비동기 fire-and-forget으로 발행한다.
+
+    기존 `log_agent_metrics`(구조화 로그) 호출과 완전히 독립적으로 동작한다 — 이 함수가
+    실패하거나 느려도 로그·응답 흐름에 영향을 주지 않는다. `publisher`가 `None`이거나
+    비활성(`enabled=False`)이면 즉시 반환한다(플래그 OFF 시 코드 경로 미실행).
+    """
+    if publisher is None or metrics_summary is None:
+        return
+    usage = metrics_summary.get("accumulated_usage")
+    if not isinstance(usage, dict):
+        return
+
+    input_tokens = int(usage.get("inputTokens", 0) or 0)
+    output_tokens = int(usage.get("outputTokens", 0) or 0)
+    cache_read_tokens = int(usage.get("cacheReadInputTokens", 0) or 0)
+    cache_write_tokens = int(usage.get("cacheWriteInputTokens", 0) or 0)
+    cost_usd = estimate_cost_usd(model_id, usage)
+
+    async def _publish() -> None:
+        try:
+            await publisher.publish_usage(
+                model_id=model_id,
+                cost_usd=cost_usd,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+            )
+        except Exception:
+            logger.warning("[CLOUDWATCH_METRICS] Failed to publish usage metrics", exc_info=True)
+
+    # fire-and-forget: 요청 응답 흐름을 기다리게 하지 않는다. 완료 전 GC로 취소되지
+    # 않도록 강한 참조를 유지하고, 완료 시 스스로 집합에서 제거한다.
+    task = asyncio.create_task(_publish())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 class OrchestratorService:
     """오케스트레이터 에이전트 대화 및 세션 관리를 총괄하는 서비스."""
 
@@ -147,6 +196,7 @@ class OrchestratorService:
         librarian_tool: ConsultLibrarianTool | None = None,
         library_tool: SearchMyLibraryTool | None = None,
         tools: list[Any] | None = None,
+        cloudwatch_publisher: CloudWatchMetricsPublisher | None = None,
     ) -> None:
         self._session_store = session_store
         self._settings = settings
@@ -154,6 +204,7 @@ class OrchestratorService:
         self._librarian_tool = librarian_tool
         self._library_tool = library_tool
         self._tools = tools or []
+        self._cloudwatch_publisher = cloudwatch_publisher
 
     def _build_agent(
         self,
@@ -455,6 +506,9 @@ class OrchestratorService:
             message_length=len(message),
             metrics_summary=orchestrator_metrics,
             direct_metrics=direct_metrics,
+        )
+        _publish_cloudwatch_usage_metrics(
+            self._cloudwatch_publisher, self._settings.orchestrator_model_id, orchestrator_metrics
         )
         return response_text, switch_to, signals, library_books, recommended_books
 
@@ -793,6 +847,9 @@ class OrchestratorService:
             message_length=len(message),
             metrics_summary=orchestrator_metrics,
             direct_metrics=direct_metrics_stream,
+        )
+        _publish_cloudwatch_usage_metrics(
+            self._cloudwatch_publisher, self._settings.orchestrator_model_id, orchestrator_metrics
         )
 
 
