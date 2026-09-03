@@ -4,7 +4,6 @@ AGENTS.md 테스트 원칙: 반환값을 우선 검증한다. Tavily 실제 호�
 (AsyncTavilyClient 자체를 mocker로 대체).
 """
 
-import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -270,7 +269,6 @@ async def test_search_books_publishes_cache_hit_event(mocker: MockerFixture) -> 
     )
 
     await tool.search_books("비 오는 날 소설")
-    await asyncio.sleep(0)
 
     publisher.publish_search_cache_event.assert_awaited_once_with(hit=True)
 
@@ -291,7 +289,6 @@ async def test_search_books_publishes_cache_miss_event(mocker: MockerFixture) ->
     )
 
     await tool.search_books("따뜻한 소설")
-    await asyncio.sleep(0)
 
     publisher.publish_search_cache_event.assert_awaited_once_with(hit=False)
 

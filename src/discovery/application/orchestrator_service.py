@@ -53,10 +53,6 @@ from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
 
 logger = logging.getLogger(__name__)
 
-# CLIAR-276: asyncio.create_task로 던진 fire-and-forget 태스크가 완료 전에 GC되어
-# 예기치 않게 취소되는 것을 막기 위한 강한 참조 집합. 완료 시 콜백으로 스스로 제거한다.
-_background_tasks: set[asyncio.Task[None]] = set()
-
 # Bedrock Converse API에서 Claude 도구 호출 포맷 붕괴 시 발생하는 ValidationException 패턴
 TOOL_CALL_FORMAT_ERROR_PATTERNS: tuple[str, ...] = (
     "assistant message prefill",
@@ -142,16 +138,22 @@ def _build_recommended_book_cards(response_text: str) -> list[RecommendedBookCar
     ]
 
 
-def _publish_cloudwatch_usage_metrics(
+async def _publish_cloudwatch_usage_metrics(
     publisher: CloudWatchMetricsPublisher | None,
     model_id: str,
     metrics_summary: dict[str, Any] | None,
 ) -> None:
-    """CLIAR-276: 요청 1건의 토큰 사용량을 CloudWatch에 비동기 fire-and-forget으로 발행한다.
+    """CLIAR-276: 요청 1건의 토큰 사용량을 CloudWatch에 발행한다.
 
     기존 `log_agent_metrics`(구조화 로그) 호출과 완전히 독립적으로 동작한다 — 이 함수가
-    실패하거나 느려도 로그·응답 흐름에 영향을 주지 않는다. `publisher`가 `None`이거나
+    실패해도 로그·응답 흐름에 영향을 주지 않는다(예외를 삼킨다). `publisher`가 `None`이거나
     비활성(`enabled=False`)이면 즉시 반환한다(플래그 OFF 시 코드 경로 미실행).
+
+    직접 `await`한다 — 내부 `publish_usage`는 `asyncio.to_thread`로 이미 별도 스레드에서
+    동작하므로 이벤트 루프를 블로킹하지 않는다. 이전에는 `asyncio.create_task`로
+    fire-and-forget 처리했으나, FastAPI 요청 처리 코루틴이 응답을 반환한 직후 종료되면서
+    던져둔 태스크가 실행 기회를 얻지 못하고 조용히 소실되는 문제가 dev 실측(2026-09-04)으로
+    확인되어 직접 대기 방식으로 전환했다.
     """
     if publisher is None or metrics_summary is None:
         return
@@ -165,24 +167,23 @@ def _publish_cloudwatch_usage_metrics(
     cache_write_tokens = int(usage.get("cacheWriteInputTokens", 0) or 0)
     cost_usd = estimate_cost_usd(model_id, usage)
 
-    async def _publish() -> None:
-        try:
-            await publisher.publish_usage(
-                model_id=model_id,
-                cost_usd=cost_usd,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cache_read_tokens=cache_read_tokens,
-                cache_write_tokens=cache_write_tokens,
-            )
-        except Exception:
-            logger.warning("[CLOUDWATCH_METRICS] Failed to publish usage metrics", exc_info=True)
-
-    # fire-and-forget: 요청 응답 흐름을 기다리게 하지 않는다. 완료 전 GC로 취소되지
-    # 않도록 강한 참조를 유지하고, 완료 시 스스로 집합에서 제거한다.
-    task = asyncio.create_task(_publish())
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    try:
+        await publisher.publish_usage(
+            model_id=model_id,
+            cost_usd=cost_usd,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+        )
+        logger.info(
+            "[CLOUDWATCH_METRICS] Published usage metrics (model=%s, input=%d, output=%d)",
+            model_id,
+            input_tokens,
+            output_tokens,
+        )
+    except Exception:
+        logger.warning("[CLOUDWATCH_METRICS] Failed to publish usage metrics", exc_info=True)
 
 
 class OrchestratorService:
@@ -507,7 +508,7 @@ class OrchestratorService:
             metrics_summary=orchestrator_metrics,
             direct_metrics=direct_metrics,
         )
-        _publish_cloudwatch_usage_metrics(
+        await _publish_cloudwatch_usage_metrics(
             self._cloudwatch_publisher, self._settings.orchestrator_model_id, orchestrator_metrics
         )
         return response_text, switch_to, signals, library_books, recommended_books
@@ -848,7 +849,7 @@ class OrchestratorService:
             metrics_summary=orchestrator_metrics,
             direct_metrics=direct_metrics_stream,
         )
-        _publish_cloudwatch_usage_metrics(
+        await _publish_cloudwatch_usage_metrics(
             self._cloudwatch_publisher, self._settings.orchestrator_model_id, orchestrator_metrics
         )
 
