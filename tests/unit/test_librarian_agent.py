@@ -121,3 +121,16 @@ def test_get_librarian_system_prompt_by_librarian_id() -> None:
     stork_prompt = get_librarian_system_prompt("stork")
     assert "슈빌" in stork_prompt
     assert "고양이 말투는 사용하지 않습니다" in stork_prompt
+
+
+def test_librarian_prompts_discourage_none_genre_fallback() -> None:
+    """CLIAR-244: 장르를 NONE으로 도피하지 말고 16개 중 반드시 1개를 고르도록 유도한다."""
+    from discovery.domain.librarian.agent import (
+        get_librarian_system_prompt,
+    )
+
+    for librarian_id in ("cat", "stork"):
+        prompt = get_librarian_system_prompt(librarian_id)
+        # 반드시 1개 선택 + NONE 남발 억제 지침이 양쪽 프롬프트에 존재해야 한다.
+        assert "반드시 선택" in prompt
+        assert "NONE으로 도피하지" in prompt
