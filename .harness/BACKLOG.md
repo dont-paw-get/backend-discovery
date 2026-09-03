@@ -3,6 +3,12 @@
 지금 하지 않지만 나중에 할 것.
 
 ## 기술 부채 / 후속 과제
+- [ ] **도서 등록 후 추천 결과 유지 및 세션 히스토리 영속화 (방향 확정, 착수 대기)**:
+  - **현상**: 추천 도서 1권 이상을 받고 [등록하기] 화면으로 이동하거나 취소 복귀 시, 대화창 상태가 소실되어 AI에게 20~40초씩 걸려 다시 검색해야 하는 UX 불편.
+  - **단기 권장 (프론트엔드)**: `RegisterBook` 라우팅 이동 시 `sessionStorage` 또는 전역 상태에 대화 상태/메시지를 보존하여 복귀 시 레이턴시 0ms로 즉시 복원 (다른 작업 완료 후 진행).
+  - **중장기 확장 (백엔드)**: 브라우저 새로고침/재접속 영속성 요구 시 (a) `GET /api/v1/chat/history` 조회 엔드포인트 신설, (b) `ChatSessionStore.append_turn` 세션 턴 스키마에 구조화 필드(`recommended_books`, `library_books`, `switch_to`, `signals`) 저장 확장, (c) 스트리밍 제너레이터 종료 시점에 구조화 카드 파싱 및 저장 배선을 세트로 구현하여 CLIAR-229 회귀 방지.
+- [ ] **B안: `by-title-author`가 `totalPages`를 직접 채우도록 backend-book 개선 요청** — 현재 이 엔드포인트는 ISBN은 주지만 목록 검색만 하여 `totalPages`가 항상 null이라, discovery가 "by-title-author→ISBN→search?isbn=" 2단 조회(권당 HTTP 2회)로 우회한다(2026-09-03 A안 구현·실측 완료). 팀원이 `by-title-author` 내부에서 ISBN 상세 조회(알라딘 ItemLookup)까지 태워 `totalPages`를 채워주면 discovery의 2단 조회를 1단으로 되돌릴 수 있다(`fetch_by_title_author`는 이미 `totalPages`가 직접 오면 재조회를 생략하도록 구현되어 있어, backend-book 수정만으로 자동 최적화됨). 레이턴시·호출량 절감 목적. 급하지 않음(A안으로 기능은 이미 정상 동작).
+- [ ] **이슈 2(프론트): 추천 카드 장르를 저자 칩 옆에 카드형(div)으로 렌더링** — 백엔드는 `ChatResponse.recommended_books[i].genre`(16개 표준 `StandardGenre` Enum)를 동기 `chat` 응답에 이미 구조화 필드로 내려주고 있다(CLIAR-244, 파서·카드 조립 검증 완료). 현재 프론트(`my-reading-room`)는 이 필드를 안 쓰고 `message` 마크다운의 `- **장르**:` 라인을 그대로 `<li>`로 렌더링 중이라 저자 칩과 포맷이 다르다. 프론트 `BookCardView`(MarkdownRenderer)가 `recommended_books[i].genre`를 읽어 저자 칩과 동일한 칩/카드 스타일로 저자 옆에 렌더링하도록 수정 필요(방향 1 확정). **백엔드 작업 아님 — 프론트 담당 전달 사항.**
 - [x] **사서 전환(`switch_to`) 후 추천 미연계 이슈 조사 및 종결** (2026-09-02) — dev 환경 실측 결과 3가지 호출 방식(동기+명시적 librarian_id, 동기+세션 메타 의존, 스트리밍+세션 메타 의존) 모두 정상적으로 사서 전환 후 추천까지 완결됨을 확인(재현 불가). 백엔드 결함이 아니며 프론트엔드 세션 유지 또는 일시적 포맷 문제로 판단되어 백엔드 수정 대상에서 제외 및 종결 처리.
 - [ ] **CLIAR-215 QA 케이스 중 서재 API 연동 항목(라우팅-서재검색, signals-날씨반영 등 내 서재 연계 추천) 재검증** — 로컬 검증 환경에는 유효한 JWT를 발급받을 방법이 없어 `qa_runner.py`가 쓰는 임의 토큰(`test-token`)도 `backend-book`이 401로 처리한다(2026-09-02 확인, 이는 CLIAR-215 Task 2에서 구현한 401 전달 로직이 정상 동작하는 증거이지 결함이 아님). 실제 프론트엔드 로그인 세션의 진짜 JWT 또는 `backend-book` 팀이 발급한 유효 토큰으로 dev 환경에서 재검증 필요.
 - [ ] Bedrock 모델 가용성 — Haiku 4.5/Sonnet 4 이상은 `kosa-edu-region-pol`로 전
