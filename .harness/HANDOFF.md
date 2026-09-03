@@ -1103,3 +1103,65 @@
    - 디바이스 위치 권한 팝업 대기로 인한 백엔드 요청 지연 방지(선제적 `latitude=null, longitude=null` 전송 또는 geolocation 타임아웃 옵션 적용).
 3. **CLIAR-257 (추천 결과 기억하기)** 착수 검토 (프론트 sessionStorage 캐싱).
 
+
+
+
+## 2026-09-04 — CLIAR-276 Bedrock 비용·캐시 관측(CloudWatch) 계획 수립 및 구현 완료
+- 사용자가 "AWS 환경 실습" 목적으로 LLM 비용/캐시 최적화 관측을 해보고 싶다고 제안. 코드
+  확인 결과 인프라 레벨 관측(OTel 트레이싱, Prometheus HTTP 메트릭, 구조화 로그)은 이미
+  풀스택으로 갖춰져 있고, 실제 공백은 "Bedrock 토큰의 USD 비용 환산"과 "캐시 히트율의
+  메트릭화"뿐임을 확인해 범위를 좁혔다. Langfuse/Helicone 같은 서드파티 LLM 관측 SaaS는
+  이미 Grafana/Tempo/Loki/Prometheus가 있어 도입하지 않기로 판단.
+- 사용자가 "기존 Prometheus/Loki/Grafana 모니터링을 절대 건드리지 말 것"을 명시적으로
+  요구(충돌 방지). 이에 따라 최초 제안(A안: `core/metrics.py`에 메트릭 추가)을 철회하고
+  **AWS CloudWatch 커스텀 메트릭 기반의 완전 분리 경로(B안)**로 방향을 전환. ELI5 설명과
+  IAM/비용/논블로킹 주의사항을 안내했다.
+- IAM 권한 조사: 이 서비스가 IRSA(`dpyb-discovery-dev-bedrock` Role)를 쓰고 있음을 확인,
+  이 레포에 Terraform/CDK가 없어 Role이 콘솔 수동 관리 상태임을 확인. 사용자가 콘솔+
+  CloudShell 접근 권한이 있어 직접 `aws iam put-role-policy`로
+  `DiscoveryCloudWatchMetricsPolicy`(네임스페이스 `DPYB/Discovery/LLM` 조건부
+  `cloudwatch:PutMetricData`) 인라인 정책을 등록 완료. 기존 `bedrock-invoke` 정책과 이름이
+  겹치지 않음을 `aws iam list-role-policies`로 먼저 확인한 뒤 진행해 안전하게 추가됨.
+- 티켓 **CLIAR-276** 확정, 모델은 **Sonnet 5 단일종**만 지원(현 세션에서 이미 전환 완료,
+  SCP 정책상 다중 모델 비교 여유 없음 — 다른 모델은 추후 단가 dict에 행만 추가하면 되는
+  확장 지점으로 설계). 브랜치 `CLIAR-276-Bedrock-Cost-Cache-Observability`를 `develop`
+  최신에서 분기.
+- Task 1~6 전체 구현 완료:
+  - Task 1: `core/pricing.py` — Sonnet 5 단가(2026-09-01 정가 기준 입력 $3/M, 출력 $15/M,
+    캐시읽기 $0.30/M, 캐시쓰기 $3.75/M — Anthropic 공식 발표 및 Bedrock 리셀러 교차 검증)
+    dict + `estimate_cost_usd(model_id, usage) -> float | None` 순수 함수. 단위 테스트 6건.
+  - Task 2: `core/cloudwatch_metrics.py`(신규) — `CloudWatchMetricsPublisher`, 네임스페이스
+    `DPYB/Discovery/LLM`, `enabled=False`(기본) 시 no-op, lazy boto3 client 생성,
+    `asyncio.to_thread`로 이벤트 루프 논블로킹, 발행 실패는 로그만 남기고 삼킴. 단위 테스트
+    6건(mocker로 boto3 대체, 실제 AWS 호출 없음).
+  - Task 3: `orchestrator_service.py`에 `_publish_cloudwatch_usage_metrics` 헬퍼 신설.
+    `chat`/`stream_chat`의 기존 `log_agent_metrics` 호출 직후(옆에, 대체 아님)에 추가.
+    `asyncio.create_task` + 모듈 레벨 `_background_tasks` 강한 참조 집합으로 fire-and-forget
+    (GC로 태스크가 조기 취소되는 것을 방지). `deps.py`에 `get_cloudwatch_metrics_publisher`
+    DI를 신설해 `get_orchestrator_service`에 배선. `cloudwatch_publisher` 생성자 인자는
+    옵셔널 기본값 `None`이라 기존 45건 테스트가 인자를 안 줘도 그대로 통과(무회귀 확인).
+  - Task 4: `book_search_tool.py`의 `search_books()` 캐시 히트/미스 분기(`self._cache.get`
+    직후)에 `_publish_cache_event(hit=True/False)` 훅 추가(기존 로직 순서·반환값 변경 없음).
+    프롬프트 캐시 히트율은 Task 3에서 이미 `cacheReadInputTokens`로 처리되어 별도 작업
+    불필요했다. `deps.py`의 `get_book_search_tool`에도 동일 publisher 배선.
+  - Task 5: `core/config.py`에 `enable_cloudwatch_metrics: bool = False` 필드,
+    `.env.example`에 `ENABLE_CLOUDWATCH_METRICS=false` 및 주석 추가.
+  - Task 6: `ruff check .`/`uv run mypy .`(84개 파일) 통과, `pytest -m "not integration"`
+    281건 전체 통과(무회귀, 신규 19건: pricing 6 + cloudwatch_metrics 6 +
+    orchestrator_cloudwatch_metrics 4 + book_search_tool 신규 3). `git diff --stat`으로
+    기존 4개 수정 파일(`deps.py`/`orchestrator_service.py`/`config.py`/`book_search_tool.py`)
+    변경이 전부 순수 추가(+111줄, -0줄)임을 정량 확인 — 기존 로직 삭제/변경 없음.
+    `core/metrics.py`/`tracing.py`/`observability.py`/ServiceMonitor 등 기존 관측 자산은
+    `git status`에 전혀 나타나지 않아 완전 비침습임을 재확인.
+- 커밋은 아직 생성하지 않았다. 하네스 문서(`STATE.md`/`PLAN.md`/`DECISIONS.md`)만 이번
+  세션 안에서 동기화했다.
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 Task 단위로 커밋 생성(`[CLIAR-276]` 태그) 및 원격 push.
+2. dev configmap에 `ENABLE_CLOUDWATCH_METRICS=true` 배포 후 CloudWatch 콘솔에서 실제 메트릭
+   (`BedrockCostUSD`, `InputTokens`/`OutputTokens`/`CacheReadTokens`, `SearchCacheHit`/
+   `SearchCacheMiss`) 도착 확인.
+3. CloudWatch 대시보드 1개 구성(비용 추이, 캐시 히트율 시각화).
+4. 여유 있으면 Task 7(CloudWatch Alarm → SNS → Lambda(Discord), 기존 Grafana→Discord RCA
+   Agent와 별개 채널로 분리) 착수.
+5. Task 8(`ARCHITECTURE.md`에 "독립 CloudWatch LLM 관측(선택적, 기본 OFF)" 서술 추가).

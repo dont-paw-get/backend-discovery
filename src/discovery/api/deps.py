@@ -8,6 +8,7 @@ from tavily import AsyncTavilyClient
 from discovery.application.genre_classifier_service import GenreClassifierService
 from discovery.application.librarian_service import LibrarianService
 from discovery.application.orchestrator_service import OrchestratorService
+from discovery.core.cloudwatch_metrics import CloudWatchMetricsPublisher
 from discovery.core.config import get_settings
 from discovery.domain.orchestrator.tools.book_metadata_client import BookMetadataClient
 from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianTool
@@ -62,11 +63,16 @@ def get_book_search_tool(request: Request) -> BookSearchTool:
         request.app.state.redis, monthly_limit=settings.tavily_monthly_credit_limit
     )
     tavily_client = AsyncTavilyClient(api_key=settings.tavily_api_key)
+    cloudwatch_publisher = CloudWatchMetricsPublisher(
+        enabled=settings.enable_cloudwatch_metrics,
+        region_name=settings.aws_region,
+    )
     return BookSearchTool(
         tavily_client=tavily_client,
         cache=cache,
         usage_limiter=usage_limiter,
         now=get_now,
+        cloudwatch_publisher=cloudwatch_publisher,
     )
 
 
@@ -102,11 +108,23 @@ def get_search_my_library_tool() -> SearchMyLibraryTool:
     return SearchMyLibraryTool(settings=settings)
 
 
+def get_cloudwatch_metrics_publisher() -> CloudWatchMetricsPublisher:
+    """CLIAR-276: 기존 Prometheus/Grafana/Loki 관측 스택과 독립적인 CloudWatch 커스텀
+    메트릭(비용/토큰/캐시 히트율) 발행기. `enable_cloudwatch_metrics=False`(기본값)이면
+    발행 메서드가 즉시 반환하는 no-op이 된다."""
+    settings = get_settings()
+    return CloudWatchMetricsPublisher(
+        enabled=settings.enable_cloudwatch_metrics,
+        region_name=settings.aws_region,
+    )
+
+
 def get_orchestrator_service(
     session_store: ChatSessionStore = Depends(get_chat_session_store),
     recommend_tool: RecommendBooksTool = Depends(get_recommend_books_tool),
     librarian_tool: ConsultLibrarianTool = Depends(get_consult_librarian_tool),
     library_tool: SearchMyLibraryTool = Depends(get_search_my_library_tool),
+    cloudwatch_publisher: CloudWatchMetricsPublisher = Depends(get_cloudwatch_metrics_publisher),
 ) -> OrchestratorService:
     """오케스트레이터 에이전트 서비스."""
     settings = get_settings()
@@ -116,6 +134,7 @@ def get_orchestrator_service(
         recommend_tool=recommend_tool,
         librarian_tool=librarian_tool,
         library_tool=library_tool,
+        cloudwatch_publisher=cloudwatch_publisher,
     )
 
 

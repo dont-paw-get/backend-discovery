@@ -1,5 +1,50 @@
 # PLAN — backend-discovery
 
+## [코드 완료 · IAM 승인 완료 · dev 배포/실측 대기] CLIAR-276: Bedrock 비용·캐시 관측 (CloudWatch)
+
+브랜치: `CLIAR-276-Bedrock-Cost-Cache-Observability` (`develop`에서 분기, 2026-09-04)
+
+**배경**: 기존 관측 스택(Prometheus/Grafana/Loki/Tempo)은 인프라 레벨을 커버하지만
+LLM 파이프라인 자체의 비용(USD)·캐시 히트율은 비어 있었다. 사용자가 "기존 모니터링을
+절대 건드리지 말 것"을 명시해, `core/metrics.py`(공유 Prometheus)에 얹는 대신 **AWS
+CloudWatch 커스텀 메트릭 기반의 완전 분리 경로**로 구현했다(세부 근거는
+`.harness/DECISIONS.md` 2026-09-04 참고). 범위는 Sonnet 5 단일 모델(현재 서비스가
+실제로 쓰는 유일한 모델).
+
+**구현 완료 (Task 1~6, 코드 세부는 `.harness/STATE.md`)**:
+- Task 1: `core/pricing.py` — Sonnet 5 단가 dict + `estimate_cost_usd` 순수 함수.
+- Task 2: `core/cloudwatch_metrics.py`(신규, 격리) — `CloudWatchMetricsPublisher`,
+  네임스페이스 `DPYB/Discovery/LLM`, 기본 OFF, 실패 시 조용히 무시.
+- Task 3: `orchestrator_service.py`에 `_publish_cloudwatch_usage_metrics` 배선(기존
+  `log_agent_metrics` 유지, fire-and-forget), `deps.py`에 DI 추가.
+- Task 4: `book_search_tool.py`의 캐시 히트/미스 분기에 발행 훅 추가(프롬프트 캐시는
+  Task 3의 `cacheReadInputTokens`로 이미 처리됨).
+- Task 5: `core/config.py`에 `enable_cloudwatch_metrics`(기본 False) 플래그, `.env.example` 반영.
+- Task 6: `ruff`/`mypy`(84파일) 통과, `pytest -m "not integration"` 281건 전체 통과(무회귀,
+  +19건 신규). 기존 4개 파일 diff가 전부 순수 추가(+111줄/-0줄)임을 `git diff --stat`으로
+  확인 — 기존 로직 무변경. `core/metrics.py`/`tracing.py`/`observability.py`/ServiceMonitor
+  등 기존 관측 자산 완전 비침습 확인.
+
+**IAM 권한**: 사용자가 CloudShell에서 `dpyb-discovery-dev-bedrock` Role에
+`DiscoveryCloudWatchMetricsPolicy`(네임스페이스 `DPYB/Discovery/LLM` 조건부
+`cloudwatch:PutMetricData`) 인라인 정책을 직접 등록 완료(기존 `bedrock-invoke` 정책 유지 확인).
+
+**남은 작업**:
+- [ ] 커밋 생성 및 push (사용자 승인 대기, `[CLIAR-276]` 태그)
+- [ ] dev configmap에 `ENABLE_CLOUDWATCH_METRICS=true` 배포 후 CloudWatch 콘솔에서 실제
+      `BedrockCostUSD`/`InputTokens`/`OutputTokens`/`CacheReadTokens`/`SearchCacheHit`/
+      `SearchCacheMiss` 메트릭 도착 확인
+- [ ] CloudWatch 대시보드 1개 구성(비용 추이, 캐시 히트율)
+- [ ] (여유 있을 때, 그래프 완료 후) Task 7: CloudWatch Alarm(예: 시간당 비용 급등) → SNS →
+      Lambda(Discord 웹훅). 기존 Grafana→Discord RCA Agent와는 **별개 채널**(다른 웹훅 URL)로
+      분리해 알림 출처를 혼동하지 않게 한다
+- [ ] Task 8: `ARCHITECTURE.md`에 "독립 CloudWatch LLM 관측(선택적, 기본 OFF)" 서술 추가
+
+**리스크/메모**: CloudWatch 커스텀 메트릭은 소액 비용 발생(메트릭당 월 ~$0.30 + API 호출
+요금) — 플래그로 통제. 차원(Dimension)은 `Model`만 사용해 카디널리티를 낮게 유지(세션ID 금지).
+
+---
+
 ## [코드 완료 · dev 배포/스크레이핑 확인 대기] 관측 인프라(dont-paw-get/infra) 연동 — dev 환경
 
 브랜치: `관측-인프라-연동` (티켓 없음 — 배포용 임시 작업, 커밋 `[CLIAR-XX]` 태그 생략, 사용자 확정 2026-09-02)
