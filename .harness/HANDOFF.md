@@ -1048,3 +1048,19 @@
   - **단기/우선 (프론트엔드)**: `RegisterBook` 화면 이동/복귀 시 `sessionStorage` 또는 전역 상태에 대화 상태/메시지를 캐싱하여 복귀 시 0ms로 즉시 복원 (현재 다른 세션의 작업 완료 후 진행하기로 합의).
   - **중장기 확장 (백엔드)**: 브라우저 새로고침/재접속 영속성 지원이 공식 요구될 때, (a) `GET /api/v1/chat/history` 엔드포인트 신설 + (b) 세션 턴 구조화 스키마 확장 및 하위 호환 + (c) 스트리밍 종료 시 구조화 카드 생성/저장을 한 세트로 묶어 구현 (내용은 `.harness/BACKLOG.md`에 기록 완료).
 
+## 2026-09-03 (이어서) — CLIAR-244 장르 UX 완성(프론트 3건 + 백엔드 NONE 방어) 및 전체 develop 머지
+- 사용자가 배포 환경 스크린샷으로 3가지 제보: (1) 상단 `미스터리` 칩이 여전히 뜸(오해 유발), (2) 추천 이유에 역사·경제가 명확한 책이 장르 NONE으로 뽑혀 칩이 안 뜸, (3) 등록하기 눌러도 장르가 미지정으로 들어감.
+- **배포 환경 실측**(CloudFront `d1wab52ln5by5k.cloudfront.net` 경유 `/api/v1/chat`, 사용자 제공 JWT): "커피에 관한 인문학 책 2권 추천" 요청 시 `recommended_books`가 커피인문학=`HUMANITIES`, 커피의 역사=`HISTORY`로 **정상 판단**됨을 확인. 즉 백엔드 장르 판단 로직 자체는 동작하며, 스크린샷의 NONE은 LLM의 확률적 누락. 페이지수도 368/568로 채워짐 확인.
+- **프론트(`frontend` 레포, `CLIAR-244-Recommended-Book-Genre-Chip` 브랜치, PR #128)** — 커밋 4건:
+  1. `MarkdownRenderer.BookCardView`: 저자 칩 옆에 장르 칩(🏷️) 추가, `genreLabel`로 Enum→한글 변환, `- **장르**:` 마크다운 라인을 카드 파싱에서 소비해 `<li>` 노출 차단.
+  2. `WeatherMoodBadge`: 상단 `genre_focus` 칩 제거(무드/날씨/시간대만 유지). `signals.genre_focus`는 표준 Enum과 무관한 대화 무드값이라 실제 추천 장르와 어긋나 오해를 유발.
+  3. `LibrarianChat.handleRegisterBook`: navigate state의 book에 `genre` 추가 → 등록 폼 자동 매칭. `bookExtractor.formatRecommendedBooks`에도 genre 보존.
+  - build/lint 통과.
+- **백엔드(`backend-discovery`, `CLIAR-244-Genre-None-Guard` 브랜치)** — (B) NONE 방어:
+  - `domain/librarian/agent.py`의 cat/stork 프롬프트 8번 장르 규칙을 "추천 이유·주제 근거로 16개 중 반드시 1개 선택, NONE은 정보가 전혀 없어 주제조차 가늠 불가할 때만"으로 강화(역사·경제→HISTORY/BUSINESS_ECONOMICS, 인문학→HUMANITIES 예시 명시).
+  - `test_librarian_agent.py`에 NONE 방어 회귀 테스트 1건 추가. ruff/mypy 100%, 단위 254건 통과.
+- **CLIAR-237 브랜치**엔 이번 세션 초 잔여 하네스 변경(다른 세션이 만든 CLIAR-257 티켓 반영 문서 정리)을 커밋해 PR #43에 반영.
+
+### 다음 세션이 할 일
+- dev 배포 후 배포 환경에서 (1) 상단 미스터리 칩 사라짐, (2) 등록 시 장르 자동 매칭, (3) NONE 빈도 감소를 실측 확인.
+- CLIAR-257(추천 결과 기억하기, 프론트 sessionStorage) 착수 검토.
