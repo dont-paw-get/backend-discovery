@@ -1,15 +1,16 @@
 """OrchestratorService의 CLIAR-276 CloudWatch 비용/토큰 메트릭 배선 검증.
 
 - `cloudwatch_publisher`가 주어지면 `accumulated_usage`를 읽어 `publish_usage`가
-  fire-and-forget으로 호출된다(응답 흐름을 기다리지 않음, `asyncio.sleep(0)`으로 스케줄된
-  태스크를 한 스텝 진행시켜 검증한다).
+  직접 `await`되어 호출된다. 이전에는 `asyncio.create_task` fire-and-forget 방식을
+  썼으나, FastAPI 요청 코루틴이 응답 반환 직후 종료되며 던져둔 태스크가 실행 기회를
+  얻지 못하고 소실되는 문제가 dev 실측(2026-09-04)으로 확인되어 직접 대기 방식으로
+  전환했다. 이 테스트는 그 전환된 동작(await 완료 후 반환)을 검증한다.
 - `cloudwatch_publisher=None`(기존 테스트 전부가 이 경로)이면 CloudWatch 관련 코드가
   전혀 호출되지 않는다 — 이는 `test_orchestrator_service.py`의 기존 45건이 이 인자를
   주지 않고도 그대로 통과함으로써 이미 검증된다(회귀 없음).
 - 기존 `log_agent_metrics` 로그 호출은 CloudWatch 배선 여부와 무관하게 그대로 유지된다.
 """
 
-import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -70,9 +71,6 @@ async def test_chat_publishes_cloudwatch_usage_metrics_when_publisher_given(
     )
 
     await service.chat(session_id="sess-cw-1", message="도서 추천해줘")
-    # fire-and-forget 태스크가 실행될 기회를 준다.
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
 
     mock_publisher.publish_usage.assert_awaited_once_with(
         model_id="global.anthropic.claude-sonnet-5",
@@ -116,7 +114,6 @@ async def test_chat_does_not_touch_publisher_when_metrics_summary_missing(
     )
 
     await service.chat(session_id="sess-cw-2", message="안녕")
-    await asyncio.sleep(0)
 
     mock_publisher.publish_usage.assert_not_awaited()
 
@@ -158,8 +155,6 @@ async def test_stream_chat_publishes_cloudwatch_usage_metrics(mocker: MockerFixt
 
     async for _ in service.stream_chat(session_id="sess-cw-3", message="추천해줘"):
         pass
-    await asyncio.sleep(0)
-    await asyncio.sleep(0)
 
     mock_publisher.publish_usage.assert_awaited_once_with(
         model_id="global.anthropic.claude-sonnet-5",
@@ -200,6 +195,5 @@ async def test_chat_without_cloudwatch_publisher_does_not_raise(mocker: MockerFi
     )
 
     response, *_ = await service.chat(session_id="sess-cw-4", message="안녕")
-    await asyncio.sleep(0)
 
     assert response == "응답"
