@@ -134,3 +134,15 @@ def test_librarian_prompts_discourage_none_genre_fallback() -> None:
         # 반드시 1개 선택 + NONE 남발 억제 지침이 양쪽 프롬프트에 존재해야 한다.
         assert "반드시 선택" in prompt
         assert "NONE으로 도피하지" in prompt
+
+
+def test_librarian_prompts_contain_hallucination_guard() -> None:
+    """CLIAR-216: 추천 에이전트에 실존 도서 엄수 및 환각 방지 지침이 존재해야 한다."""
+    from discovery.domain.librarian.agent import get_librarian_system_prompt
+
+    for librarian_id in ("cat", "stork"):
+        prompt = get_librarian_system_prompt(librarian_id)
+        assert "환각 방지 및 실존 도서 엄수" in prompt
+        assert "가상의 제목/저자" in prompt
+        assert "실존 도서만" in prompt
+

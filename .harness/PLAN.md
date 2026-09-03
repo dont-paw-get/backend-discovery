@@ -84,8 +84,8 @@ CLIAR-171과 CLIAR-216이 `src/discovery/domain/orchestrator/agent.py`의 같은
 | 5 | **CLIAR-235** | ✅ **완료** — 도서 장르 분류 API의 ISBN 단일 요청 필드 개편 (title/author/raw_category 제거 및 ISBN 전용 분류로 간소화) | 없음 |
 | 6 | **CLIAR-236** | ✅ **완료** — 고도화 후 자잘한 버그 수정: Claude Sonnet 5 도구 호출 포맷 붕괴(assistant message prefill ValidationException) 방어 재시도 로직 (`is_tool_call_format_error`, chat/stream_chat 1회 재시도 배선, 단위 테스트 6건) | CLIAR-229 완료 |
 | 7 | **CLIAR-237** | ✅ **완료** — 추천 도서 페이지수를 `RecommendBooksTool` 내부에서 `backend-book` 알라딘 실조회(`GET /api/v1/books/search?isbn=...`)로 검증. ISBN 내부 주석(`<!-- isbn: ... -->`) 파싱·제거, `BookMetadataClient` 신설, 단위 테스트 19건 | CLIAR-236 완료 |
-| 8 | **CLIAR-216** (QA기반 최적화b) | 🔄 **다음 착수 대상 (CLIAR-257보다 우선, 2026-09-03 확정)** — 공통 가드레일 리팩터 + 안전·엣지·환각·감정 프롬프트 고도화. 블루 스위치 후 서재 오분류(미재현) 엣지 케이스를 Task 2에 편입. **추천 카드 장르 NONE 정확도 개선도 Task 2에 편입**(CLIAR-244 후속) | CLIAR-237 완료 |
-| 9 | **CLIAR-257** (추천 결과 기억하기) | ⏸ **216 이후** — 프론트 `sessionStorage`/전역 상태 캐싱(단기 우선), 백엔드 히스토리 영속화(중장기)는 `.harness/BACKLOG.md` 참고 | CLIAR-216 이후 |
+| 8 | **CLIAR-216** (QA기반 최적화b) | ✅ **완료** — 공통 가드레일(`SHARED_GUARDRAILS`) 모듈화 리팩터링 + 추천 에이전트 환각 방지(9번 규칙) + 감정 공감 톤 + 범위 밖 질문 차단 가드레일. 단위 테스트 262건 100% 통과 | CLIAR-237 완료 |
+| 9 | **CLIAR-257** (추천 결과 기억하기) | 🔄 **다음 착수 대상** — 프론트 `sessionStorage`/전역 상태 캐싱(단기 우선), 백엔드 히스토리 영속화(중장기)는 `.harness/BACKLOG.md` 참고 | CLIAR-216 완료 |
 
 순서 근거: (1) CLIAR-158은 충돌 대상이 없는 순손실 제거이고 계측 기반이 이후 티켓의 판단 근거가 된다. (2) CLIAR-171이 프롬프트를 줄인 뒤에 CLIAR-216이 확장해야 재작업과 회귀 원인 혼선을 피할 수 있다. (3) CLIAR-215는 P1 안전성·인증 공백을 다루지만 구현 위치가 입력 게이트 코드와 `api/deps.py`라 프롬프트와 충돌하지 않아 앞으로 당겼다. 계획 확정 시 이 근거를 `.harness/DECISIONS.md`에 기록했다.
 
@@ -111,128 +111,13 @@ Task 1(계측 모듈 & 개인정보 화이트리스트 필터링), Task 2-1(tail
 
 ---
 
-### [완료] CLIAR-229: [오케스트레이터] 등록하기(제목·저자·페이지수 자동추출) 버그 수정 + 출력단 HTML 태그 노출 방어
+### 프론트엔드 조치 요청 사항 (별도 전달 항목)
 
-브랜치: `CLIAR-229-Recommendation-Card-Structuring` (`develop`에서 분기)
-
-**배경**: 프론트 "책 등록" 화면에서 AI 추천 도서의 "저자" 입력란에 `톰 버틀러 보던 (548쪽)`처럼 쪽수가 함께 들어가는 버그가 발견됨. 원인은 추천 카드(`### 📖`)가 CLIAR-196에서 서재 카드(`### 📚`)에 도입한 구조화 필드(`LibraryBookCard`) 패턴을 따르지 않고 여전히 순수 마크다운 텍스트로만 내려가, 프론트가 `- **저자**: {name} ({page}쪽)` 문자열 전체를 author로 파싱하기 때문. `<br>` 태그 노출 문제는 백엔드 코드에 `<br>` 생성 지점이 없음을 확인함(`grep_search`로 전체 소스 확인) — 프론트 마크다운 렌더러의 `\n`→`<br>` 변환 이스케이프 문제로 추정되나, 백엔드도 방어적으로 raw HTML 태그를 sanitize하는 안전장치를 추가한다.
-
-- [x] **Task 1: 추천 카드 구조화 필드 도입 (핵심 수정)** — `RecommendedBookCard` 스키마(openapi.yaml + Pydantic), `ChatResponse.recommended_books`(동기 `chat` 응답만), `parse_recommended_books_from_markdown` 파서, `OrchestratorService.chat` 배선 완료
-- [x] **Task 2: 출력 HTML 태그 노출 방어** — `sanitize_html_tags` 순수 함수 신설, `chat`/`stream_chat` 세션 히스토리 저장 시점에 적용 완료
-- [x] **Task 3: 검증 및 문서 동기화** — 단위 테스트 12건 신규(파서 5건, sanitize 2건, 라우터 1건, 언패킹 갱신 4개 파일), 전체 단위 212건 + 통합 16건 통과, ADR 0008 작성, 하네스 문서 동기화 완료
-- [x] **Task 4 (프론트엔드 전달 항목)**: 아래 "프론트엔드 조치 요청 사항" 참고
+- **디바이스 위치 권한 비동기 전송 조치 (CLIAR-216 후속)**:
+  - **현상**: 브라우저 `navigator.geolocation.getCurrentPosition()` 권한 팝업 대기로 인해 백엔드 HTTP 요청 자체가 지연/미발생.
+  - **프론트 조치 예시**: 위치 권한 응답을 기다리지 않고 즉시 `latitude=null, longitude=null`로 대화 요청을 선제 전송 (백엔드가 기본 서울 날씨로 즉시 응답)하거나, geolocation 조회에 짧은 타임아웃 옵션을 적용.
 
 ---
-
-### [완료] CLIAR-236: 고도화 후 자잘한 버그 수정 (Claude Sonnet 5 도구 호출 포맷 붕괴 방어 재시도)
-
-브랜치: `CLIAR-236-Post-Optimization-Bug-Fixes` (`develop`에서 분기)
-
-**배경 (2026-09-02 dev 재현 및 로그 실측)**: CLIAR-171/CLIAR-229 배포 후 dev에서 슈빌(stork) 모드로 "명탐정 코난 추천해줘" 요청 → `switch_to`로 블루(cat)로 전환 제안 → 사용자가 전환 → 다음 요청("명탐정 코난 가장 유명한 에피소드 추천해줘" 계열, 3번째 `consult_librarian` 재호출 사이클)에서 다음 에러로 실패, 사서 fallback 문구("냥냥... 통신 연결이 잠시 끊겼다냥")가 노출됨:
-
-```
-ValidationException: The model returned the following errors: This model does not
-support assistant message prefill. The conversation must end with a user message.
-```
-
-**근본 원인**: `kubectl logs`로 실제 스트림 원문을 확인한 결과, Claude Sonnet 5가 `recommend_books` 도구를 호출할 때 정상적인 Bedrock Converse `toolUse` 콘텐츠 블록이 아니라 **XML 텍스트를 그대로 assistant 텍스트로 출력**했다(`<invoke name="recommend_books"><parameter name="query">...</parameter></invoke>`). Strands가 이를 tool_use로 인식하지 못해 다음 사이클에서 정상적인 user 응답(toolResult)이 이어지지 못하고 대화가 assistant로 끝난 상태가 되어 Bedrock이 검증 오류로 거부했다. `temperature`/`top_p` 파라미터를 완전히 제거(CLIAR-171 핫픽스, PR #34/#35)한 이후 Bedrock 기본 샘플링값을 쓰게 된 것이 이 포맷 붕괴 빈도에 영향을 줬을 가능성이 있으나(Sonnet 5는 두 파라미터 모두 미지원이라 되돌릴 수 없음), 확정된 인과관계는 아니며 모델의 확률적 오류로 간주한다.
-
-- [x] **Task 1: `chat`/`stream_chat`에 도구 호출 포맷 붕괴 재시도 로직 추가**
-  - [x] `ValidationException` 메시지에 "assistant message prefill" 또는 "must end with a user message"가 포함된 경우를 식별하는 헬퍼(`is_tool_call_format_error`, `TOOL_CALL_FORMAT_ERROR_PATTERNS`) 신설
-  - [x] 해당 예외가 감지되면, 오염된 `agent.messages`를 재사용하지 않고 **새 `Agent`를 세션 히스토리 기준으로 처음부터 재생성**하여 1회 재시도
-  - [x] 재시도도 실패하면 기존과 동일하게 `get_llm_fallback_message`로 폴백 (무한 재시도 방지, 최대 1회로 제한)
-  - [x] `chat`(동기)과 `stream_chat`(스트리밍) 양쪽에 동일 패턴 적용. 스트리밍은 첫 청크가 이미 전송된 이후 실패할 경우 재시도가 부분 응답과 섞이지 않도록 주의(첫 청크 전송 전 실패 시에만 재시도, 이미 청크가 나간 뒤에는 기존처럼 fallback chunk를 append)
-- [x] **Task 2: 재현 및 회귀 테스트**
-  - [x] `agent.invoke_async` 및 `agent.stream_async`가 특정 예외를 던지도록 mock하여 재시도 경로(성공/재시도 후 실패/TTFB 후 미재시도) 단위 테스트 6건 작성
-  - [x] 기존 `[BEDROCK_FALLBACK]` 관련 테스트 회귀 확인
-- [x] **Task 3: 검증 및 문서 동기화**
-  - [x] 정적 분석(`ruff`, `mypy`) 및 전체 단위 테스트(232건) 100% 통과
-  - [x] `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 문서 동기화 완료
-  - [ ] **(dev 배포 후 후속 실측)**: dev 배포 후 동일 시나리오(사서 전환 후 연속 도구 호출) 재현 시 `[FORMAT_COLLAPSE_RETRY]` 로그 및 `format_retry_triggered` 메트릭 발생 여부 실측 확인, Bedrock 예외 메시지 문구 변동 모니터링
-
----
-
-### [완료] CLIAR-237: 도서 추천 총 페이지수 검색 실패 시 알라딘 API로 정확하게 가져오기
-
-브랜치: `CLIAR-237-Page-Count-Aladin-Verification` (`develop`에서 분기)
-
-**배경 (2026-09-02 dev 재현 및 로그 실측)**: dev 환경에서 "비즈니스/경제 책 추천해줘"를 재현한 결과, 추천 에이전트(`RecommendBooksTool` → Tavily `search_books`)가 생성한 `### 📖` 카드의 저자 줄에 `- **저자**: 모건 하우절 (약 300쪽)`처럼 근사치·불확실 표현이 그대로 섞여 나왔다. 파싱 결과 `page_count=null`이 되고 `author` 필드에도 `"모건 하우절 (약 300쪽)"`처럼 쪽수 텍스트가 오염되어 CLIAR-229에서 고쳤던 회귀가 재발했다. 근본적으로 LLM+웹검색(Tavily) 조합은 페이지수를 정확히 알지 못하거나 부정확하게 생성할 수 있는 신뢰 불가능한 소스이므로, 정규식 보강만으로는 "정확도" 문제 자체를 해결할 수 없다. 프론트 "책 등록" 폼이 이 값을 그대로 자동입력에 쓰므로, 틀린 페이지수가 서재 DB에 영구 저장되는 위험이 있다.
-
-**해결 방향(A안, 사용자 확정 2026-09-02)**: `backend-book`이 이미 보유한 알라딘 연동 API `GET /api/v1/books/search?isbn=...`를 재사용하여, 추천 에이전트가 확보한 ISBN으로 실제 서지 데이터(`book.totalPages`)를 재조회해 LLM이 생성한 페이지수를 신뢰 가능한 값으로 덮어쓴다. 이 API는 로그인 사용자의 서재에 해당 ISBN이 이미 있으면 알라딘을 호출하지 않고 저장된 `libraryBook` 데이터를 반환하고, 없으면 알라딘에서 조회해 `book`으로 반환하며, 알라딘에도 없으면 `book` 자체가 응답에서 생략된다(수동 입력 폴백 케이스).
-
-**실측 확인된 응답 스키마** (사용자가 실제 호출 결과 공유, 2026-09-02):
-```json
-{
-  "alreadyRegistered": false,
-  "book": {
-    "title": "어린 왕자",
-    "author": "앙투안 드 생텍쥐페리",
-    "isbn": "9788932917245",
-    "publisher": "열린책들",
-    "publishedDate": "2015-10-20",
-    "totalPages": 160,
-    "coverUrl": "https://example.com/covers/9788932917245.jpg"
-  }
-}
-```
-이번 티켓에서는 `book.totalPages`만 사용한다(제목/저자/출판사 등 다른 필드는 CLIAR-229 마크다운 카드가 이미 담당하므로 재사용하지 않음). `alreadyRegistered=true`인 `libraryBook` 응답 스키마는 아직 실측 전이라 Task 1에서 `book`과 동일 취급 가능한지 확인 필요(필드명이 다를 경우 대응 추가).
-
-**선결 확인 사항 (2026-09-02 방향 확정)**:
-- `libraryBook`(이미 서재에 등록된 경우) 응답 스키마는 실측 전이라 `book`과 동일하다고 가정하고 구현한다. DTO는 `extra="ignore"` + 전 필드 옵셔널로 방어적으로 설계하여, 실제 필드명이 다르면 `totalPages`를 못 찾아 `None`을 반환할 뿐 예외로 전체 응답을 막지 않는다. 이후 dev 재현으로 실제 스키마가 다르면 alias만 추가한다.
-- 인증 헤더는 순수 서지 조회 목적이므로 **우선 `Authorization` 없이 호출**한다. dev 재현 시 401/403이 나오면 `Authorization` 패스스루를 추가한다(현재 설계상 실패해도 graceful degradation으로 전체 응답이 막히지 않으므로 나중에 추가해도 안전).
-- ISBN을 추천 에이전트가 못 찾는 경우(Tavily 웹검색 결과에 ISBN이 없는 경우)는 구조적 한계로 받아들인다 — 이 경우 `page_count`는 기존과 동일하게 LLM 생성값 또는 `null`로 남는다. 100% 커버리지는 이번 범위의 목표가 아니다.
-
-- [x] **Task 1: 추천 에이전트가 ISBN을 확보하도록 확장**
-  - [x] `LIBRARIAN_SYSTEM_PROMPT`(cat/stork 둘 다)에 `<!-- isbn: {ISBN} -->` 내부 주석 규칙(8번) 추가. 확인 불가 시 근사치("약", "대략" 등) 대신 라인 자체를 생략하도록 3번 규칙도 강화.
-  - [x] `post_processor.py`의 `RecommendedBookFields`에 `isbn` 필드 추가, `parse_recommended_books_from_markdown`이 `<!-- isbn: ... -->`(10/13자리 숫자만 허용)를 파싱. `strip_isbn_comments`로 최종 응답에서 주석을 항상 제거하는 안전장치 추가.
-- [x] **Task 2: `backend-book` ISBN 조회 클라이언트 (`BookMetadataClient`) 구현**
-  - [x] `core/config.py`/`.env.example`에 `book_metadata_api_url`(기본값 `library_api_url`과 동일 서비스 재사용), `book_metadata_timeout_seconds`(3초) 추가.
-  - [x] `domain/orchestrator/book_metadata_response.py`(`BookMetadata`, `BookMetadataSearchResponse` — `libraryBook`을 `book`으로 정규화하는 `model_validator` 포함) 및 `domain/orchestrator/tools/book_metadata_client.py`(`fetch_total_pages`) 구현. `Authorization` 헤더 없이 호출(선결 결정대로 우선 미포함), 실패 시 예외 없이 `None` 반환.
-- [x] **Task 3: 페이지수 검증 배선 — 원래 계획(`OrchestratorService`) 대신 `RecommendBooksTool` 내부에서 처리 (설계 변경, 이유는 아래)**
-  - [x] `RecommendBooksTool.recommend()`가 `truncate_books_by_count` 이후 `_verify_page_counts()`를 호출해 ISBN이 파싱되면 `asyncio.gather`로 병렬 검증하고, `_replace_page_count_for_title`로 저자 줄의 `(N쪽)`/`(약 N쪽)` 표기를 검증된 값으로 교체. ISBN 주석은 이 지점에서 항상 제거.
-  - [x] `api/deps.py`에 `get_book_metadata_client` 의존성 추가, `get_recommend_books_tool`에 배선.
-  - **설계 변경 이유**: 원래 계획은 `OrchestratorService.chat`의 `recommended_books` 조립 시점(동기 경로만)에서 검증하는 것이었으나, ISBN 주석이 오케스트레이터 응답 텍스트에 그대로 남아있으면 **스트리밍 경로에서 청크가 실시간으로 그대로 사용자에게 노출**되는 문제가 있음을 구현 중 발견했다. `RecommendBooksTool`(하위 추천 에이전트 도구) 반환 지점에서 검증과 주석 제거를 모두 끝내면 동기/스트리밍 양쪽 모두 안전하고, `OrchestratorService`는 전혀 수정할 필요가 없어졌다(더 단순한 설계로 귀결).
-- [x] **Task 4: 검증 및 문서 동기화**
-  - [x] 단위 테스트 19건 신규: ISBN 파서 3건 + `strip_isbn_comments` 3건(`test_post_processor.py`), `BookMetadataClient` 6건(`test_book_metadata_client.py`, 신규 파일), `RecommendBooksTool` 페이지수 검증 3건(`test_recommend_tool.py`).
-  - [x] 정적 분석(`ruff`, `mypy`) 및 `pytest -m "not integration"` 247건 100% 통과(전체 회귀 없음).
-  - [x] **(dev 배포 후 실측 완료, 2026-09-02)**: PR #40 머지·dev 배포 확인. `kubectl logs`로 실제 요청에서 `<!-- isbn: ... -->` 파싱 및 `book_metadata_client` 호출(알라딘 API가 401 반환 — 무인증 호출이 거부됨, 아래 발견 사항 참고)이 정상적으로 트리거되는 것을 확인. graceful degradation도 의도대로 동작(401이어도 전체 응답 안 깨짐).
-  - [x] API wire 계약 변경 없음(`RecommendedBookCard.page_count` 필드 자체는 그대로, description만 정확도 문구로 보강) — 새 ADR 불필요로 판단, `openapi.yaml`만 description 갱신.
-
-**dev 실측으로 발견된 후속 이슈 (별도 트랙, 코드 미착수)**:
-1. **`book_metadata_api_url` 무인증 호출이 401을 반환함** — 선결 결정("우선 Authorization 없이 호출")과 달리 실제로는 인증이 필요한 것으로 보임. 다만 CLIAR-237의 graceful degradation 설계 덕분에 전체 응답이 깨지지 않고 LLM 생성값을 그대로 유지하는 것으로 안전하게 처리됨(설계가 의도대로 방어 역할을 함). `Authorization` 패스스루 추가는 아래 2번 항목(팀원 신규 API)으로 대체될 가능성이 높아 즉시 조치하지 않음.
-2. **LLM이 ISBN 자체를 못 찾아 주석을 생략하는 경우가 실측상 빈번함** — "백야행", "유리 세공" 등 여러 사례에서 `page_count: null`로 남음(Tavily 검색 결과에 ISBN이 우연히 없으면 LLM이 통째로 생략). 사용자가 팀원에게 **"제목+저자로 알라딘 검색 → 최상단 결과의 isbn, totalPages 반환"** 하는 신규 API를 요청함(2026-09-02). API가 나오면 ISBN 주석 의존 없이 `BookMetadataClient`에 `fetch_by_title_author(title, author)` 메서드를 추가하는 방향으로 재설계 예정 — **다음 세션 최우선 작업**.
-
-**레이턴시 영향**: `backend-book` 조회는 동기 `chat` 응답 조립 후반(이미 `recommend_books` 완료 시점)에 추가되므로 스트리밍 TTFB에는 영향 없음. 다만 동기 경로의 총 응답 시간은 추천 권수만큼 조회가 늘어날 수 있어 `asyncio.gather`로 병렬화하고, 타임아웃을 짧게(예: 3초) 잡아 실패해도 전체 응답이 막히지 않게 한다.
-
-**백로그로 이관 검토 항목**: 페이지수 신뢰도 플래그(`page_count_confidence: "verified"|"estimated"|"unknown"`)를 `RecommendedBookCard`에 추가해 프론트가 "확인됨" 표시를 할 수 있게 하는 것은 API 계약 확장이라 이번 범위에서는 제외하고 별도 논의.
-
----
-
-### [상세 계획 수립 대상] CLIAR-216: QA 데이터셋 기반 가드레일 및 프롬프트 고도화 (CLIAR-237 완료 후 착수)
-
-브랜치: `CLIAR-216-Prompt-Guardrails` (`develop` 최신 헤드에서 분기)
-
-- [ ] **Task 1: 블루/슈빌 프롬프트 공통 가드레일(`SHARED_GUARDRAILS`) 모듈화 리팩터링**
-  - [`src/discovery/domain/orchestrator/agent.py`](file:///Users/jangchangho/backend-discovery/src/discovery/domain/orchestrator/agent.py)에서 블루/슈빌 프롬프트의 공통 분기 규칙, 서재 전용 카드(`### 📚`), 추천 카드 재작성 금지, 내부 메타데이터 노출 금지 규칙을 `SHARED_GUARDRAILS` 상수로 통합 분리.
-  - 페르소나별 어조(`~다냥 🐾` vs `두둥! 🪶`), 특화 장르 및 사서 스위칭 멘트만 주입하는 모듈식 구조로 정돈.
-- [ ] **Task 2: QA 46건 실측 기반 프롬프트 엣지 케이스 보강**
-  - **날씨 추천 시 위치 좌표 미전달/대기 무중단(Fail-Safe) 가드레일**:
-    - 날씨 기반 도서 추천 질의 시 디바이스 위치 권한 허용 대기나 좌표 누락(`latitude`/`longitude` 없음) 상황에서도 사용자에게 위치 권한을 요구하거나 응답을 지연하지 않고, 기본 서울 날씨 및 계절감을 바탕으로 지체 없이 즉시 도서 추천(`recommend_books`)을 진행하는 명시적 지침 추가 (QA 12~14번 대응).
-  - **사서 전환(`switch_to`) 후 서재 오분류 방어**:
-    - 블루 사서로 전환된 후 사용자가 일반 도서 추천을 요청했을 때 이를 서재 조회(`search_my_library`)로 잘못 라우팅하지 않고 외부 도서 추천(`recommend_books`)을 올바르게 수행하도록 분기 지침 강화.
-  - **환각(Hallucination) 방지 지침 강화**:
-    - 검색 도구(`recommend_books`) 결과에 없는 책을 임의로 지어내지 않고, 검색 결과가 부족한 경우 솔직하게 한계를 인정하고 대안을 제시하도록 방어 지침 보강 (QA 20, 21번 대응).
-  - **감정/위로 대화의 페르소나 공감 톤 보강**:
-    - 비위기 일상 감정(스트레스, 분노, 슬픔 등) 토로 시 페르소나별 1인칭 공감 멘트와 함께 마음을 달래주는 힐링 도서 추천으로 자연스럽게 연계 (QA 31, 32번 대응).
-  - **범위 밖 질문 정중한 한계 안내**:
-    - 주식 투자, 코딩 등 비도서 전문 분야 질문 시 서비스 범위를 정중히 안내하고 관련 도서 탐색을 제안하도록 유도 (QA 34번 대응).
-  - **추천 카드 장르 NONE 정확도 개선 (CLIAR-244에서 편입, 2026-09-03)**:
-    - 추천 카드 장르는 `classify-genre` API·알라딘 카테고리가 아니라 추천 에이전트가 Tavily 웹 스니펫(400자)+사전지식만으로 `- **장르**:`를 추론하는 구조라, 단서가 약하면 NONE으로 떨어진다. #44에서 "NONE 도피 금지" 프롬프트를 넣었으나 대증요법. 배포 실측 후 NONE 빈도가 여전히 높으면 근본 해결책 착수: (a) `RecommendBooksTool`이 페이지수 검증 시 이미 호출하는 `backend-book`에서 알라딘 카테고리도 받아 `match_standard_genre`로 확정 매핑, 또는 (b) 추천 이유 텍스트를 `match_standard_genre`로 후처리 fallback 매핑. 등록 자동매칭 자체는 정상 동작하므로(장르가 NONE이 아니면 폼에 자동 반영됨) NONE 빈도를 줄이는 게 목표.
-- [ ] **Task 3: QA 러너(`scripts/qa_runner.py`) 전체 46건 재실측 및 통과율 검증**
-  - 로컬 서버 기동 후 46개 QA 케이스 실행하여 P1/P2/P3 우선순위별 응답 품질, 의도 분기 및 레이턴시 전수 점검.
-- [ ] **Task 4: 정적 분석, 단위 테스트 갱신 및 문서 동기화**
-  - 정적 분석(`ruff`, `mypy`) 및 전체 단위 테스트 통과 확인.
-  - `.harness/STATE.md`, `.harness/DECISIONS.md`, `.harness/HANDOFF.md` 동기화.
 
 ### 백로그로 이관 (이번 범위 제외)
 
