@@ -1079,3 +1079,27 @@
 2. **CLIAR-216 착수** (257보다 먼저): `develop`에서 `CLIAR-216-Prompt-Guardrails` 분기. Task 1(공통 가드레일 `SHARED_GUARDRAILS` 모듈화) → Task 2(QA 엣지케이스 + **추천 카드 장르 NONE 정확도 개선 편입**) → Task 3(QA 46건 실측) → Task 4(검증/문서).
 3. dev 배포 후 백엔드 #43(페이지수 2단조회)·#44(장르 NONE 방어) 효과 실측(페이지수 채워짐, NONE 빈도 감소).
 4. CLIAR-257은 216 이후.
+
+
+## 2026-09-03 (이어서 3) — CLIAR-216 QA 가드레일 및 프롬프트 고도화 완료
+- **브랜치**: `CLIAR-216-Prompt-Guardrails` (`develop` 최신 헤드에서 분기)
+- **수행 작업**:
+  1. **Task 1: 오케스트레이터 공통 가드레일 모듈화 리팩터링**:
+     - `src/discovery/domain/orchestrator/agent.py`에서 블루/슈빌 프롬프트의 80% 이상 중복되던 분기 규칙(단순 대화, 서재 조회, 명시적 추천, 복합 추천, 범위 밖 안내), 서재 전용 카드(`### 📚`), 추천 카드 재작성 금지, 내부 메타데이터 노출 금지 규칙을 `SHARED_GUARDRAILS` 공통 상수로 모듈화하여 단일 소스 원칙 확립.
+  2. **Task 2: 실측 기반 엣지 케이스 및 가드레일 보강**:
+     - **환각 방지**: `src/discovery/domain/librarian/agent.py`의 `LIBRARIAN_SYSTEM_PROMPT`에 9번 `환각 방지 및 실존 도서 엄수` 지침 추가 (Tavily 검색 도구 및 서지 정보에 기반한 실존 도서만 추천, 지어내기 금지).
+     - **감정 공감 톤**: `SHARED_GUARDRAILS`의 단순 대화 분기에 일상 감정 표현(스트레스/피드백 등) 공감 톤 보강.
+     - **범위 밖 질문**: 주식/코딩 등 전문 분야 질문 시 `recommend_books` 자동 도구 호출 차단 및 도서 비서 범위 안내 가드레일 주입.
+  3. **Task 4: 검증 및 하네스 문서 동기화**:
+     - `test_orchestrator_agent.py` 및 `test_librarian_agent.py`에 감정 응대, 범위 밖 질문, 환각 방지 지침 검증 단위 테스트 2건 추가.
+     - 정적 분석(`ruff check .`, `mypy .`) 79개 파일 100% 통과.
+     - 단위 테스트 스위트(`pytest -m "not integration"`) 262건 전체 100% 통과 (기존 260건 + 신규 2건, 회귀 없음).
+     - `.harness/STATE.md`, `.harness/DECISIONS.md`, `.harness/PLAN.md` 동기화 완료.
+
+### 다음 세션이 할 일
+1. **사용자 컨펌 후 `CLIAR-216-Prompt-Guardrails` 커밋 및 PR 생성**:
+   - `[CLIAR-216] refactor(orchestrator): 공통 가드레일 모듈화 및 프롬프트 환각·감정·범위밖 방어 지침 보강`
+2. **프론트엔드 전달 (Task 5)**:
+   - 디바이스 위치 권한 팝업 대기로 인한 백엔드 요청 지연 방지(선제적 `latitude=null, longitude=null` 전송 또는 geolocation 타임아웃 옵션 적용).
+3. **CLIAR-257 (추천 결과 기억하기)** 착수 검토 (프론트 sessionStorage 캐싱).
+

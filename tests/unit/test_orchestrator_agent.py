@@ -143,3 +143,15 @@ def test_get_orchestrator_system_prompt_by_librarian_id() -> None:
         assert "88% 진행률" not in prompt
 
 
+def test_orchestrator_system_prompt_contains_emotion_and_out_of_scope_guard() -> None:
+    """CLIAR-216: 오케스트레이터에 감정 표현 공감 및 범위 밖 질문 차단 가드레일이 존재해야 한다."""
+    from discovery.domain.orchestrator.agent import get_orchestrator_system_prompt
+
+    for librarian_id in ("cat", "stork"):
+        prompt = get_orchestrator_system_prompt(librarian_id)
+        assert "감정 표현" in prompt
+        assert "도서 서비스 범위 밖 질문" in prompt
+        assert "도구를 자동으로 호출하지 마세요" in prompt
+
+
+
