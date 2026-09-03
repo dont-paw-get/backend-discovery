@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     librarian_http_timeout_seconds: float = 20.0
     initial_meta_timeout_seconds: float = 1.5
     enable_prompt_caching: bool = False
+    # CLIAR-276: 기존 Prometheus/Grafana/Loki 관측 스택과 완전히 분리된 CloudWatch 커스텀
+    # 메트릭(비용/토큰/캐시 히트율) 발행 스위치. 기본 False — 켜기 전엔 core/cloudwatch_metrics.py
+    # 코드 경로 자체가 실행되지 않는다(`enable_prompt_caching` 선례와 동일한 안전 기본값 패턴).
+    enable_cloudwatch_metrics: bool = False
     library_api_url: str = (
         "http://k8s-dpybbook-backendb-d17a725d36-1113312703.ap-northeast-2.elb.amazonaws.com"
     )
