@@ -84,7 +84,8 @@ CLIAR-171과 CLIAR-216이 `src/discovery/domain/orchestrator/agent.py`의 같은
 | 5 | **CLIAR-235** | ✅ **완료** — 도서 장르 분류 API의 ISBN 단일 요청 필드 개편 (title/author/raw_category 제거 및 ISBN 전용 분류로 간소화) | 없음 |
 | 6 | **CLIAR-236** | ✅ **완료** — 고도화 후 자잘한 버그 수정: Claude Sonnet 5 도구 호출 포맷 붕괴(assistant message prefill ValidationException) 방어 재시도 로직 (`is_tool_call_format_error`, chat/stream_chat 1회 재시도 배선, 단위 테스트 6건) | CLIAR-229 완료 |
 | 7 | **CLIAR-237** | ✅ **완료** — 추천 도서 페이지수를 `RecommendBooksTool` 내부에서 `backend-book` 알라딘 실조회(`GET /api/v1/books/search?isbn=...`)로 검증. ISBN 내부 주석(`<!-- isbn: ... -->`) 파싱·제거, `BookMetadataClient` 신설, 단위 테스트 19건 | CLIAR-236 완료 |
-| 8 | **CLIAR-216** (QA기반 최적화b) | 🔄 **다음 착수 대상** — 공통 가드레일 리팩터 + 안전·엣지·환각·감정 프롬프트 고도화. 블루 스위치 후 서재 오분류(미재현) 엣지 케이스를 이 티켓 Task 2에 편입 | CLIAR-237 완료 |
+| 8 | **CLIAR-216** (QA기반 최적화b) | 🔄 **다음 착수 대상 (CLIAR-257보다 우선, 2026-09-03 확정)** — 공통 가드레일 리팩터 + 안전·엣지·환각·감정 프롬프트 고도화. 블루 스위치 후 서재 오분류(미재현) 엣지 케이스를 Task 2에 편입. **추천 카드 장르 NONE 정확도 개선도 Task 2에 편입**(CLIAR-244 후속) | CLIAR-237 완료 |
+| 9 | **CLIAR-257** (추천 결과 기억하기) | ⏸ **216 이후** — 프론트 `sessionStorage`/전역 상태 캐싱(단기 우선), 백엔드 히스토리 영속화(중장기)는 `.harness/BACKLOG.md` 참고 | CLIAR-216 이후 |
 
 순서 근거: (1) CLIAR-158은 충돌 대상이 없는 순손실 제거이고 계측 기반이 이후 티켓의 판단 근거가 된다. (2) CLIAR-171이 프롬프트를 줄인 뒤에 CLIAR-216이 확장해야 재작업과 회귀 원인 혼선을 피할 수 있다. (3) CLIAR-215는 P1 안전성·인증 공백을 다루지만 구현 위치가 입력 게이트 코드와 `api/deps.py`라 프롬프트와 충돌하지 않아 앞으로 당겼다. 계획 확정 시 이 근거를 `.harness/DECISIONS.md`에 기록했다.
 
@@ -225,6 +226,8 @@ support assistant message prefill. The conversation must end with a user message
     - 비위기 일상 감정(스트레스, 분노, 슬픔 등) 토로 시 페르소나별 1인칭 공감 멘트와 함께 마음을 달래주는 힐링 도서 추천으로 자연스럽게 연계 (QA 31, 32번 대응).
   - **범위 밖 질문 정중한 한계 안내**:
     - 주식 투자, 코딩 등 비도서 전문 분야 질문 시 서비스 범위를 정중히 안내하고 관련 도서 탐색을 제안하도록 유도 (QA 34번 대응).
+  - **추천 카드 장르 NONE 정확도 개선 (CLIAR-244에서 편입, 2026-09-03)**:
+    - 추천 카드 장르는 `classify-genre` API·알라딘 카테고리가 아니라 추천 에이전트가 Tavily 웹 스니펫(400자)+사전지식만으로 `- **장르**:`를 추론하는 구조라, 단서가 약하면 NONE으로 떨어진다. #44에서 "NONE 도피 금지" 프롬프트를 넣었으나 대증요법. 배포 실측 후 NONE 빈도가 여전히 높으면 근본 해결책 착수: (a) `RecommendBooksTool`이 페이지수 검증 시 이미 호출하는 `backend-book`에서 알라딘 카테고리도 받아 `match_standard_genre`로 확정 매핑, 또는 (b) 추천 이유 텍스트를 `match_standard_genre`로 후처리 fallback 매핑. 등록 자동매칭 자체는 정상 동작하므로(장르가 NONE이 아니면 폼에 자동 반영됨) NONE 빈도를 줄이는 게 목표.
 - [ ] **Task 3: QA 러너(`scripts/qa_runner.py`) 전체 46건 재실측 및 통과율 검증**
   - 로컬 서버 기동 후 46개 QA 케이스 실행하여 P1/P2/P3 우선순위별 응답 품질, 의도 분기 및 레이턴시 전수 점검.
 - [ ] **Task 4: 정적 분석, 단위 테스트 갱신 및 문서 동기화**

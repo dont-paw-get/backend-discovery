@@ -1064,3 +1064,18 @@
 ### 다음 세션이 할 일
 - dev 배포 후 배포 환경에서 (1) 상단 미스터리 칩 사라짐, (2) 등록 시 장르 자동 매칭, (3) NONE 빈도 감소를 실측 확인.
 - CLIAR-257(추천 결과 기억하기, 프론트 sessionStorage) 착수 검토.
+
+
+
+## 2026-09-03 (이어서 2) — 프론트 유실 커밋 복구(PR #129) 및 216>257 우선순위 확정
+- **PR #128 squash 머지 누락 발견**: CLIAR-244 프론트 4커밋 중 첫 커밋(장르 칩)만 develop에 들어가고 나머지(상단 미스터리 칩 제거, 등록 자동매칭, bookExtractor genre 보존)가 유실됨. develop의 `WeatherMoodBadge.jsx`에 옛 `genre_focus` 칩 코드가 그대로 남아있어 배포 환경에서 미스터리 칩이 안 사라진 원인이었음.
+- **복구**: 유실 커밋이 담긴 원격 브랜치(`CLIAR-244-Recommended-Book-Genre-Chip`, 헤드 479ce72)를 `CLIAR-244-Signal-Genre-Chip-Removal`로 가져와 develop에 rebase(충돌 없음) → **PR #129 생성·머지 완료**. develop에서 `if (genreFocus)` 칩 코드 제거 확인.
+- **dev 배포 실측(사용자 확인)**: 상단 미스터리 칩 사라짐 ✅, 등록 자동매칭 "어느 정도" 동작 ✅. "어느 정도"인 이유는 장르가 NONE으로 뽑힌 책은 넘길 값이 NONE이라 등록 폼도 미지정이 되기 때문(자동매칭 로직 자체는 정상).
+- **추천 카드 장르 NONE 원인 규명(코드 확인)**: 추천 카드 장르는 `classify-genre` API·알라딘 카테고리를 안 쓴다. 추천 에이전트가 `book_search_tool.py`의 Tavily 웹 스니펫(title/url/content 400자)+사전지식만으로 `- **장르**:`를 추론하는 구조라, 단서가 약하면 NONE으로 떨어진다. #44 프롬프트 강화는 대증요법이며 근본 해결(알라딘 카테고리 확정 매핑 or 추천이유 후처리 매핑)은 CLIAR-216 Task 2로 편입.
+- **우선순위 확정**: CLIAR-216(QA 가드레일)을 CLIAR-257(추천 결과 기억하기)보다 먼저. 근거는 `.harness/DECISIONS.md` 최상단 참고. PLAN 진행 순서표에 216(순서8)·257(순서9) 반영.
+
+### 다음 세션이 할 일
+1. **원격 브랜치 정리**: `git push origin --delete CLIAR-244-Recommended-Book-Genre-Chip` (모든 커밋 develop 반영됨, 안전). 로컬 `CLIAR-244-harness-sync`도 머지 후 정리.
+2. **CLIAR-216 착수** (257보다 먼저): `develop`에서 `CLIAR-216-Prompt-Guardrails` 분기. Task 1(공통 가드레일 `SHARED_GUARDRAILS` 모듈화) → Task 2(QA 엣지케이스 + **추천 카드 장르 NONE 정확도 개선 편입**) → Task 3(QA 46건 실측) → Task 4(검증/문서).
+3. dev 배포 후 백엔드 #43(페이지수 2단조회)·#44(장르 NONE 방어) 효과 실측(페이지수 채워짐, NONE 빈도 감소).
+4. CLIAR-257은 216 이후.
