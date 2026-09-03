@@ -25,6 +25,19 @@
 
 ---
 
+## [코드 완료 · 로컬 실측 검증 · dev 배포 대기] 페이지수 2단 조회 + Authorization 패스스루 (CLIAR-237 재수정)
+
+**배경 (2026-09-02~03 실측)**: 사용자가 "페이지수를 못 가져오는 경우"를 제보. dev 실서버에 실제 HTTP 호출로 확인한 결과 두 근본 원인을 확정했다:
+1. `by-title-author`와 `search?isbn=` **두 엔드포인트 모두 무인증 호출 시 401**(`UNAUTHORIZED`)을 반환한다. 기존 `fetch_by_title_author`는 Authorization을 안 보내 실서비스에서 항상 401 → `None`.
+2. `by-title-author`는 ISBN은 반환하지만 **목록 검색만 수행하여 `totalPages`가 항상 null**이다. 같은 책(사피엔스 9788934972464)이 `search?isbn=`(ISBN 상세 조회)에서는 `totalPages: 648`로 정상 반환됨을 실측 확인. 즉 CLIAR-237 후속에서 ISBN 경로를 버리고 by-title-author로 전환한 것이 페이지수를 주는 쪽을 버린 셈이 됐다.
+
+**해결(A안, 사용자 확정)**: `by-title-author`(제목·저자→ISBN) + `search?isbn=`(ISBN→페이지수) 2단 조회로 두 문제를 모두 우회. Authorization 토큰을 라우터→서비스→도구→클라이언트로 패스스루. 구현 세부는 `.harness/STATE.md` 참고. 실 토큰 실측으로 사피엔스648/백야행592/돈의심리학416/어린왕자136 정상 확보 확인.
+
+**남은 작업**:
+- [ ] dev 배포 후 실제 추천 요청으로 `recommended_books[i].page_count`가 채워지는지 확인(로컬 실측은 완료, dev 파이프라인 통합 확인만 남음)
+
+---
+
 ## [코드 구현 완료 · dev 실측 대기] CLIAR-244: 도서 추천 카드 장르(16개 표준) 필드 추가
 
 **배경 (2026-09-02, 스크린샷으로 재확인)**: 지금 프론트 상단 칩에 "미스터리"가 이미 표시되고 있으나, 이 값은 `ChatResponse.signals.genre_focus`(`backend-librarian`이 대화 분석으로 자유 판단한 `list[str] | str`, 코드로 확인: `librarian_response.py:58`)로 **16개 표준 `StandardGenre` Enum 매핑을 거치지 않은 값**이다. 사용자 요청: (1) 상단 칩에는 날씨/시간대/분위기만 남기고 장르 칩은 제거, (2) 대신 **각 도서 카드 내부**(저자 옆)에 그 도서의 실제 표준 장르를 표시, (3) "등록하기" 버튼 클릭 시 이 장르 값이 등록 요청 페이로드에 함께 실려야 함 — 즉 표시 이동이 아니라 `RecommendedBookCard`에 구조화 필드로 편입되어야 하는 문제.
@@ -36,15 +49,6 @@
 **남은 작업**:
 - [ ] dev 배포 후 실제 추천 요청으로 `recommended_books[i].genre` 필드가 채워지는지 확인
 - [ ] 프론트 전달 사항 정리 완료 (`.harness/HANDOFF.md` 참고)
-
----
-
-## [코드 구현 완료 · dev 실측 대기] 제목·저자 기반 알라딘 조회 API 연동 (CLIAR-237 브랜치 연장)
-
-**배경**: CLIAR-237 dev 실측 결과 LLM이 ISBN을 못 찾아 `page_count: null`로 남는 사례가 빈번함을 확인해, 팀원(backend-book)에게 요청한 `GET /api/v1/books/search/by-title-author`(제목·저자 교집합 검색) API를 연동했다. ISBN 경로(`<!-- isbn: ... -->` 주석, `fetch_total_pages` 호출)는 완전히 제거하고 title/author 기반으로 통일했다(사용자 확정, 2026-09-02). 구현 완료 세부는 `.harness/STATE.md` 참고.
-
-**남은 작업**:
-- [ ] dev 배포 후 "백야행", "유리 세공" 등 기존에 `page_count: null`로 남던 사례 재현하여 title/author 경로 동작 확인
 
 ---
 
@@ -205,14 +209,27 @@ support assistant message prefill. The conversation must end with a user message
 
 ### [상세 계획 수립 대상] CLIAR-216: QA 데이터셋 기반 가드레일 및 프롬프트 고도화 (CLIAR-237 완료 후 착수)
 
-브랜치: `CLIAR-216-Prompt-Guardrails` (CLIAR-171 머지 후 `develop`에서 분기)
+브랜치: `CLIAR-216-Prompt-Guardrails` (`develop` 최신 헤드에서 분기)
 
 - [ ] **Task 1: 블루/슈빌 프롬프트 공통 가드레일(`SHARED_GUARDRAILS`) 모듈화 리팩터링**
-  - `agent.py`에서 중복되는 도구 분기/서재 안내/안전 가드레일을 공통 상수로 분리하고 페르소나 어조만 조합하도록 정돈
+  - [`src/discovery/domain/orchestrator/agent.py`](file:///Users/jangchangho/backend-discovery/src/discovery/domain/orchestrator/agent.py)에서 블루/슈빌 프롬프트의 공통 분기 규칙, 서재 전용 카드(`### 📚`), 추천 카드 재작성 금지, 내부 메타데이터 노출 금지 규칙을 `SHARED_GUARDRAILS` 상수로 통합 분리.
+  - 페르소나별 어조(`~다냥 🐾` vs `두둥! 🪶`), 특화 장르 및 사서 스위칭 멘트만 주입하는 모듈식 구조로 정돈.
 - [ ] **Task 2: QA 46건 실측 기반 프롬프트 엣지 케이스 보강**
-  - 환각 방지(없는 책 지어내기 방어 지침 강화), 감정/위로 대화의 페르소나 공감 톤 보강
+  - **날씨 추천 시 위치 좌표 미전달/대기 무중단(Fail-Safe) 가드레일**:
+    - 날씨 기반 도서 추천 질의 시 디바이스 위치 권한 허용 대기나 좌표 누락(`latitude`/`longitude` 없음) 상황에서도 사용자에게 위치 권한을 요구하거나 응답을 지연하지 않고, 기본 서울 날씨 및 계절감을 바탕으로 지체 없이 즉시 도서 추천(`recommend_books`)을 진행하는 명시적 지침 추가 (QA 12~14번 대응).
+  - **사서 전환(`switch_to`) 후 서재 오분류 방어**:
+    - 블루 사서로 전환된 후 사용자가 일반 도서 추천을 요청했을 때 이를 서재 조회(`search_my_library`)로 잘못 라우팅하지 않고 외부 도서 추천(`recommend_books`)을 올바르게 수행하도록 분기 지침 강화.
+  - **환각(Hallucination) 방지 지침 강화**:
+    - 검색 도구(`recommend_books`) 결과에 없는 책을 임의로 지어내지 않고, 검색 결과가 부족한 경우 솔직하게 한계를 인정하고 대안을 제시하도록 방어 지침 보강 (QA 20, 21번 대응).
+  - **감정/위로 대화의 페르소나 공감 톤 보강**:
+    - 비위기 일상 감정(스트레스, 분노, 슬픔 등) 토로 시 페르소나별 1인칭 공감 멘트와 함께 마음을 달래주는 힐링 도서 추천으로 자연스럽게 연계 (QA 31, 32번 대응).
+  - **범위 밖 질문 정중한 한계 안내**:
+    - 주식 투자, 코딩 등 비도서 전문 분야 질문 시 서비스 범위를 정중히 안내하고 관련 도서 탐색을 제안하도록 유도 (QA 34번 대응).
 - [ ] **Task 3: QA 러너(`scripts/qa_runner.py`) 전체 46건 재실측 및 통과율 검증**
+  - 로컬 서버 기동 후 46개 QA 케이스 실행하여 P1/P2/P3 우선순위별 응답 품질, 의도 분기 및 레이턴시 전수 점검.
 - [ ] **Task 4: 정적 분석, 단위 테스트 갱신 및 문서 동기화**
+  - 정적 분석(`ruff`, `mypy`) 및 전체 단위 테스트 통과 확인.
+  - `.harness/STATE.md`, `.harness/DECISIONS.md`, `.harness/HANDOFF.md` 동기화.
 
 ### 백로그로 이관 (이번 범위 제외)
 

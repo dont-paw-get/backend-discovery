@@ -38,6 +38,7 @@ class RecommendBooksTool:
         count: int = 2,
         librarian_id: str | None = None,
         session_id: str | None = None,
+        auth_token: str | None = None,
     ) -> str:
         """추천 에이전트를 생성하여 도서 추천 및 웹 검색을 수행하고 결과를 반환한다.
 
@@ -64,7 +65,7 @@ class RecommendBooksTool:
         result = await agent.invoke_async(prompt=prompt)
         raw_text = extract_text_from_message(result.message)
         truncated_text = truncate_books_by_count(raw_text, count=clamped_count)
-        processed_text = await self._verify_page_counts(truncated_text)
+        processed_text = await self._verify_page_counts(truncated_text, auth_token=auth_token)
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         metrics_summary = (
@@ -83,12 +84,13 @@ class RecommendBooksTool:
         )
         return processed_text
 
-    async def _verify_page_counts(self, markdown: str) -> str:
+    async def _verify_page_counts(self, markdown: str, auth_token: str | None = None) -> str:
         """마크다운의 각 `### 📖` 도서 블록에서 제목/저자를 추출해 페이지수를 검증하고,
         검증된 값으로 `({페이지수}쪽)` 표기를 덮어쓴다.
 
         `book_metadata_client`가 배선되지 않았거나 제목/저자를 파싱할 수 있는 블록이
-        하나도 없으면 원본을 그대로 반환한다.
+        하나도 없으면 원본을 그대로 반환한다. `auth_token`은 backend-book 서지 조회
+        API가 요구하는 사용자 인증 토큰으로, `fetch_by_title_author`까지 패스스루된다.
         """
         if self._book_metadata_client is None:
             return markdown
@@ -103,7 +105,9 @@ class RecommendBooksTool:
         titles = list(author_by_title.keys())
         verified_pages = await asyncio.gather(
             *(
-                self._book_metadata_client.fetch_by_title_author(t, author_by_title[t])
+                self._book_metadata_client.fetch_by_title_author(
+                    t, author_by_title[t], auth_token=auth_token
+                )
                 for t in titles
             )
         )
@@ -122,8 +126,13 @@ class RecommendBooksTool:
         self,
         librarian_id: str | None = None,
         session_id: str | None = None,
+        auth_token: str | None = None,
     ) -> Any:
-        """Strands 오케스트레이터 에이전트에 등록할 @tool 함수를 반환한다."""
+        """Strands 오케스트레이터 에이전트에 등록할 @tool 함수를 반환한다.
+
+        `auth_token`은 서비스 레이어에서 클로저로 주입되어(LLM 인자로 노출하지 않음),
+        페이지수 검증 시 backend-book 서지 조회 API 호출에 사용된다.
+        """
 
         @tool(name="recommend_books")
         async def recommend_books_tool(query: str, count: int = 2) -> str:
@@ -140,6 +149,7 @@ class RecommendBooksTool:
                 count=count,
                 librarian_id=librarian_id,
                 session_id=session_id,
+                auth_token=auth_token,
             )
 
         return recommend_books_tool

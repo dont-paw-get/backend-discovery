@@ -1010,3 +1010,41 @@
 2. infra 저장소에 회신: (1) `<SVC>`=`backend-discovery` (2) ServiceMonitor `backend-discovery` / `dpyb-discovery-dev` (3) Micrometer 이름 모방이라 알림 규칙 수정 불필요 — `http_server_requests_seconds_{count,bucket}`, 라벨 `method,uri,status,outcome,application` (4) 스크레이핑 확인 결과.
 3. (후속 검토) `/metrics`가 Ingress `path: /`로 외부 노출됨 — dev 한정 수용, 필요 시 ingress 차단/별도 포트.
 4. Task 6(genre classifier `anthropic.claude-3-haiku-20240307-v1:0` 베어 ID) — 배포 후 실제 401/거부 발생 시 `us.` inference profile로 교체 재검토.
+
+
+
+## 2026-09-03 — 추천 도서 페이지수 2단 조회 + Authorization 패스스루 (CLIAR-237 재수정), 장르 카드 이슈 분류
+- 브랜치: `CLIAR-237-Page-Count-Two-Step-Fetch` (`origin/develop`에서 분기).
+- 사용자가 두 가지를 제보: (1) 추천 도서 페이지수를 못 가져오는 경우가 있음, (2) 장르가 출력되긴 하나 `<li>`로 뜨는데 카드(div) 안 저자 칩 옆에 저자와 동일 포맷으로 넣고 싶음.
+
+### 이슈 1 (페이지수) — 실측으로 근본 원인 2겹 확정 후 A안 구현
+- dev 실서버(`backend-book` ELB)에 직접 curl로 확인:
+  1. `by-title-author`/`search?isbn=` **둘 다 무인증 호출 시 401**(`UNAUTHORIZED`). 기존 `fetch_by_title_author`는 Authorization을 안 보내 실서비스에서 항상 401 → `None`.
+  2. `by-title-author`는 ISBN은 주지만 목록 검색만 하여 **`totalPages`가 항상 null**. 같은 책(사피엔스 9788934972464)이 `search?isbn=`에서는 `totalPages: 648` 정상 반환. 즉 CLIAR-237 후속에서 ISBN 경로를 버린 게 페이지수 소스를 버린 셈.
+- 사용자와 A안 확정(자립 해결) 후 구현:
+  - `BookMetadataClient`: `_build_auth_headers` 헬퍼 추가(Bearer 접두사 자동 처리, 토큰 없으면 헤더 생략). `fetch_total_pages`/`fetch_by_title_author` 모두 `auth_token` 파라미터 추가. `fetch_by_title_author`를 2단 조회로 변경 — by-title-author로 ISBN 획득 → `totalPages`가 null이면 그 ISBN으로 `fetch_total_pages`(search?isbn=) 재조회. `totalPages`가 직접 오면(향후 backend-book 개선 시) 재조회 생략.
+  - `RecommendBooksTool`: `recommend`/`as_tool`/`_verify_page_counts`에 `auth_token` 배선(클로저 주입, LLM 인자 미노출).
+  - `OrchestratorService._build_agent`: `recommend_tool.as_tool(auth_token=auth_token)` 전달. chat/stream_chat의 `_build_agent` 4개 호출 지점 모두 이미 `auth_token`을 넘기고 있었고, 라우터도 이미 `authorization`을 전달 중이라 서비스 위쪽 배선은 손댈 것 없었음.
+  - 단위 테스트: `test_book_metadata_client.py`에 2단 조회/페이지수 직접 반환/ISBN 없음/auth 헤더 유무 5건 추가, `test_recommend_tool.py` 2건을 auth_token 패스스루 검증으로 갱신. 정적 분석(ruff/mypy) 100%, `pytest -m "not integration"` 259건 통과.
+  - **실 토큰 실측**(사용자 제공 JWT): 사피엔스648 / 백야행592 / 돈의심리학416 / 어린왕자136 — 앞서 by-title-author 단독으로는 전부 null이던 책들이 2단 조회로 정확히 채워짐 확인.
+- B안(팀원이 `by-title-author`에 `totalPages`를 직접 채우도록 개선 → discovery 2단→1단 자동 최적화)은 `.harness/BACKLOG.md`에 기록. 급하지 않음(A안으로 이미 정상 동작).
+
+### 이슈 2 (장르 카드) — 백엔드 무작업, 프론트 전달 사항으로 분류
+- 백엔드는 `ChatResponse.recommended_books[i].genre`(16개 표준 Enum)를 동기 `chat` 응답에 이미 구조화 필드로 내려줌(CLIAR-244). 파서/카드 조립 검증 완료(단위 테스트 통과 + 직접 실행 확인).
+- 현재 프론트는 이 필드를 안 쓰고 `message` 마크다운의 `- **장르**:` 라인을 `<li>`로 렌더링 중. 사용자가 원하는 "저자 칩 옆 카드형"은 프론트 `BookCardView`가 `recommended_books[i].genre`를 읽어 저자 칩과 동일 스타일로 렌더링하는 방향 1로 확정. `.harness/BACKLOG.md`에 프론트 담당 전달 사항으로 기록. **이 레포에는 프론트 코드가 없어 백엔드 작업 없음.**
+
+### 다음 세션이 할 일
+1. 커밋/push/PR은 사용자 명시 요청 대기(아직 안 함). `[CLIAR-237]` 태그, base `develop`.
+2. dev 배포 후 실제 추천 요청으로 `recommended_books[i].page_count`가 채워지는지 파이프라인 통합 확인(로컬 실측은 완료).
+3. 프론트(`my-reading-room`) 담당에게 이슈 2(장르 칩 렌더링) 전달. 프론트 레포 접근 가능해지면 `BookCardView` 직접 수정 가능.
+
+
+## 2026-09-03 — 도서 추천 결과 유지 및 세션 히스토리 영속화 방향 확정 (대기)
+- **요구 배경**: AI 도서 추천 후 [등록하기] 화면으로 이동하거나 취소 복귀 시, 프론트 대화 상태가 초기화되어 이전 추천 도서 카드(2~3권)가 사라져 다시 20~40초씩 걸려 추천 질문을 검색해야 하는 UX 불편 발생.
+- **피드백 및 기술적 분석**:
+  - 단순 히스토리 조회 API(`GET /api/v1/chat/history`)만 열 경우, Redis의 `ChatSessionStore.append_turn`에는 `{"role": ..., "content": ...}` 순수 텍스트만 들어 있어 `RecommendedBookCard`(`title`/`author`/`page_count`/`genre`), `LibraryBookCard`, `switch_to`, `signals` 등의 구조화 데이터가 유실됨 (프론트가 다시 마크다운 정규식 파싱을 하면 CLIAR-229 회귀 발생).
+  - 또한 스트리밍(`stream=true`) 경로에서는 구조화 카드를 생성하지 않고 있어 스트리밍 대화 세션은 백엔드 어디에도 카드가 남지 않음.
+- **결정 및 향후 진행 방향 (사용자 확정)**:
+  - **단기/우선 (프론트엔드)**: `RegisterBook` 화면 이동/복귀 시 `sessionStorage` 또는 전역 상태에 대화 상태/메시지를 캐싱하여 복귀 시 0ms로 즉시 복원 (현재 다른 세션의 작업 완료 후 진행하기로 합의).
+  - **중장기 확장 (백엔드)**: 브라우저 새로고침/재접속 영속성 지원이 공식 요구될 때, (a) `GET /api/v1/chat/history` 엔드포인트 신설 + (b) 세션 턴 구조화 스키마 확장 및 하위 호환 + (c) 스트리밍 종료 시 구조화 카드 생성/저장을 한 세트로 묶어 구현 (내용은 `.harness/BACKLOG.md`에 기록 완료).
+

@@ -75,19 +75,27 @@ async def test_recommend_tool_as_tool_execution(mocker: MockerFixture) -> None:
     )
     tool_instance.recommend = AsyncMock(return_value="추천 도서입니다.")  # type: ignore[method-assign]
 
-    tool_func = tool_instance.as_tool()
+    tool_func = tool_instance.as_tool(auth_token="Bearer test-jwt")
 
     # Strands @tool로 데코레이트된 함수 실행 검증 (기본값 count=2 및 명시적 count=3)
     result_default = await tool_func(query="인문학 책 추천")
     assert result_default == "추천 도서입니다."
     tool_instance.recommend.assert_awaited_with(
-        query="인문학 책 추천", count=2, librarian_id=None, session_id=None
+        query="인문학 책 추천",
+        count=2,
+        librarian_id=None,
+        session_id=None,
+        auth_token="Bearer test-jwt",
     )
 
     result_custom = await tool_func(query="소설 3권 추천", count=3)
     assert result_custom == "추천 도서입니다."
     tool_instance.recommend.assert_awaited_with(
-        query="소설 3권 추천", count=3, librarian_id=None, session_id=None
+        query="소설 3권 추천",
+        count=3,
+        librarian_id=None,
+        session_id=None,
+        auth_token="Bearer test-jwt",
     )
 
 
@@ -173,10 +181,13 @@ async def test_recommend_verifies_page_count_via_title_author(
         book_metadata_client=mock_metadata_client,
     )
 
-    result_text = await tool_instance.recommend(query="돈에 관한 책 추천해줘", count=1)
+    result_text = await tool_instance.recommend(
+        query="돈에 관한 책 추천해줘", count=1, auth_token="Bearer test-jwt"
+    )
 
+    # auth_token이 fetch_by_title_author까지 패스스루되는지 검증(무인증 401 방지).
     mock_metadata_client.fetch_by_title_author.assert_awaited_once_with(
-        "돈의 심리학", "모건 하우절"
+        "돈의 심리학", "모건 하우절", auth_token="Bearer test-jwt"
     )
     assert "(352쪽)" in result_text
     assert "약 300쪽" not in result_text
