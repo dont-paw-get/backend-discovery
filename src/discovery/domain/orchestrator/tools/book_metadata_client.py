@@ -7,11 +7,18 @@ CLIAR-237: 추천 에이전트(LLM+Tavily 웹검색)가 생성한 페이지수�
 CLIAR-237 후속(2026-09-02): 최초 설계는 LLM이 생성한 ISBN 내부 주석
 (`<!-- isbn: ... -->`)으로 `GET /api/v1/books/search?isbn=...`를 호출하는 방식이었으나,
 LLM이 ISBN 자체를 못 찾아 주석을 생략하는 사례가 dev 실측에서 빈번하게 확인되어
-`GET /api/v1/books/search/by-title-author`(제목·저자 교집합 검색)로 완전히 전환했다.
-추천 에이전트가 이미 파싱해 알고 있는 도서명/저자를 그대로 넘기면 되므로 LLM에게
-ISBN을 요구할 필요가 없어졌다. `fetch_total_pages`(ISBN 조회)는 이 파이프라인에서는
-더 이상 호출되지 않지만, 향후 다른 용도(예: 서재 등록 후 검증) 재사용 가능성을 위해
-삭제하지 않고 유지한다.
+`GET /api/v1/books/search/by-title-author`(제목·저자 교집합 검색)로 전환했다.
+
+CLIAR-237 재수정(2026-09-02 실측): 두 가지가 추가로 확인됐다.
+1. 두 엔드포인트 모두 무인증 호출 시 401(`UNAUTHORIZED`)을 반환한다 → 사용자 Bearer
+   토큰을 반드시 패스스루해야 한다.
+2. `by-title-author`는 ISBN은 반환하지만 목록 검색만 수행하여 `totalPages`가 항상
+   null이다. 반면 `GET /api/v1/books/search?isbn=...`(ISBN 상세 조회)는 같은 책에
+   `totalPages`를 정상 반환한다(사피엔스 ISBN 9788934972464 실측: by-title-author=null,
+   isbn 조회=648).
+따라서 `fetch_by_title_author`는 "제목·저자 → ISBN(by-title-author) → 페이지수
+(search?isbn=)"의 2단 조회로 페이지수를 확보한다. `fetch_total_pages`는 이 2단 조회의
+2단계로 재사용된다.
 
 이 클라이언트는 LLM에게 노출되는 Strands `@tool`이 아니라, 도메인 도구
 (`RecommendBooksTool`)가 추천 카드 조립 후 내부적으로 호출하는 순수 HTTP 클라이언트다.
@@ -30,8 +37,22 @@ from discovery.domain.orchestrator.book_metadata_response import (
 logger = logging.getLogger(__name__)
 
 
+def _build_auth_headers(auth_token: str | None) -> dict[str, str]:
+    """Authorization 헤더 딕셔너리를 만든다.
+
+    `backend-book`의 서지 조회 API는 무인증 호출 시 401을 반환하므로(dev 실측 확인),
+    사용자 Bearer 토큰을 반드시 전달해야 한다. `auth_token`이 없으면 빈 헤더를 반환한다
+    (호출부는 401 → None graceful degradation으로 흡수).
+    """
+    headers = {"Accept": "application/json"}
+    if auth_token and auth_token.strip():
+        token = auth_token.strip()
+        headers["Authorization"] = token if token.startswith("Bearer ") else f"Bearer {token}"
+    return headers
+
+
 class BookMetadataClient:
-    """ISBN으로 `backend-book`의 알라딘 서지 조회 API를 호출해 페이지수를 검증하는 클라이언트."""
+    """`backend-book`의 알라딘 서지 조회 API를 호출해 페이지수를 검증하는 클라이언트."""
 
     def __init__(
         self,
@@ -41,15 +62,33 @@ class BookMetadataClient:
         self._settings = settings
         self._http_client = http_client
 
-    async def fetch_total_pages(self, isbn: str) -> int | None:
-        """ISBN으로 정확한 총 페이지 수를 조회한다.
+    async def _get(
+        self, url: str, params: dict[str, str], auth_token: str | None
+    ) -> httpx.Response | None:
+        """공통 GET 실행 헬퍼. 예외는 삼키고 `None`을 반환한다(graceful degradation)."""
+        headers = _build_auth_headers(auth_token)
+        timeout = self._settings.book_metadata_timeout_seconds
+        if self._http_client is not None:
+            return await self._http_client.get(
+                url, params=params, headers=headers, timeout=timeout
+            )
+        async with httpx.AsyncClient() as client:
+            return await client.get(url, params=params, headers=headers, timeout=timeout)
 
-        네트워크 오류, 타임아웃, 4xx/5xx, 응답 파싱 실패 등 어떤 이유로든 조회에
-        실패하면 예외를 전파하지 않고 `None`을 반환한다(graceful degradation) —
-        호출부는 이 경우 기존 LLM 생성값 또는 `None`을 그대로 유지해야 한다.
+    async def fetch_total_pages(self, isbn: str, auth_token: str | None = None) -> int | None:
+        """ISBN으로 정확한 총 페이지 수를 조회한다(`GET /api/v1/books/search?isbn=...`).
+
+        이 엔드포인트는 ISBN 상세 조회(알라딘 ItemLookup)까지 수행하므로 `totalPages`가
+        채워진다(제목·저자 검색 엔드포인트는 목록 검색만 하여 `totalPages`가 null인 것과
+        대비됨 — dev 실측 확인, 2026-09-02).
+
+        네트워크 오류, 타임아웃, 4xx/5xx(무인증 401 포함), 응답 파싱 실패 등 어떤
+        이유로든 조회에 실패하면 예외를 전파하지 않고 `None`을 반환한다
+        (graceful degradation).
 
         Args:
             isbn: 10자리 또는 13자리 숫자 ISBN.
+            auth_token: 사용자 Bearer 토큰(라우터에서 패스스루). 미전달 시 401로 None.
 
         Returns:
             알라딘/서재 데이터에서 확인된 총 페이지 수. 조회 실패 또는 정보 없음이면 `None`.
@@ -60,19 +99,13 @@ class BookMetadataClient:
         base = self._settings.book_metadata_api_url.rstrip("/")
         url = f"{base}/api/v1/books/search"
         params = {"isbn": isbn.strip()}
-        timeout = self._settings.book_metadata_timeout_seconds
 
         try:
-            if self._http_client is not None:
-                response = await self._http_client.get(url, params=params, timeout=timeout)
-            else:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, params=params, timeout=timeout)
-
-            if response.status_code != 200:
+            response = await self._get(url, params, auth_token)
+            if response is None or response.status_code != 200:
                 logger.warning(
-                    "Book metadata API returned status %d for isbn=%s",
-                    response.status_code,
+                    "Book metadata API returned status %s for isbn=%s",
+                    response.status_code if response is not None else "N/A",
                     isbn,
                 )
                 return None
@@ -88,17 +121,26 @@ class BookMetadataClient:
             )
             return None
 
-    async def fetch_by_title_author(self, title: str, author: str) -> int | None:
-        """제목과 저자로 알라딘 교집합 검색을 수행해 총 페이지 수를 조회한다.
+    async def fetch_by_title_author(
+        self, title: str, author: str, auth_token: str | None = None
+    ) -> int | None:
+        """제목·저자로 알라딘 교집합 검색을 수행해 총 페이지 수를 조회한다.
 
-        네트워크 오류, 타임아웃, 4xx/5xx, 응답 파싱 실패, 검색 결과 없음(`book` 필드
-        생략) 등 어떤 이유로든 조회에 실패하면 예외를 전파하지 않고 `None`을
-        반환한다(graceful degradation) — 호출부는 이 경우 기존 LLM 생성값 또는
-        `None`을 그대로 유지해야 한다.
+        2단 조회(dev 실측 기반, 2026-09-02):
+        `GET /api/v1/books/search/by-title-author`는 교집합 도서의 ISBN은 반환하지만
+        목록 검색만 수행하여 `totalPages`가 항상 null이다. 따라서 여기서 얻은 ISBN으로
+        `fetch_total_pages`(`GET /api/v1/books/search?isbn=...`, ISBN 상세 조회)를 재호출해
+        정확한 페이지수를 확보한다. 만약 by-title-author가 예외적으로 `totalPages`를
+        직접 채워주면(향후 backend-book 개선 시) 재조회 없이 그 값을 그대로 쓴다.
+
+        네트워크 오류, 타임아웃, 4xx/5xx(무인증 401 포함), 응답 파싱 실패, 검색 결과
+        없음(`book` 필드 생략) 등 어떤 이유로든 조회에 실패하면 예외를 전파하지 않고
+        `None`을 반환한다(graceful degradation).
 
         Args:
             title: 도서 제목.
             author: 저자명.
+            auth_token: 사용자 Bearer 토큰(라우터에서 패스스루). 미전달 시 401로 None.
 
         Returns:
             검증된 총 페이지 수. 조회 실패 또는 검색 결과 없음이면 `None`.
@@ -109,26 +151,29 @@ class BookMetadataClient:
         base = self._settings.book_metadata_api_url.rstrip("/")
         url = f"{base}/api/v1/books/search/by-title-author"
         params = {"title": title.strip(), "author": author.strip()}
-        timeout = self._settings.book_metadata_timeout_seconds
 
         try:
-            if self._http_client is not None:
-                response = await self._http_client.get(url, params=params, timeout=timeout)
-            else:
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, params=params, timeout=timeout)
-
-            if response.status_code != 200:
+            response = await self._get(url, params, auth_token)
+            if response is None or response.status_code != 200:
                 logger.warning(
-                    "Book search-by-title-author API returned status %d for title=%s",
-                    response.status_code,
+                    "Book search-by-title-author API returned status %s for title=%s",
+                    response.status_code if response is not None else "N/A",
                     title,
                 )
                 return None
 
             data = response.json()
             parsed = BookSearchByTitleAuthorResponse.model_validate(data)
-            return parsed.total_pages
+
+            # 1) by-title-author가 페이지수를 직접 주면 그대로 사용(향후 개선 대비).
+            if parsed.total_pages is not None:
+                return parsed.total_pages
+
+            # 2) 페이지수가 null이면(현재 기본 동작), 얻은 ISBN으로 상세 조회 재시도.
+            isbn = parsed.isbn
+            if isbn:
+                return await self.fetch_total_pages(isbn, auth_token=auth_token)
+            return None
         except Exception:
             logger.warning(
                 "Failed to fetch book metadata for title=%s, author=%s (falling back to None)",

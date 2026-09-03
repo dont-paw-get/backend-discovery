@@ -175,6 +175,7 @@ class OrchestratorService:
                 self._recommend_tool.as_tool(
                     librarian_id=librarian_id,
                     session_id=session_id,
+                    auth_token=auth_token,
                 )
             )
         if self._librarian_tool is not None:
