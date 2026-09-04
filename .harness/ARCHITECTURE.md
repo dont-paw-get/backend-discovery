@@ -27,7 +27,7 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 | 캐시/세션 | Redis 7 (redis.asyncio) — 대화 세션 및 메타 관리 |
 | 에이전트 | Strands Agents SDK (Orchestrator + Agent-as-a-Tool) |
 | 웹 검색 도구 | Tavily API (`search_depth="basic"` 고정, `sanitize_search_results` 페이로드 축소) |
-| LLM | AWS Bedrock via boto3, Claude Sonnet 5 글로벌 프로필 (`global.anthropic.claude-sonnet-5`, `us-east-1`). `max_tokens`만 전달하고 `temperature`/`top_p`/`top_k`는 전달하지 않는다(Sonnet 5에서 모두 미지원, deprecated ValidationException 유발 — CLIAR-171). |
+| LLM | AWS Bedrock via boto3, Claude Haiku 4.5 글로벌 프로필 (`global.anthropic.claude-haiku-4-5-20251001-v1:0`, `us-east-1`, CLIAR-278, 2026-09-04 — Sonnet 5 대비 레이턴시 개선 목적으로 교체, 단발 호출 실측 평균 약 42% 단축). `max_tokens`만 전달하고 `temperature`/`top_p`/`top_k`는 전달하지 않는다(Sonnet 5에서 확인된 제약을 그대로 유지 — CLIAR-171). |
 | 패키지 관리 | uv (`pyproject.toml` + `uv.lock`) |
 | 정적 분석 | ruff, mypy |
 | 테스트 | pytest, pytest-asyncio, pytest-mock, testcontainers(redis), httpx |

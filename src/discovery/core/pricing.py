@@ -4,20 +4,22 @@ CLIAR-276: LLM 파이프라인 자체의 비용 관측이 비어 있어(토큰 �
 환산되지 않음), 이 모듈이 그 계산만 순수 함수로 담당한다. 계산 결과의 소비처(CloudWatch
 전송 등)는 이 모듈의 책임이 아니다 — `core/cloudwatch_metrics.py`가 담당한다.
 
-현재 이 서비스는 Sonnet 5(`global.anthropic.claude-sonnet-5`) 단일 모델만 사용한다
-(`core/config.py`, AGENTS.md SCP 정책상 다른 모델 전환·실측 여유가 없음). 단가 테이블은
-딕셔너리 구조로 두어 향후 모델이 추가되면 행 하나만 추가하면 되도록 확장 지점을 미리
-마련한다(지금은 1개 행만 등록).
+현재 이 서비스는 Sonnet 5(`global.anthropic.claude-sonnet-5`)를 사용 중이며, 레이턴시
+개선을 위해 Haiku 4.5(`global.anthropic.claude-haiku-4-5-20251001-v1:0`) 전환을 검토 중이다
+(2026-09-04). 단가 테이블은 딕셔너리 구조로 두어 모델이 추가되면 행 하나만 추가하면 되도록
+확장 지점을 미리 마련했다 — 실제로 이번에 Haiku 4.5 단가를 그 지점에 추가했다.
 
 단가 출처 및 기준일 (2026-09-04 확인):
-- Anthropic 공식 발표(https://www.anthropic.com/claude/sonnet) 및 Bedrock 리셀러
-  교차 검증(requesty.ai, futureagi.com) 기준 Sonnet 5 정가: 입력 $3/output $15 (1M 토큰당),
+- Sonnet 5: Anthropic 공식 발표(https://www.anthropic.com/claude/sonnet) 및 Bedrock 리셀러
+  교차 검증(requesty.ai, futureagi.com) 기준 정가: 입력 $3/output $15 (1M 토큰당),
   2026-09-01부터 적용(2026-08-31까지의 소개가 $2/$10는 이미 종료됨 — 확인 시점 기준 정가 채택).
-- 프롬프트 캐시 읽기(cache read)는 입력가의 10%로 계산한다(Anthropic 공식 "최대 90% 절감"
-  발표 및 캐시 읽기 실측가 $0.30/M 교차 확인 — 정가 $3 기준 10%와 일치).
+- Haiku 4.5: Anthropic 공식 및 리셀러 교차 검증(felloai.com, requesty.ai, cloudprice.net,
+  openrouter.ai, puter.com 등 다수 일치) 기준 정가: 입력 $1/output $5 (1M 토큰당).
+- 프롬프트 캐시 읽기(cache read)는 두 모델 모두 입력가의 10%로 계산한다(Anthropic 공식
+  "최대 90% 절감" 발표와 일치. Haiku 4.5는 requesty.ai 실측가 $0.10~0.11/1M으로 교차 확인).
 - 프롬프트 캐시 쓰기(cache write, 5분 TTL 기준)는 Anthropic 표준 정책상 입력가의 1.25배로
-  계산한다. 이 서비스는 현재 `enable_prompt_caching=False`(CLIAR-158)라 캐시 쓰기가
-  실제로는 발생하지 않지만, 활성화될 경우를 대비해 단가를 미리 등록해 둔다.
+  계산한다(두 모델 공통). 이 서비스는 현재 `enable_prompt_caching=False`(CLIAR-158)라 캐시
+  쓰기가 실제로는 발생하지 않지만, 활성화될 경우를 대비해 단가를 미리 등록해 둔다.
 - AWS 리전별 단가 차이는 이번 범위에서 반영하지 않는다(글로벌 크로스리전 프로필 사용 중이라
   단일 리전 단가를 특정하기 어려움 — 필요 시 실제 청구서 대비 검증 후 리전별 계수 추가 검토).
 """
@@ -27,6 +29,7 @@ from typing import Final
 
 # 모델 ID는 core/config.py의 librarian_model_id / orchestrator_model_id 값과 1:1 대응한다.
 SONNET_5_MODEL_ID: Final[str] = "global.anthropic.claude-sonnet-5"
+HAIKU_4_5_MODEL_ID: Final[str] = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,12 @@ MODEL_PRICING: Final[dict[str, TokenPricing]] = {
         output_per_1k=0.015,
         cache_read_per_1k=0.0003,
         cache_write_per_1k=0.00375,
+    ),
+    HAIKU_4_5_MODEL_ID: TokenPricing(
+        input_per_1k=0.001,
+        output_per_1k=0.005,
+        cache_read_per_1k=0.0001,
+        cache_write_per_1k=0.00125,
     ),
 }
 

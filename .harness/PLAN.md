@@ -1,5 +1,16 @@
 # PLAN — backend-discovery
 
+## [보류 · 통합 범위 미확정] 사서 에이전트(backend-librarian) → backend-discovery 통합
+
+사용자가 이번 세션에서 보류를 명확히 함. 재개 시 먼저 확정할 것:
+1. 범위: (a) 원격 HTTP 연동 제거 + 기존 로컬 페르소나 엔진(`evaluate_local_persona_response`)
+   단독 사용으로 전환, 아니면 (b) `backend-librarian` 레포의 실제 에이전트/프롬프트 코드를
+   이 레포로 물리적 이전(별도 프로세스 제거).
+2. (b)라면 `backend-librarian`이 다른 팀원 소유 레포인지, 이관 시 그 레포를 폐기해도 되는지
+   먼저 확인 필요.
+
+---
+
 ## [코드 완료 · IAM 승인 완료 · dev 배포/실측 대기] CLIAR-276: Bedrock 비용·캐시 관측 (CloudWatch)
 
 브랜치: `CLIAR-276-Bedrock-Cost-Cache-Observability` (`develop`에서 분기, 2026-09-04)

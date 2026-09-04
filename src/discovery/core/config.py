@@ -2,9 +2,10 @@
 
 AGENTS.md DB 정책: 코드/설정에 접속 정보 기본값을 하드코딩하지 않는다.
 
-Bedrock 모델 가용성 (2026-08-21, 교육 계정 기준 확인): Claude Haiku 4.5/Claude
-Sonnet 4 이상 최신 모델은 `kosa-edu-region-pol`로 전 리전 차단됨. Claude 3 Haiku,
-Claude 3.5 Sonnet은 실제 호출 가능(콘솔+CLI 확인). 상세는 `.harness/BACKLOG.md` 참고.
+Bedrock 모델 가용성 (2026-09-04, 교육 계정 기준 재확인): 2026-08-21 시점에는 Claude
+Haiku 4.5/Sonnet 4 이상이 `kosa-edu-region-pol`로 전 리전 차단되어 있었으나, 그 사이
+계정 권한이 풀려 Sonnet 5(CLIAR-189)와 Haiku 4.5(CLIAR-278) 모두 글로벌 크로스리전
+프로필로 실제 호출 가능함을 `aws bedrock-runtime converse` 직접 호출로 확인했다.
 """
 
 from functools import lru_cache
@@ -33,9 +34,17 @@ class Settings(BaseSettings):
     aws_region: str | None = "us-east-1"
     chat_history_max_turns: int = 20
     chat_session_ttl_seconds: int = 3600
-    # 추천 에이전트 및 오케스트레이터 모델: Claude Sonnet 5 글로벌 크로스리전 프로필
-    librarian_model_id: str = "global.anthropic.claude-sonnet-5"
-    orchestrator_model_id: str = "global.anthropic.claude-sonnet-5"
+    # 추천 에이전트 및 오케스트레이터 모델: Claude Haiku 4.5 글로벌 크로스리전 프로필
+    # (CLIAR-278, 2026-09-04). Sonnet 5(`global.anthropic.claude-sonnet-5`)보다 레이턴시가
+    # 짧은 경량 모델로 교체. 모델 ID는 AWS 공식 문서 기준
+    # (model-card-anthropic-claude-haiku-4-5). 이 계정에서 `aws bedrock-runtime converse`로
+    # 직접 실호출해 정상 응답을 확인했다(latencyMs: 809) — `.harness/BACKLOG.md`의 "Haiku 4.5는
+    # kosa-edu-region-pol로 전 리전 차단" 기록은 그 사이 계정 권한이 풀려 더 이상 사실이 아니다.
+    librarian_model_id: str = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    orchestrator_model_id: str = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    # [Sonnet 5로 롤백 시]
+    # librarian_model_id: str = "global.anthropic.claude-sonnet-5"
+    # orchestrator_model_id: str = "global.anthropic.claude-sonnet-5"
     # [서울 리전 초저지연 fallback 옵션 (TTFT ~600ms)]
     # aws_region: str | None = "ap-northeast-2"
     # librarian_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
