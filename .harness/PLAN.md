@@ -1,5 +1,54 @@
 # PLAN — backend-discovery
 
+## [코드 완료 · dev 배포/실측 대기] CLIAR-282: [오케스트레이터] 속도 및 정확도 최적화
+
+브랜치: `CLIAR-282-Orchestrator-Speed-Accuracy-Optimization` (`develop`에서 분기, 2026-09-04)
+
+**배경**: CLIAR-278(Haiku 4.5)·CLIAR-281(search_books 1회 강제) 이후에도 12.7초→5초로
+줄었을 뿐 남은 미계측 간극이 있었고, 별도로 추천 카드 장르 칩이 dev 실측에서 안 뜨는
+버그(LLM이 멀티턴 후반부에서 `- **장르**:` 마크다운 라인 자체를 빼먹음)가 발견됐다.
+사서팀(backend-librarian)의 코드 분석에서 "Strands `BedrockModel`이 매 요청마다 새
+`boto3.Session()`을 만들어 커넥션/TLS 핸드셰이크를 반복한다"는 힌트를 얻어 discovery도
+같은 패턴인지 코드로 확인(`create_librarian_agent`/`create_orchestrator_agent`/
+`genre_classifier_service`가 매 호출마다 새 `BedrockModel` 생성)했고, 이를 근거로
+두 작업(속도+정확도)을 함께 진행했다.
+
+**Task 1 (속도): boto3 세션 재사용**
+- `main.py` lifespan에서 `boto3.Session(region_name=...)`을 프로세스 생명주기 동안
+  1회만 생성해 `app.state.boto_session`에 저장.
+- `create_librarian_agent`/`create_orchestrator_agent`에 `boto_session` 파라미터 추가
+  (주어지면 `region_name`은 무시 — `BedrockModel`이 둘 다 받으면 `ValueError`).
+- `deps.py`에 `get_boto_session` 의존성 추가, `RecommendBooksTool`/`OrchestratorService`/
+  `GenreClassifierService` 생성 지점에 배선. 에이전트 객체(대화 상태) 자체는 여전히
+  매 요청마다 새로 생성해(사서팀이 겪은 싱글턴 상태 오염 문제와 다른 방식) 세션/커넥션
+  풀만 재사용한다.
+- `LibrarianService`(레거시, 라우터 미연결 확인됨)는 이번 범위에서 건드리지 않음.
+
+**Task 2 (정확도): 장르 결정론적 보강**
+- `BookMetadataClient.fetch_isbn_and_pages`(신규, 기존 `fetch_by_title_author`는 하위
+  호환을 위해 유지) — `by-title-author` 조회에서 얻는 ISBN을 페이지수와 함께 반환.
+- `RecommendBooksTool._verify_page_counts`가 파싱된 도서 중 장르가 `NONE`인 것만 골라
+  `GenreClassifierService.classify_genre`(기존 `POST /api/v1/classify-genre` 서비스
+  레이어, ISBN 기반)를 재사용해 재분류하고, `_upsert_genre_for_title`로 마크다운에
+  `- **장르**:` 라인을 삽입(없으면 추가, 있으면 교체)한다.
+- 알라딘/backend-book 응답에 카테고리 필드가 실제로 오는지 미실측 상태라(하네스 기록
+  확인: `totalPages`만 실측됨), 그 필드를 직접 가정하지 않고 기존 ISBN 기반 LLM
+  분류(`classify-genre`)로 폴백하는 방식을 택함 — 실제로 카테고리 필드가 온다는 게
+  향후 확인되면 `BookMetadata` DTO에 필드만 추가해 우선 사용하도록 확장 가능.
+- `genre_classifier_service`가 배선되지 않았거나 ISBN을 못 구했거나 분류가 `NONE`이면
+  원본을 그대로 둔다(추가 손해 없음, graceful).
+
+**검증**: `ruff`/`mypy` 84파일 통과. 단위 테스트 신규 3건(장르 보강/기존 유지/서비스
+미배선 스킵) + 기존 2건(메서드명 변경) 갱신, 전체 284건 통과(무회귀).
+
+**남은 작업**:
+- [ ] dev 배포 후 재실측: (1) `agent_invoke_ms`와 Strands 순수 사이클 시간 사이 간극이
+      boto3 재사용으로 더 줄었는지 확인. (2) 같은 세션에서 여러 턴 도서 추천 요청 시
+      장르 칩이 프론트에 정상적으로 뜨는지 확인(이전엔 멀티턴 후반부에서 누락 재현됨).
+- [ ] 하네스 문서(`STATE.md`/`DECISIONS.md`) 최종 동기화(초안은 이미 반영, 실측 후 보강).
+
+---
+
 ## [보류 · 통합 범위 미확정] 사서 에이전트(backend-librarian) → backend-discovery 통합
 
 사용자가 이번 세션에서 보류를 명확히 함. 재개 시 먼저 확정할 것:

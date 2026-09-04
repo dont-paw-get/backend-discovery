@@ -131,6 +131,7 @@ def create_orchestrator_agent(
     *,
     model_id: str,
     region_name: str | None = None,
+    boto_session: Any = None,
     librarian_id: str | None = None,
     tools: list[Any] | None = None,
     messages: list[dict[str, Any]] | None = None,
@@ -142,7 +143,12 @@ def create_orchestrator_agent(
 
     Args:
         model_id: Bedrock 모델 ID (core/config.py의 Settings.orchestrator_model_id).
-        region_name: AWS 리전. None이면 boto3 기본 설정을 따른다.
+        region_name: AWS 리전. None이면 boto3 기본 설정을 따른다. `boto_session`이
+            주어지면 이 값은 무시된다(BedrockModel이 둘 다 받으면 ValueError).
+        boto_session: 프로세스 생명주기 동안 공유하는 `boto3.Session`(CLIAR-282).
+            매 요청마다 `BedrockModel`이 새 세션/커넥션 풀을 만들던 것을 피해
+            TCP/TLS 핸드셰이크 반복 비용을 줄인다. None이면 기존처럼 매번 새
+            세션이 생성된다(하위 호환).
         librarian_id: 활성화된 사서 ID ('cat' 또는 'stork').
         tools: 에이전트에 등록할 도구 목록 (recommend_books_tool, consult_librarian_tool 등).
         messages: 이전 대화 히스토리 (ChatSessionStore에서 불러온 내역을 Strands 형식으로 변환).
@@ -158,9 +164,12 @@ def create_orchestrator_agent(
     """
     model_kwargs: dict[str, Any] = {
         "model_id": model_id,
-        "region_name": region_name,
         "max_tokens": max_tokens,
     }
+    if boto_session is not None:
+        model_kwargs["boto_session"] = boto_session
+    else:
+        model_kwargs["region_name"] = region_name
     if enable_prompt_caching:
         model_kwargs["cache_config"] = CacheConfig(strategy="auto")
         model_kwargs["cache_tools"] = "default"

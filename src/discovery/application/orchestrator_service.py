@@ -198,6 +198,7 @@ class OrchestratorService:
         library_tool: SearchMyLibraryTool | None = None,
         tools: list[Any] | None = None,
         cloudwatch_publisher: CloudWatchMetricsPublisher | None = None,
+        boto_session: Any = None,
     ) -> None:
         self._session_store = session_store
         self._settings = settings
@@ -206,6 +207,7 @@ class OrchestratorService:
         self._library_tool = library_tool
         self._tools = tools or []
         self._cloudwatch_publisher = cloudwatch_publisher
+        self._boto_session = boto_session
 
     def _build_agent(
         self,
@@ -258,6 +260,7 @@ class OrchestratorService:
         return create_orchestrator_agent(
             model_id=self._settings.orchestrator_model_id,
             region_name=self._settings.aws_region,
+            boto_session=self._boto_session,
             librarian_id=librarian_id,
             tools=active_tools,
             messages=strands_messages if strands_messages else None,

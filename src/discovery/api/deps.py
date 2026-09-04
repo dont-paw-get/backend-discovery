@@ -1,6 +1,7 @@
 """FastAPI 의존성 주입 지점. 테스트에서 이 함수들을 오버라이드해 실제 인프라를 대체한다."""
 
 from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import Depends, Header, HTTPException, Request, status
 from tavily import AsyncTavilyClient
@@ -26,6 +27,16 @@ def get_now() -> datetime:
     AGENTS.md 테스트 원칙: 제어 불가능한 값(현재 시각)은 DI로 받아 결정론적으로 테스트한다.
     """
     return datetime.now(UTC)
+
+
+def get_boto_session(request: Request) -> Any:
+    """CLIAR-282: `main.py` lifespan에서 생성한 프로세스 공유 `boto3.Session`.
+
+    `BedrockModel`(Strands)이 매 요청마다 새 세션/커넥션 풀을 만들던 것을 피해
+    TCP/TLS 핸드셰이크 반복 비용을 줄인다. `app.state.boto_session`이 없으면(예:
+    lifespan을 안 타는 일부 테스트 컨텍스트) None을 반환해 하위 호환을 유지한다.
+    """
+    return getattr(request.app.state, "boto_session", None)
 
 
 def require_authorization_header(
@@ -83,9 +94,19 @@ def get_book_metadata_client() -> BookMetadataClient:
     return BookMetadataClient(settings=settings)
 
 
+def get_genre_classifier_service(
+    boto_session: Any = Depends(get_boto_session),
+) -> GenreClassifierService:
+    """도서 표준 장르 분류 서비스."""
+    settings = get_settings()
+    return GenreClassifierService(settings=settings, boto_session=boto_session)
+
+
 def get_recommend_books_tool(
     book_search_tool: BookSearchTool = Depends(get_book_search_tool),
     book_metadata_client: BookMetadataClient = Depends(get_book_metadata_client),
+    genre_classifier_service: GenreClassifierService = Depends(get_genre_classifier_service),
+    boto_session: Any = Depends(get_boto_session),
 ) -> RecommendBooksTool:
     """도서 추천 에이전트 로컬 도구."""
     settings = get_settings()
@@ -93,6 +114,8 @@ def get_recommend_books_tool(
         book_search_tool=book_search_tool,
         settings=settings,
         book_metadata_client=book_metadata_client,
+        genre_classifier_service=genre_classifier_service,
+        boto_session=boto_session,
     )
 
 
@@ -125,6 +148,7 @@ def get_orchestrator_service(
     librarian_tool: ConsultLibrarianTool = Depends(get_consult_librarian_tool),
     library_tool: SearchMyLibraryTool = Depends(get_search_my_library_tool),
     cloudwatch_publisher: CloudWatchMetricsPublisher = Depends(get_cloudwatch_metrics_publisher),
+    boto_session: Any = Depends(get_boto_session),
 ) -> OrchestratorService:
     """오케스트레이터 에이전트 서비스."""
     settings = get_settings()
@@ -135,6 +159,7 @@ def get_orchestrator_service(
         librarian_tool=librarian_tool,
         library_tool=library_tool,
         cloudwatch_publisher=cloudwatch_publisher,
+        boto_session=boto_session,
     )
 
 
@@ -149,9 +174,3 @@ def get_librarian_service(
         book_search_tool=book_search_tool,
         settings=settings,
     )
-
-
-def get_genre_classifier_service() -> GenreClassifierService:
-    """도서 표준 장르 분류 서비스."""
-    settings = get_settings()
-    return GenreClassifierService(settings=settings)

@@ -52,6 +52,7 @@ async def test_recommend_tool_calls_create_librarian_agent(mocker: MockerFixture
     mock_create_librarian.assert_called_once_with(
         model_id="anthropic.claude-3-haiku-20240307-v1:0",
         region_name="us-east-1",
+        boto_session=None,
         librarian_id=None,
         tools=[mock_search_as_tool],
         enable_prompt_caching=False,
@@ -178,7 +179,7 @@ async def test_recommend_verifies_page_count_via_title_author(
     )
 
     mock_metadata_client = mocker.MagicMock()
-    mock_metadata_client.fetch_by_title_author = AsyncMock(return_value=352)
+    mock_metadata_client.fetch_isbn_and_pages = AsyncMock(return_value=(None, 352))
 
     tool_instance = RecommendBooksTool(
         book_search_tool=mock_search_tool,
@@ -190,8 +191,8 @@ async def test_recommend_verifies_page_count_via_title_author(
         query="돈에 관한 책 추천해줘", count=1, auth_token="Bearer test-jwt"
     )
 
-    # auth_token이 fetch_by_title_author까지 패스스루되는지 검증(무인증 401 방지).
-    mock_metadata_client.fetch_by_title_author.assert_awaited_once_with(
+    # auth_token이 fetch_isbn_and_pages까지 패스스루되는지 검증(무인증 401 방지).
+    mock_metadata_client.fetch_isbn_and_pages.assert_awaited_once_with(
         "돈의 심리학", "모건 하우절", auth_token="Bearer test-jwt"
     )
     assert "(352쪽)" in result_text
@@ -226,7 +227,7 @@ async def test_recommend_keeps_llm_value_when_metadata_lookup_fails(
     )
 
     mock_metadata_client = mocker.MagicMock()
-    mock_metadata_client.fetch_by_title_author = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_isbn_and_pages = AsyncMock(return_value=(None, None))
 
     tool_instance = RecommendBooksTool(
         book_search_tool=mock_search_tool,
@@ -275,3 +276,142 @@ async def test_recommend_skips_verification_without_metadata_client(
     result_text = await tool_instance.recommend(query="동화책 추천해줘", count=1)
 
     assert result_text == raw_text
+
+
+
+@pytest.mark.asyncio
+async def test_recommend_backfills_missing_genre_via_classifier(mocker: MockerFixture) -> None:
+    """CLIAR-282: LLM이 `- **장르**:` 라인을 빼먹은 도서는 backend-book에서 얻은 ISBN으로
+    GenreClassifierService를 재호출해 결정론적으로 장르를 보강한다."""
+    from discovery.api.schemas.genre import BookClassificationResponse, StandardGenre
+
+    mock_search_tool = mocker.MagicMock()
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = mocker.MagicMock()
+    # 장르 라인이 통째로 빠진 실제 dev 재현 케이스.
+    raw_text = (
+        "### 📖 총, 균, 쇠\n"
+        "- **저자**: 재레드 다이아몬드 (784쪽)\n"
+        "- 문명의 흥망성쇠를 파헤치는 지적 모험이다."
+    )
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mocker.patch(
+        "discovery.domain.orchestrator.tools.recommend_tool.create_librarian_agent",
+        return_value=mock_agent,
+    )
+
+    mock_metadata_client = mocker.MagicMock()
+    mock_metadata_client.fetch_isbn_and_pages = AsyncMock(
+        return_value=("9788934972464", None)
+    )
+
+    mock_genre_service = mocker.MagicMock()
+    mock_genre_service.classify_genre = AsyncMock(
+        return_value=BookClassificationResponse(genre=StandardGenre.HISTORY, confidence=0.9)
+    )
+
+    tool_instance = RecommendBooksTool(
+        book_search_tool=mock_search_tool,
+        settings=settings,
+        book_metadata_client=mock_metadata_client,
+        genre_classifier_service=mock_genre_service,
+    )
+
+    result_text = await tool_instance.recommend(query="역사책 추천해줘", count=1)
+
+    mock_genre_service.classify_genre.assert_awaited_once()
+    await_args = mock_genre_service.classify_genre.await_args
+    assert await_args is not None
+    called_request = await_args.args[0]
+    assert called_request.isbn == "9788934972464"
+    assert "- **장르**: HISTORY" in result_text
+
+
+@pytest.mark.asyncio
+async def test_recommend_keeps_existing_genre_without_calling_classifier(
+    mocker: MockerFixture,
+) -> None:
+    """이미 `- **장르**:` 라인이 정상적으로 있으면(NONE이 아니면) classifier를 호출하지
+    않는다(불필요한 LLM 재호출 방지)."""
+    mock_search_tool = mocker.MagicMock()
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = mocker.MagicMock()
+    raw_text = (
+        "### 📖 지구 끝의 온실\n"
+        "- **저자**: 김초엽\n"
+        "- **추천 이유**: SF 감성 소설.\n"
+        "- **장르**: SCIENCE_FICTION"
+    )
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mocker.patch(
+        "discovery.domain.orchestrator.tools.recommend_tool.create_librarian_agent",
+        return_value=mock_agent,
+    )
+
+    mock_metadata_client = mocker.MagicMock()
+    mock_metadata_client.fetch_isbn_and_pages = AsyncMock(return_value=("9791162341234", None))
+
+    mock_genre_service = mocker.MagicMock()
+
+    tool_instance = RecommendBooksTool(
+        book_search_tool=mock_search_tool,
+        settings=settings,
+        book_metadata_client=mock_metadata_client,
+        genre_classifier_service=mock_genre_service,
+    )
+
+    await tool_instance.recommend(query="SF 소설 추천해줘", count=1)
+
+    mock_genre_service.classify_genre.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_recommend_skips_genre_backfill_without_classifier_service(
+    mocker: MockerFixture,
+) -> None:
+    """genre_classifier_service가 배선되지 않으면 장르 보강을 시도하지 않고 원본을
+    그대로 반환한다(기존 동작 무변화, 하위 호환)."""
+    mock_search_tool = mocker.MagicMock()
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = mocker.MagicMock()
+    raw_text = "### 📖 총, 균, 쇠\n- **저자**: 재레드 다이아몬드 (784쪽)"
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mocker.patch(
+        "discovery.domain.orchestrator.tools.recommend_tool.create_librarian_agent",
+        return_value=mock_agent,
+    )
+
+    mock_metadata_client = mocker.MagicMock()
+    mock_metadata_client.fetch_isbn_and_pages = AsyncMock(return_value=("9788934972464", None))
+
+    tool_instance = RecommendBooksTool(
+        book_search_tool=mock_search_tool,
+        settings=settings,
+        book_metadata_client=mock_metadata_client,
+        # genre_classifier_service 미배선
+    )
+
+    result_text = await tool_instance.recommend(query="역사책 추천해줘", count=1)
+
+    assert "- **장르**:" not in result_text

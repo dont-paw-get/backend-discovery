@@ -73,6 +73,7 @@ async def test_orchestrator_service_chat(mocker: MockerFixture) -> None:
     mock_create_agent.assert_called_once_with(
         model_id="anthropic.claude-3-haiku-20240307-v1:0",
         region_name="us-east-1",
+        boto_session=None,
         librarian_id="cat",
         tools=[mock_tool],
         messages=[{"role": "user", "content": [{"text": "이전 대화"}]}],
@@ -129,6 +130,7 @@ async def test_orchestrator_service_passes_enable_prompt_caching_true(
     mock_create_agent.assert_called_once_with(
         model_id=settings.orchestrator_model_id,
         region_name=settings.aws_region,
+        boto_session=None,
         librarian_id="cat",
         tools=[],
         messages=None,

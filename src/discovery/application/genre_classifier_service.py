@@ -42,8 +42,9 @@ def _extract_text_from_message(message: Any) -> str:
 class GenreClassifierService:
     """도서 표준 장르 분류를 수행하는 애플리케이션 서비스."""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, boto_session: Any = None) -> None:
         self._settings = settings
+        self._boto_session = boto_session
 
     def _classify_mock(self, request: BookClassificationRequest) -> BookClassificationResponse:
         """테스트 및 로컬 mock 환경을 위한 결정론적 규칙 기반 분류."""
@@ -64,10 +65,12 @@ class GenreClassifierService:
             return self._classify_mock(request)
 
         try:
-            model = BedrockModel(
-                model_id=self._settings.genre_classifier_model_id,
-                region_name=self._settings.aws_region,
-            )
+            model_kwargs: dict[str, Any] = {"model_id": self._settings.genre_classifier_model_id}
+            if self._boto_session is not None:
+                model_kwargs["boto_session"] = self._boto_session
+            else:
+                model_kwargs["region_name"] = self._settings.aws_region
+            model = BedrockModel(**model_kwargs)
             agent = Agent(
                 model=model,
                 system_prompt=GENRE_CLASSIFIER_SYSTEM_PROMPT,
