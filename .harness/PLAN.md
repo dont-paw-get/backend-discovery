@@ -66,6 +66,12 @@
 - [ ] `genre_classifier_model_id` Haiku 4.5 교체로 `verify_page_counts_ms` 증가분이
       상쇄되는지 재실측.
 - [ ] 하네스 문서(`STATE.md`/`DECISIONS.md`) 최종 동기화(실측 후 보강).
+- [ ] **신규(2026-09-04, 사용자 제보)**: 장르 칩은 정상 노출되지만 페이지수가 안
+      채워지는 현상 재확인. `RecommendBooksTool._verify_page_counts`의 2단 조회
+      (`by-title-author`→ISBN→`search?isbn=`→페이지수) 중 2단계(`fetch_total_pages`)만
+      실패하는 경로로 추정(장르 보강은 ISBN만 있으면 되므로 영향 없음). dev 로그의
+      `Book metadata API returned status ...` 경고로 실패 원인(401/타임아웃/응답 없음)
+      확정 필요.
 
 ---
 
