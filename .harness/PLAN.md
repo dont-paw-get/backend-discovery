@@ -1,12 +1,88 @@
 # PLAN — backend-discovery
 
-## [코드 완료 · PR #55 머지 대기 · dev 배포/실측 대기] CLIAR-282: [오케스트레이터] 속도 및 정확도 최적화
+## [코드 완료 · dev 배포 완료 · 실측 대기] CLIAR-282: 오케스트레이터 LLM 레벨 미계측 지연 원인 조사
+
+**세션 인계 메모 (2026-09-04, 새 세션에서 진행)**: PR #55/#56 모두 `develop`에 머지·dev
+배포 완료(이미지 태그 `dfd2eae08e923afbb093253b3f5402487b17c492`). dev 실측(curl 직접
+호출, 35.8초)으로 캐싱/병렬화(PR #56)는 의도대로 동작 확인(`verify_page_counts_ms`가
+이전 1.3~5.3초에서 41ms로 감소 — 이번 테스트는 가짜 토큰으로 401 처리된 케이스라 실제
+캐시 히트 효과는 미검증이지만 최소 실패 시 즉시 반환은 확인됨). **하지만 사용자가
+"몇 번씩 30초 이상 그대로"라고 제보한 체감 지연은 전혀 해소되지 않았다** — 이번
+스코프(후처리 캐싱/병렬화)가 애초에 건드리지 않은 영역이 병목이기 때문.
+
+**이번 실측(2026-09-04)으로 새로 확정된 사실**:
+- 오케스트레이터 전체 35.72초 = `consult_librarian`(0.32초) + `recommend_books`(18.93초)
+  + **오케스트레이터 자체 재구성/사이클 나머지(16.47초, 46%, 여전히 미계측)**.
+- `recommend_books`(18.93초) 내부 = `agent_creation_ms`(4ms, 무시) +
+  `agent_invoke_ms`(18.88초) + `verify_page_counts_ms`(41ms, PR #56으로 해소 확인).
+  즉 `recommend_books`의 지연은 거의 전부 `agent_invoke_ms`(LLM 추론) 자체다.
+- `agent_invoke_ms`(18.88초) 내부에서 `largest_event_gap_ms: 5370.69ms`가
+  `start_event_loop` 이벤트 직후에서 발생(직전 실측과 정확히 동일한 크기로 재현 —
+  일회성 노이즈가 아니라 구조적으로 반복되는 패턴임을 확인).
+- Strands 1.26 SDK 소스(`event_loop.py`/`streaming.py`)를 직접 읽어 `StartEventLoopEvent`
+  직후 곧바로 `stream_messages()` → `model.stream()`(`BedrockModel`의 `converse_stream`
+  API 호출)이 실행됨을 확인. 즉 이 5.3초는 **Bedrock 자체의 TTFT(첫 토큰까지의 대기시간)
+  구간**이며 Strands/discovery 코드가 그 사이에 무거운 동기 작업을 하는 게 아님
+  (SDK 레벨에서는 이미 확정, 원인은 Bedrock 쪽 — 크로스리전 프로필 특성, 페이로드 크기,
+  스로틀링 등 후보 다수, 아래 조사 계획에서 좁힌다).
+- `strands_metrics.total_cycles: 2`(recommend_books) / `3`(orchestrator) — 오케스트레이터가
+  LLM을 3사이클 도는데, 5.3초 간극이 그중 몇 번째 사이클인지는 현재 로깅이 사이클을
+  구분하지 않고 전체를 하나로 합산해서 찍기 때문에 알 수 없음(조사 계획의 핵심 갭).
+- **오케스트레이터 레벨(`OrchestratorService.chat`)에는 이런 이벤트별 계측이 전혀 없다**
+  (`recommend_tool.py`의 `_on_event`/`_largest_event_gap_ms`만 있고 `orchestrator_service.py`
+  의 `agent.invoke_async(prompt=message)` 호출에는 콜백이 없음, 코드 확인 완료). 즉 16.47초
+  미계측 구간은 관측 자체가 없어 "무엇 때문인지" 조사가 시작도 못 한 상태.
+
+**아직 확인되지 않은 것 (다음 세션이 조사할 것)**:
+- 16.47초(오케스트레이터 자체) 안에서 무슨 일이 일어나는지 — LLM 호출이 몇 번(3사이클
+  중 recommend_books를 뺀 나머지 2사이클?)인지, 각 사이클이 몇 초인지, 도구 실행이 아닌
+  순수 LLM-only 사이클인지.
+- `agent_invoke_ms` 안의 5.3초 간극이 몇 번째 사이클에서 발생하는지, 이 사이클의
+  `inputTokens`가 얼마인지(페이로드 크기와 TTFT의 상관관계 확인 필요).
+- Bedrock 크로스리전 프로필(`global.anthropic.claude-sonnet-5`)의 리전별 실제 TTFT가
+  네이티브 리전(`ap-northeast-2`) 대비 얼마나 느린지 — CLIAR-278에서 Haiku 4.5로 실측한
+  적은 있으나 Sonnet 5 크로스리전 자체의 TTFT를 단독으로 측정한 적은 없음(재확인 필요 —
+  `.harness/DECISIONS.md`에 Haiku 4.5 42% 단축 실측 기록은 있지만 오케스트레이터가 지금
+  실제로 Sonnet 5를 쓰는지 Haiku 4.5인지도 재확인 필요, 로그의 `model=global.anthropic.
+  claude-sonnet-5` 확인됨 — Haiku 4.5로의 전환이 오케스트레이터에는 적용 안 됐을 가능성).
+- 프롬프트 캐싱(`enable_prompt_caching`)이 실제로 켜져 있는지, 켜져 있다면 캐시 히트가
+  이 5.3초에 영향을 주는지(현재 기본값 `False`로 알고 있으나 dev configmap 재확인 필요).
+
+**조사 계획 (다음 세션, 순서대로)**:
+1. **오케스트레이터 레벨 이벤트 계측 추가**: `recommend_tool.py`의 `_on_event`/
+   `_largest_event_gap_ms` 패턴을 `orchestrator_service.py`의 `chat()`/`stream_chat()`에
+   동일하게 적용. 사이클 번호(`total_cycles` 내 순번)를 라벨에 포함시켜 "몇 번째 사이클의
+   TTFT가 느린지" 구분 가능하게 한다(현재 `recommend_tool.py` 계측도 사이클 구분이 없어
+   같이 보강). `invoke_async` API는 그대로 유지(기존 mock 테스트 무영향 원칙 재사용).
+2. **dev 재배포 후 재실측**: 같은 질의로 재현해 사이클별 TTFT 분포, `inputTokens` 크기,
+   간극이 어느 사이클에 몰리는지 확인. 최소 3~5회 반복해 노이즈인지 일관된 패턴인지 확인.
+3. **모델/리전 재확인**: dev configmap의 `ORCHESTRATOR_MODEL_ID`가 실제로 무엇인지,
+   Haiku 4.5 교체(CLIAR-278)가 오케스트레이터에도 적용됐는지 확인. 적용 안 됐다면 그것부터
+   교체가 더 근본적인 해결일 수 있음(Sonnet 5는 reasoning 모델이라 TTFT가 원래 느림 —
+   `.harness/BACKLOG.md`의 "최신 CRIS Reasoning 모델은 TTFT 1.7~2.4초로 실시간 부적합"
+   기록 참고, 5.3초는 이 범위를 크게 초과해 reasoning만으로는 설명 안 될 가능성도 열어둠).
+4. **프롬프트 캐싱 상태 확인**: `enable_prompt_caching` 실제 값, 켜져 있다면
+   `cacheReadInputTokens`가 0인지 확인(캐시 미스가 반복돼 매번 풀 프롬프트를 처리하는지).
+5. **원인이 좁혀지면 대응**: (a) 모델/리전 문제면 교체, (b) 캐싱 미작동이면 활성화 후
+   재실측, (c) 순수 Bedrock 네트워크 레벨 지연이면 Latency-Optimized Inference 지원
+   모델 재조사(BACKLOG에 이미 "Sonnet 5 미지원" 기록 있음 — 대안 모델 검토), (d) 어느
+   것도 아니면 오케스트레이터의 3사이클 자체를 줄이는 방향(CLIAR-281이 recommend_books에
+   했던 "정확히 1회만 호출" 강제를 오케스트레이터 프롬프트에도 적용 검토) 순으로 접근.
+
+**주의(범위 경계)**: 이 조사는 순수 진단이 목적이다. 이전 CLIAR-158/171에서 "직결
+스트리밍"이 Strands `@tool`의 `str` 반환 계약상 아키텍처적으로 불가능하다고 이미 결론
+낸 바 있으므로(`.harness/DECISIONS.md` 2026-09-01), 그 결론을 재검토하려는 게 아니라
+그 제약 안에서 사이클 수·모델·캐싱 레벨의 최적화 여지를 찾는 것이 목표다.
+
+---
+
+## [코드 완료 · develop 머지 완료] CLIAR-282: [오케스트레이터] 속도 및 정확도 최적화 (1~2차, 완료 기록)
 
 브랜치: `CLIAR-282-Orchestrator-Speed-Accuracy-Optimization` (`develop`에서 분기, 2026-09-04)
 
-**PR 상태 (2026-09-04 세션 종료 시점, 중요)**: 1차 PR #54(boto3 재사용 + 장르 보강,
-커밋 `558824d`)는 **머지·dev 배포 완료**. 2차 PR #55(장르 모델 교체 + 이벤트 간극 계측,
-커밋 `458e119`)는 **생성됨, 아직 미머지** — 다음 세션이 사용자 승인 받아 머지 처리할 것.
+**PR 상태 (최종)**: PR #54(boto3 재사용 + 장르 보강), PR #55(장르 모델 교체 + 이벤트
+간극 계측), PR #56(페이지수 타임아웃 수정 + 서지/장르 캐싱 + 후처리 병렬화) **모두
+`develop` 머지 및 dev 배포 완료**.
 
 **배경**: CLIAR-278(Haiku 4.5)·CLIAR-281(search_books 1회 강제) 이후에도 12.7초→5초로
 줄었을 뿐 남은 미계측 간극이 있었고, 별도로 추천 카드 장르 칩이 dev 실측에서 안 뜨는

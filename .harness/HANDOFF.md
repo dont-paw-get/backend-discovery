@@ -1267,3 +1267,73 @@
    혼동하지 않도록 주의.
 5. `.harness/BACKLOG.md`의 "by-title-author가 totalPages를 직접 채우도록 backend-book
    개선 요청" 등 기존 백로그 항목은 이번 세션에서 다루지 않았으므로 여전히 유효.
+
+
+
+## 2026-09-04 — PR #55/#56 머지 완료 확인, dev 실측 검증, 오케스트레이터 미계측 지연 조사 계획 수립
+
+- **PR #55가 이미 03:36에 머지되어 있었음을 발견**: 이전 세션이 "PR #55 머지 대기"로
+  착각하고 같은 head 브랜치(`CLIAR-282-Orchestrator-Speed-Accuracy-Optimization`)에
+  타임아웃 수정·서지/장르 캐싱·후처리 병렬화 커밋을 계속 쌓았으나, 이미 머지된 PR에
+  push한 커밋은 `develop`에 자동 반영되지 않는다는 점을 놓쳤다. `gh pr view 55 --json state`
+  로 `MERGED` 확인 후 `mergedAt: 03:36:01Z`를 근거로 정정.
+- 같은 head 브랜치로 새 PR #56(`develop` 대상)을 생성. `develop`이 그 사이 다시 갱신되며
+  발생한 컨플릭트(문서 중복 섹션, `config.py`/`.env.example` 순수 추가 충돌)를 해결—
+  임시 브랜치(`tmp-merge-check`)에서 먼저 머지·검증한 뒤 fast-forward로 작업 브랜치에
+  반영하는 방식을 사용해 실수 없이 처리. PR #56 push 완료, CI 통과, 사용자가 직접 머지.
+- **머지·dev 자동 배포 확인**: `git log origin/develop`에 `dfd2eae...` (#56) 커밋과
+  `chore(deploy): bump dev image tag` 커밋이 순서대로 확인됨. `kubectl` 직접 조회로
+  `backend-discovery` Deployment의 이미지 태그가 `dfd2eae08e923afbb093253b3f5402487b17c492`
+  로 실제 갱신됐고 파드가 이 이미지로 재기동(`Started: 15:11:55 KST`)됐음을 확인.
+- **dev 실측 검증(`kubectl port-forward` + `curl` 직접 호출, 세션 내 유일한 실제 검증
+  수단 — 프론트가 없어 로그인 토큰이 없으므로 가짜 Bearer 토큰 사용)**: "겨울에 읽으면
+  좋은 책 추천해줘" 질의로 35.84초, 200 정상 응답. 로그(`kubectl logs`)로 분해:
+  - `verify_page_counts_ms: 41.39ms` — PR #56의 캐싱/병렬화 효과 확인(이전 실측 대비
+    1.3~5.3초에서 대폭 감소). 다만 이번 케이스는 가짜 토큰으로 알라딘 조회가 즉시
+    401을 받아 실패 처리된 경로라, "실제 캐시 히트" 자체를 검증한 것은 아니고 "실패
+    시 즉시 반환"만 확인됨(정직하게 구분해서 기록).
+  - `agent_invoke_ms: 18883.55ms`(recommend_books 내부 LLM 추론) — 그 안의
+    `largest_event_gap_ms: 5370.69ms`가 `largest_event_gap_after: "start_event_loop"`로
+    다시 확인됨(직전 실측과 거의 동일한 크기로 재현 — 노이즈가 아니라 반복되는 구조적
+    패턴으로 판단).
+  - 오케스트레이터 전체 `total_duration_ms: 35722.45` = `consult_librarian`(0.32초) +
+    `recommend_books`(18.93초) + **나머지 16.47초(46%, 여전히 완전 미계측)**.
+  - **결론**: PR #56(캐싱+병렬화)은 의도한 구간(페이지수/장르 후처리)에서는 효과가
+    있지만, 사용자가 체감하는 "30초 이상" 지연의 근본 원인(LLM 추론 자체 18.9초 +
+    오케스트레이터 미계측 16.5초, 합쳐서 전체의 98%)은 이번 PR의 스코프 밖이었고
+    전혀 해소되지 않았다. 사용자에게 이 갭을 숨기지 않고 그대로 보고함.
+- **Strands 1.26 SDK 소스 직접 확인(코드 레벨 조사, 추가 배포/실측 없이 완료)**:
+  `event_loop.py`/`streaming.py`를 읽어 `StartEventLoopEvent` 방출 직후 곧바로
+  `stream_messages()` → `model.stream()`(`BedrockModel`의 실제 `converse_stream` API
+  호출)이 실행됨을 확인. 즉 `largest_event_gap_after: "start_event_loop"` 뒤의 5.3초는
+  Strands/discovery 코드가 그 사이에 무거운 동기 작업을 하는 게 아니라 **Bedrock 자체의
+  TTFT(첫 토큰 도착까지의 순수 대기시간)**라는 것이 SDK 레벨에서 확정됨. 이 사실만으로는
+  "왜 5.3초씩 걸리는지"(모델? 리전? 페이로드 크기? 캐싱?)까지는 못 좁혔다 — 그게 다음
+  세션의 조사 대상.
+- **오케스트레이터 레벨에 이벤트 계측이 전혀 없음을 코드로 확인**: `recommend_tool.py`
+  에만 `_on_event`/`_largest_event_gap_ms`(CLIAR-282 이전 세션이 추가)가 있고,
+  `orchestrator_service.py`의 `chat()`/`stream_chat()`이 부르는 `agent.invoke_async`/
+  `agent.stream_async`에는 콜백이 없다. 즉 16.47초 미계측 구간은 애초에 "볼 방법이 없는"
+  상태라 원인 추정 자체가 불가능했다 — 다음 세션의 최우선 작업은 이 계측 추가.
+- `.harness/PLAN.md`에 "오케스트레이터 LLM 레벨 미계측 지연 원인 조사" 섹션을 신설하고
+  기존 CLIAR-282 섹션(1~2차)은 "완료 기록"으로 표시 변경. 5단계 조사 계획(오케스트레이터
+  이벤트 계측 추가 → 재배포 재실측 → 모델/리전 재확인 → 캐싱 상태 확인 → 원인별 대응)을
+  순서대로 기록. CLIAR-158/171에서 "직결 스트리밍은 아키텍처적으로 불가능"이라고 이미
+  내린 결론은 재검토 대상이 아니라는 점을 범위 경계로 명시(과거 결론을 다음 세션이
+  혼동해서 다시 시도하지 않도록 방지).
+- 이번 세션은 코드/설정 변경 없음(순수 조사·검증·계획 수립). 커밋 없음.
+
+### 다음 세션이 할 일
+1. **최우선**: `orchestrator_service.py`의 `chat()`/`stream_chat()`에 `recommend_tool.py`
+   와 동일한 이벤트 콜백 계측을 추가(사이클 번호 라벨 포함 — "몇 번째 사이클의 TTFT가
+   느린지" 구분 가능하게). `invoke_async`/`stream_async` API 자체는 바꾸지 않는다(기존
+   mock 테스트 무영향 원칙, CLIAR-282 이전 세션이 이미 검증한 안전한 패턴 재사용).
+2. dev 배포 후 같은 질의로 3~5회 재현해 사이클별 TTFT와 `inputTokens` 크기를 표로 남긴다.
+3. dev configmap에서 `ORCHESTRATOR_MODEL_ID` 실제 값과 `ENABLE_PROMPT_CACHING` 값을
+   확인한다(로그의 `model=global.anthropic.claude-sonnet-5`는 확인됐으나 Haiku 4.5
+   교체가 오케스트레이터에도 적용됐는지는 별도 재확인 필요).
+4. 원인이 좁혀지면 `.harness/PLAN.md`의 "원인별 대응" 목록(모델/리전 교체, 캐싱 활성화,
+   Latency-Optimized Inference 재조사, 사이클 수 축소) 중 해당하는 것으로 진행하고
+   전후 비교 실측을 남긴다.
+5. 이 조사는 "직결 스트리밍 아키텍처 변경"을 다시 검토하는 게 아니다 — 그 결론
+   (`.harness/DECISIONS.md` 2026-09-01)은 이미 확정된 것으로 취급하고 재론하지 않는다.
