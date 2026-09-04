@@ -77,6 +77,123 @@
 
 ---
 
+## [코드 완료 · dev 배포/실측 대기] CLIAR-282 Task 5: 서지 정보·장르 분류 Redis 캐싱
+
+**배경 (2026-09-04, dev 실측)**: `verify_page_counts_ms` 구간에서 알라딘 2단계 조회
+(`by-title-author`→ISBN→`search?isbn=`)와 장르 `NONE` 시 LLM 재분류(`classify_genre`)가
+매 요청 직렬로 발생해 1.3~5.3초 지연 확인. `by-title-author`는 실측상 여전히
+`totalPages: null`을 주므로(2026-09-04 재실측, "검은 수련"/"벚꽃 지는..." 2건 모두
+2단계로 빠짐 확인) 스킵 경로가 거의 발동하지 않는다. 출판된 도서의 ISBN·페이지수·
+표준 장르는 거의 불변 데이터이므로, 기존 `SearchResultCache` 패턴(Redis, TTL)을 그대로
+재사용해 캐싱하면 재추천 시 외부 HTTP/LLM 호출을 완전히 건너뛸 수 있다.
+
+**Task 5-1: 서지 정보 캐시 (`BookMetadataCache`)**
+- 파일: `src/discovery/infrastructure/cache/book_metadata_cache.py` 신설(기존
+  `infrastructure/cache/chat_session_store.py`/`infrastructure/search/result_cache.py`와
+  같은 디렉터리 구조 일관성 유지 — 원 계획의 `infrastructure/book_client/`는 존재하지
+  않는 경로라 기존 구조에 맞춰 조정).
+- 키: `book:metadata:{normalized_title}:{normalized_author}` — `SearchResultCache.
+  normalize_query`와 동일한 정규화(소문자화+공백정리) 재사용(오타/띄어쓰기 편차 방지).
+- 값: `{"isbn": str | None, "total_pages": int | None}` JSON 직렬화.
+- TTL: 기본 7일(604800초), `book_metadata_cache_ttl_seconds` 설정으로 분리.
+- `BookMetadataClient.__init__`에 `cache: BookMetadataCache | None = None` 옵셔널 추가.
+- `fetch_isbn_and_pages`에서 캐시 선조회(Hit 시 알라딘 HTTP 0회, 즉시 반환), Miss 시
+  기존 2단 조회 수행 후 결과를 캐시에 저장(실패로 `(None, None)`이 나온 경우는 캐싱하지
+  않음 — 일시적 네트워크 오류를 7일간 실패로 고정시키지 않기 위함).
+
+**Task 5-2: 장르 분류 캐시 (`GenreClassifierCache`)**
+- 파일: `src/discovery/infrastructure/cache/genre_classifier_cache.py` 신설.
+- 키: `genre:classification:{isbn}`.
+- 값: `{"genre": str, "confidence": float}` JSON 직렬화.
+- TTL: 기본 7일(604800초), `genre_classifier_cache_ttl_seconds` 설정으로 분리.
+- `GenreClassifierService.__init__`에 `cache: GenreClassifierCache | None = None` 옵셔널
+  추가. `classify_genre`에서 캐시 선조회(Hit 시 Bedrock 호출 없이 즉시 반환), Miss 시
+  LLM 분류 후 `genre != NONE`인 경우만 캐싱(불확실한 `NONE` 결과를 7일간 고정하지 않음).
+- 이 서비스는 `POST /api/v1/classify-genre`(외부 API)와 `RecommendBooksTool.
+  _backfill_missing_genres`(내부 재사용) 양쪽에서 쓰이므로, 캐싱 시 외부 API 응답
+  속도도 함께 개선되는 부가 효과가 있다(부작용 없음, 계약 변경 없음).
+
+**Task 5-3: 설정 및 의존성 배선**
+- `core/config.py`/`.env.example`에 `book_metadata_cache_ttl_seconds`(기본 604800),
+  `genre_classifier_cache_ttl_seconds`(기본 604800) 추가.
+- `api/deps.py`의 `get_book_metadata_client`/`get_genre_classifier_service`가 현재
+  `Request`를 받지 않으므로 `request: Request` 파라미터를 추가해 `request.app.state.
+  redis`로 캐시 인스턴스를 생성해 주입.
+
+**Task 5-4: 단위 테스트 및 무회귀 검증**
+- `tests/unit/test_book_metadata_cache.py`, `tests/unit/test_genre_classifier_cache.py`
+  신설(Hit/Miss/만료/예외 시 graceful degradation).
+- 기존 `test_book_metadata_client.py`/`test_genre_classifier.py`에 캐시 주입 시 실제
+  HTTP/LLM 호출이 스킵되는지 검증하는 회귀 테스트 추가.
+- 전체 검증: `ruff check .`, `mypy .`, `pytest -m "not integration"`.
+
+**남은 작업 (구현 후)**:
+- [ ] dev 배포 후 동일 도서 재추천 시 `verify_page_counts_ms`/`_backfill_missing_genres`
+      소요시간이 수 ms로 단축되는지 실측.
+- [ ] dev 배포 후 캐시 미스(신규 도서) 요청에서 병렬화로 후처리 구간이 실제로
+      단축되는지 실측(목표: 순차 3~6초 → 병렬 1.5~3초대).
+- [ ] 사용자가 제안한 나머지 2방안(사서 상담-추천 도구 병렬/스킵, 서두 멘트-도서
+      탐색 백그라운드 병렬)은 오케스트레이터 레벨 아키텍처 변경이라 이번 범위에서
+      제외. 별도 계획 논의 필요.
+
+**구현 완료 세부 (2026-09-04)**:
+- `infrastructure/cache/book_metadata_cache.py`(`BookMetadataCache`, `normalize_field`),
+  `infrastructure/cache/genre_classifier_cache.py`(`GenreClassifierCache`) 신설.
+  `SearchResultCache`와 동일한 Redis+TTL 패턴 재사용.
+- `BookMetadataClient.fetch_isbn_and_pages`가 캐시를 선조회하고, 성공한 결과만 캐싱
+  (실패로 `(None, None)`이 나온 경우는 캐싱하지 않음). 기존 로직은
+  `_fetch_isbn_and_pages_uncached`로 분리해 캐시 유무와 무관하게 재사용.
+- `GenreClassifierService.classify_genre`가 캐시를 선조회하고, `NONE`이 아닌 결과만
+  캐싱. 기존 로직은 `_classify_genre_uncached`로 분리.
+- `core/config.py`/`.env.example`에 `book_metadata_cache_ttl_seconds`,
+  `genre_classifier_cache_ttl_seconds`(둘 다 기본 604800초=7일) 추가.
+- `api/deps.py`의 `get_book_metadata_client`/`get_genre_classifier_service`에
+  `request: Request` 파라미터를 추가해 `request.app.state.redis`로 캐시 인스턴스 생성.
+- 캐시 클래스 자체는 `SearchResultCache`와 동일하게 Testcontainers 통합 테스트로
+  검증(`tests/integration/test_book_metadata_cache.py`, `test_genre_classifier_cache.py`,
+  9건). 캐시 연동 로직(히트 시 HTTP/LLM 스킵, 미스 시 저장, 실패/NONE 미저장)은
+  mocker 기반 단위 테스트 8건 추가(`test_book_metadata_client.py`,
+  `test_genre_classifier.py`).
+- 부수 수정: `test_genre_router.py`의 422 검증 테스트 3건이 `get_genre_classifier_service`가
+  이제 `request.app.state.redis`를 참조하게 되면서 lifespan 없는 테스트 클라이언트에서
+  깨졌던 것을 `app.state.redis = MagicMock()`로 해결(실제 프로덕션에서는 lifespan이
+  항상 먼저 실행되므로 발생하지 않는 상황, 테스트 픽스처만 보강).
+- 검증: `ruff check .`/`mypy .` 88파일 통과, `pytest -m "not integration"` 292건
+  (기존 284 + 신규 8) 통과, `pytest -m integration` 25건(기존 16 + 신규 9) 통과.
+  무회귀 확인.
+
+**추가 구현 (2026-09-04, 후처리 병렬화)**:
+- 사용자(멘토 피드백 기반)가 제안한 "알라딘 페이지수 조회와 장르 분류 LLM 호출은
+  서로 의존성이 없으므로 `asyncio.gather`로 동시 실행 가능"을 코드로 검증 후 적용.
+  `BookMetadataClient`에 1단계(`by-title-author`, ISBN 확보)만 수행하는
+  `fetch_isbn_only`, 그리고 `get_cached_isbn_and_pages`/`cache_isbn_and_pages`(public,
+  캐시 히트/미스 판단과 저장을 호출부가 조율할 수 있게 분리) 신설.
+- `RecommendBooksTool._resolve_isbn_pages_and_genre`(신규)가 책 한 권 단위로: 캐시
+  히트면 즉시 사용(HTTP 없음) → 미스면 1단계로 ISBN만 먼저 확보 → 그 ISBN을 쓰는
+  "2단계 페이지수 조회"와 "장르 분류 LLM 호출"을 `asyncio.gather`로 동시 실행 →
+  성공한 결과만 캐시에 저장. 이 책 단위 처리 자체도 전체 도서 목록에 대해
+  `asyncio.gather`로 동시 실행되어(기존에도 있던 책 간 병렬), 결과적으로 "책 간 병렬
+  × 책 내부 2-way 병렬"이 된다.
+- `_verify_page_counts`가 `_backfill_missing_genres`(순차 폴백, 하위 호환 유지)를
+  호출하지 않고 `_resolve_isbn_pages_and_genre`의 결과를 직접 반영하도록 재작성.
+- 병렬 실행 자체를 실제 타이밍으로 검증하는 테스트
+  (`test_recommend_runs_page_lookup_and_genre_classification_concurrently`, 두
+  0.05초 지연 호출이 순차 0.1초가 아니라 병렬 0.05초 근처로 끝나는지 확인) 및 캐시
+  히트 시 HTTP 완전 스킵 검증 테스트 추가.
+- 기존 5개 테스트(`test_recommend_verifies_page_count_via_title_author` 등)가
+  `fetch_isbn_and_pages` 단일 호출을 mock하던 것에서 `get_cached_isbn_and_pages`/
+  `fetch_isbn_only`/`fetch_total_pages`를 각각 mock하는 새 계약으로 갱신.
+- **부수 발견(버그, 이번 범위에서는 수정하지 않고 BACKLOG에 기록)**: 병렬화 테스트
+  작성 중 `_replace_page_count_for_title`이 도서 블록이 마크다운 문자열의 맨 끝이고
+  뒤에 개행이 없으면 정규식이 매치되지 않아 페이지수 교체가 조용히 실패하는 기존
+  버그(제 변경과 무관, `_verify_page_counts` 로직 재작성 전부터 있던 문제)를 발견함.
+  실제 LLM 응답은 저자 줄 뒤에 항상 텍스트가 이어져 지금까지 드러나지 않았을
+  가능성. `.harness/BACKLOG.md`에 재현 방법과 함께 기록.
+- 검증: `ruff check .`/`mypy .` 88파일 통과, `pytest -m "not integration"` 294건
+  (기존 292 + 신규 2) 통과, `pytest -m integration` 25건 통과. 무회귀 확인.
+
+---
+
 ## [보류 · 통합 범위 미확정] 사서 에이전트(backend-librarian) → backend-discovery 통합
 
 사용자가 이번 세션에서 보류를 명확히 함. 재개 시 먼저 확정할 것:

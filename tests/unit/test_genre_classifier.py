@@ -206,3 +206,88 @@ async def test_genre_classifier_service_exception_fallback(
 
     assert res.genre == StandardGenre.NONE
     assert res.confidence == 0.0
+
+
+
+# ---------------------------------------------------------------------------
+# CLIAR-282 Task 5: classify_genre 캐시 연동 (히트 시 LLM 호출 완전 스킵)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_classify_genre_returns_cached_result_without_llm_call(
+    bedrock_settings: Settings, mocker: MockerFixture
+) -> None:
+    """캐시 히트 시 Bedrock LLM 호출을 전혀 하지 않고 즉시 반환한다."""
+    mock_agent_class = mocker.patch("discovery.application.genre_classifier_service.Agent")
+    mock_cache = mocker.AsyncMock()
+    mock_cache.get.return_value = ("SCIENCE", 0.92)
+
+    service = GenreClassifierService(settings=bedrock_settings, cache=mock_cache)
+    req = BookClassificationRequest(isbn="9788934972464")
+    res = await service.classify_genre(req)
+
+    assert res.genre == StandardGenre.SCIENCE
+    assert res.confidence == 0.92
+    mock_cache.get.assert_awaited_once_with("9788934972464")
+    mock_agent_class.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_classify_genre_stores_non_none_result_in_cache_on_miss(
+    bedrock_settings: Settings, mocker: MockerFixture
+) -> None:
+    """캐시 미스 시 LLM 분류를 수행하고, NONE이 아닌 결과만 캐시에 저장한다."""
+    mock_agent_instance = MagicMock()
+    mock_agent_result = MagicMock()
+    mock_agent_result.message = {"content": [{"text": '{"genre": "SCIENCE", "confidence": 0.92}'}]}
+    mock_agent_instance.invoke_async = AsyncMock(return_value=mock_agent_result)
+    mocker.patch(
+        "discovery.application.genre_classifier_service.Agent",
+        return_value=mock_agent_instance,
+    )
+    mocker.patch("discovery.application.genre_classifier_service.BedrockModel")
+    mock_cache = mocker.AsyncMock()
+    mock_cache.get.return_value = None
+
+    service = GenreClassifierService(settings=bedrock_settings, cache=mock_cache)
+    req = BookClassificationRequest(isbn="9788934972464")
+    res = await service.classify_genre(req)
+
+    assert res.genre == StandardGenre.SCIENCE
+    mock_cache.set.assert_awaited_once_with("9788934972464", "SCIENCE", 0.92)
+
+
+@pytest.mark.asyncio
+async def test_classify_genre_does_not_cache_none_result(
+    bedrock_settings: Settings, mocker: MockerFixture
+) -> None:
+    """분류 결과가 NONE(미식별)이면 캐시에 저장하지 않는다(불확실한 결과 고정 방지)."""
+    mock_agent_instance = MagicMock()
+    mock_agent_result = MagicMock()
+    mock_agent_result.message = {"content": [{"text": '{"genre": "NONE", "confidence": 0.0}'}]}
+    mock_agent_instance.invoke_async = AsyncMock(return_value=mock_agent_result)
+    mocker.patch(
+        "discovery.application.genre_classifier_service.Agent",
+        return_value=mock_agent_instance,
+    )
+    mocker.patch("discovery.application.genre_classifier_service.BedrockModel")
+    mock_cache = mocker.AsyncMock()
+    mock_cache.get.return_value = None
+
+    service = GenreClassifierService(settings=bedrock_settings, cache=mock_cache)
+    req = BookClassificationRequest(isbn="9788934972464")
+    res = await service.classify_genre(req)
+
+    assert res.genre == StandardGenre.NONE
+    mock_cache.set.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_classify_genre_works_without_cache(mock_settings: Settings) -> None:
+    """cache=None(기존 하위 호환)이면 캐시 관련 동작 없이 기존처럼 동작한다."""
+    service = GenreClassifierService(settings=mock_settings)
+    req = BookClassificationRequest(isbn="COMPUTER_IT")
+    res = await service.classify_genre(req)
+
+    assert res.genre == StandardGenre.COMPUTER_IT

@@ -33,6 +33,7 @@ from discovery.domain.orchestrator.book_metadata_response import (
     BookMetadataSearchResponse,
     BookSearchByTitleAuthorResponse,
 )
+from discovery.infrastructure.cache.book_metadata_cache import BookMetadataCache
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +59,11 @@ class BookMetadataClient:
         self,
         settings: Settings,
         http_client: httpx.AsyncClient | None = None,
+        cache: BookMetadataCache | None = None,
     ) -> None:
         self._settings = settings
         self._http_client = http_client
+        self._cache = cache
 
     async def _get(
         self, url: str, params: dict[str, str], auth_token: str | None
@@ -193,6 +196,12 @@ class BookMetadataClient:
         HTTP 조회를 수행하지만 ISBN도 함께 반환한다는 점만 다르다(하위 호환을 위해
         기존 메서드는 그대로 유지하고 별도 메서드로 분리).
 
+        CLIAR-282 Task 5: `cache`가 배선되어 있으면 제목·저자로 먼저 캐시를 조회한다.
+        Hit 시 알라딘 HTTP 호출 없이 즉시 반환한다(dev 실측으로 확인된 1.3~5.3초 지연을
+        수 ms로 단축). Miss 시 기존 2단 조회를 그대로 수행하고, 조회에 성공한 경우에만
+        결과를 캐시에 저장한다(실패로 `(None, None)`이 나온 경우는 캐싱하지 않음 —
+        일시적 네트워크 오류를 TTL 기간 내내 실패로 고정시키지 않기 위함).
+
         네트워크 오류, 타임아웃, 4xx/5xx(무인증 401 포함), 응답 파싱 실패, 검색 결과
         없음 등 어떤 이유로든 조회에 실패하면 예외를 전파하지 않고 `(None, None)`을
         반환한다(graceful degradation).
@@ -204,6 +213,92 @@ class BookMetadataClient:
 
         Returns:
             `(isbn, total_pages)` 튜플. 조회 실패 또는 검색 결과 없음이면 각각 `None`.
+        """
+        if not title or not title.strip() or not author or not author.strip():
+            return (None, None)
+
+        if self._cache is not None:
+            cached = await self._cache.get(title, author)
+            if cached is not None:
+                return cached
+
+        isbn, pages_from_step1 = await self._fetch_isbn_step1(title, author, auth_token)
+        result: tuple[str | None, int | None]
+        if isbn is None:
+            result = (None, None)
+        elif pages_from_step1 is not None:
+            # by-title-author가 페이지수를 직접 주면 그대로 사용(향후 개선 대비).
+            result = (isbn, pages_from_step1)
+        else:
+            pages = await self.fetch_total_pages(isbn, auth_token=auth_token)
+            result = (isbn, pages)
+
+        if self._cache is not None and result != (None, None):
+            await self._cache.set(title, author, result[0], result[1])
+
+        return result
+
+    async def fetch_isbn_only(
+        self, title: str, author: str, auth_token: str | None = None
+    ) -> str | None:
+        """제목·저자로 알라딘 교집합 검색을 수행해 ISBN만 조회한다(1단계 조회 전용).
+
+        CLIAR-282 병렬화: "ISBN 확보"만 먼저 끝내면 그 ISBN을 필요로 하는 "페이지수
+        2단계 조회"와 "장르 분류 LLM 호출"이 서로 의존성이 없어져 동시에 실행할 수
+        있다. `RecommendBooksTool._verify_page_counts`가 이 메서드로 먼저 ISBN을
+        모두 확보한 뒤, 페이지수 조회와 장르 분류를 `asyncio.gather`로 함께 실행해
+        후처리 구간을 단축한다.
+
+        `by-title-author`가 `totalPages`를 예외적으로 직접 채워주는 경우(향후
+        backend-book 개선 대비)에도 이 메서드는 ISBN만 반환한다 — 그 값이 필요하면
+        `fetch_isbn_and_pages`(캐시 포함 전체 조회)를 사용한다.
+
+        네트워크 오류, 타임아웃, 4xx/5xx(무인증 401 포함), 응답 파싱 실패, 검색 결과
+        없음 등 어떤 이유로든 조회에 실패하면 예외를 전파하지 않고 `None`을 반환한다
+        (graceful degradation).
+
+        Args:
+            title: 도서 제목.
+            author: 저자명.
+            auth_token: 사용자 Bearer 토큰(라우터에서 패스스루). 미전달 시 401로 `None`.
+
+        Returns:
+            ISBN. 조회 실패 또는 검색 결과 없음이면 `None`.
+        """
+        isbn, _ = await self._fetch_isbn_step1(title, author, auth_token)
+        return isbn
+
+    async def get_cached_isbn_and_pages(
+        self, title: str, author: str
+    ) -> tuple[str | None, int | None] | None:
+        """캐시에서 (ISBN, 페이지수)를 조회한다. 캐시가 없거나 미스면 `None`.
+
+        CLIAR-282 병렬화: `RecommendBooksTool`이 책 단위로 캐시 히트/미스를 먼저
+        판단해, 히트한 책은 HTTP 호출 없이 즉시 값을 쓰고 미스한 책만 1단계 ISBN
+        확보 후 "페이지수 조회"와 "장르 분류"를 병렬 실행하도록 조율하는 데 쓰인다.
+        """
+        if self._cache is None:
+            return None
+        return await self._cache.get(title, author)
+
+    async def cache_isbn_and_pages(
+        self, title: str, author: str, isbn: str | None, total_pages: int | None
+    ) -> None:
+        """(ISBN, 페이지수)를 캐시에 저장한다. 캐시가 배선되지 않았으면 아무 동작도 하지 않는다.
+
+        호출부(`RecommendBooksTool`)가 조회 성공 여부를 이미 판단했으므로, 이 메서드는
+        무조건 저장한다(`fetch_isbn_and_pages`처럼 실패 시 캐싱을 막는 판단은 호출부 책임).
+        """
+        if self._cache is None:
+            return
+        await self._cache.set(title, author, isbn, total_pages)
+
+    async def _fetch_isbn_step1(
+        self, title: str, author: str, auth_token: str | None
+    ) -> tuple[str | None, int | None]:
+        """`by-title-author` 1단계 조회만 수행한다. `(isbn, total_pages)`를 반환하되
+        `total_pages`는 이 엔드포인트가 예외적으로 직접 채워준 경우에만 값이 있다
+        (현재 기본 동작은 `None` — 2단계 `fetch_total_pages` 재조회가 필요함을 뜻함).
         """
         if not title or not title.strip() or not author or not author.strip():
             return (None, None)
@@ -224,20 +319,13 @@ class BookMetadataClient:
 
             data = response.json()
             parsed = BookSearchByTitleAuthorResponse.model_validate(data)
-            isbn = parsed.isbn
-
-            if parsed.total_pages is not None:
-                return (isbn, parsed.total_pages)
-
-            if isbn:
-                pages = await self.fetch_total_pages(isbn, auth_token=auth_token)
-                return (isbn, pages)
-            return (isbn, None)
+            return (parsed.isbn, parsed.total_pages)
         except Exception:
             logger.warning(
-                "Failed to fetch isbn/pages for title=%s, author=%s (falling back to None)",
+                "Failed to fetch isbn for title=%s, author=%s (falling back to None)",
                 title,
                 author,
                 exc_info=True,
             )
             return (None, None)
+

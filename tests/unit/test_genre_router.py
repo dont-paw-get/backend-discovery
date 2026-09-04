@@ -1,4 +1,5 @@
 from collections.abc import AsyncGenerator
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -22,6 +23,11 @@ def app() -> FastAPI:
 
 @pytest.fixture
 async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
+    # CLIAR-282 Task 5: get_genre_classifier_service가 캐시 배선을 위해
+    # request.app.state.redis를 참조하므로, lifespan을 태우지 않는 이 테스트
+    # 클라이언트에서도 최소한의 mock을 채워둔다(422 검증 테스트가 실제 Redis 연결
+    # 없이도 의존성 해석 단계를 통과할 수 있게 함).
+    app.state.redis = MagicMock()
     async with AsyncClient(
         transport=ASGITransport(app=app),
         base_url="http://test",

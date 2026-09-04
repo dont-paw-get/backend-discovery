@@ -15,7 +15,9 @@ from discovery.domain.orchestrator.tools.book_metadata_client import BookMetadat
 from discovery.domain.orchestrator.tools.librarian_tool import ConsultLibrarianTool
 from discovery.domain.orchestrator.tools.library_tool import SearchMyLibraryTool
 from discovery.domain.orchestrator.tools.recommend_tool import RecommendBooksTool
+from discovery.infrastructure.cache.book_metadata_cache import BookMetadataCache
 from discovery.infrastructure.cache.chat_session_store import ChatSessionStore
+from discovery.infrastructure.cache.genre_classifier_cache import GenreClassifierCache
 from discovery.infrastructure.search.book_search_tool import BookSearchTool
 from discovery.infrastructure.search.result_cache import SearchResultCache
 from discovery.infrastructure.search.usage_limiter import SearchUsageLimiter
@@ -87,19 +89,28 @@ def get_book_search_tool(request: Request) -> BookSearchTool:
     )
 
 
-def get_book_metadata_client() -> BookMetadataClient:
+def get_book_metadata_client(request: Request) -> BookMetadataClient:
     """CLIAR-237: 추천 도서 페이지수를 알라딘 실조회로 검증하는 backend-book 서지 조회
-    클라이언트."""
+    클라이언트. CLIAR-282 Task 5: Redis 캐시(`BookMetadataCache`)를 배선해 동일
+    제목·저자 재조회 시 알라딘 외부 HTTP 호출을 건너뛴다."""
     settings = get_settings()
-    return BookMetadataClient(settings=settings)
+    cache = BookMetadataCache(
+        request.app.state.redis, ttl_seconds=settings.book_metadata_cache_ttl_seconds
+    )
+    return BookMetadataClient(settings=settings, cache=cache)
 
 
 def get_genre_classifier_service(
+    request: Request,
     boto_session: Any = Depends(get_boto_session),
 ) -> GenreClassifierService:
-    """도서 표준 장르 분류 서비스."""
+    """도서 표준 장르 분류 서비스. CLIAR-282 Task 5: Redis 캐시(`GenreClassifierCache`)를
+    배선해 동일 ISBN 재분류 시 Bedrock LLM 호출을 건너뛴다."""
     settings = get_settings()
-    return GenreClassifierService(settings=settings, boto_session=boto_session)
+    cache = GenreClassifierCache(
+        request.app.state.redis, ttl_seconds=settings.genre_classifier_cache_ttl_seconds
+    )
+    return GenreClassifierService(settings=settings, boto_session=boto_session, cache=cache)
 
 
 def get_recommend_books_tool(

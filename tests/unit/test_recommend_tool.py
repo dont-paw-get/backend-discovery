@@ -179,7 +179,10 @@ async def test_recommend_verifies_page_count_via_title_author(
     )
 
     mock_metadata_client = mocker.MagicMock()
-    mock_metadata_client.fetch_isbn_and_pages = AsyncMock(return_value=(None, 352))
+    mock_metadata_client.get_cached_isbn_and_pages = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_isbn_only = AsyncMock(return_value="9788934972464")
+    mock_metadata_client.fetch_total_pages = AsyncMock(return_value=352)
+    mock_metadata_client.cache_isbn_and_pages = AsyncMock()
 
     tool_instance = RecommendBooksTool(
         book_search_tool=mock_search_tool,
@@ -191,9 +194,12 @@ async def test_recommend_verifies_page_count_via_title_author(
         query="돈에 관한 책 추천해줘", count=1, auth_token="Bearer test-jwt"
     )
 
-    # auth_token이 fetch_isbn_and_pages까지 패스스루되는지 검증(무인증 401 방지).
-    mock_metadata_client.fetch_isbn_and_pages.assert_awaited_once_with(
+    # auth_token이 fetch_isbn_only까지 패스스루되는지 검증(무인증 401 방지).
+    mock_metadata_client.fetch_isbn_only.assert_awaited_once_with(
         "돈의 심리학", "모건 하우절", auth_token="Bearer test-jwt"
+    )
+    mock_metadata_client.fetch_total_pages.assert_awaited_once_with(
+        "9788934972464", auth_token="Bearer test-jwt"
     )
     assert "(352쪽)" in result_text
     assert "약 300쪽" not in result_text
@@ -227,7 +233,10 @@ async def test_recommend_keeps_llm_value_when_metadata_lookup_fails(
     )
 
     mock_metadata_client = mocker.MagicMock()
-    mock_metadata_client.fetch_isbn_and_pages = AsyncMock(return_value=(None, None))
+    mock_metadata_client.get_cached_isbn_and_pages = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_isbn_only = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_total_pages = AsyncMock(return_value=None)
+    mock_metadata_client.cache_isbn_and_pages = AsyncMock()
 
     tool_instance = RecommendBooksTool(
         book_search_tool=mock_search_tool,
@@ -308,9 +317,10 @@ async def test_recommend_backfills_missing_genre_via_classifier(mocker: MockerFi
     )
 
     mock_metadata_client = mocker.MagicMock()
-    mock_metadata_client.fetch_isbn_and_pages = AsyncMock(
-        return_value=("9788934972464", None)
-    )
+    mock_metadata_client.get_cached_isbn_and_pages = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_isbn_only = AsyncMock(return_value="9788934972464")
+    mock_metadata_client.fetch_total_pages = AsyncMock(return_value=None)
+    mock_metadata_client.cache_isbn_and_pages = AsyncMock()
 
     mock_genre_service = mocker.MagicMock()
     mock_genre_service.classify_genre = AsyncMock(
@@ -363,7 +373,10 @@ async def test_recommend_keeps_existing_genre_without_calling_classifier(
     )
 
     mock_metadata_client = mocker.MagicMock()
-    mock_metadata_client.fetch_isbn_and_pages = AsyncMock(return_value=("9791162341234", None))
+    mock_metadata_client.get_cached_isbn_and_pages = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_isbn_only = AsyncMock(return_value="9791162341234")
+    mock_metadata_client.fetch_total_pages = AsyncMock(return_value=None)
+    mock_metadata_client.cache_isbn_and_pages = AsyncMock()
 
     mock_genre_service = mocker.MagicMock()
 
@@ -403,7 +416,10 @@ async def test_recommend_skips_genre_backfill_without_classifier_service(
     )
 
     mock_metadata_client = mocker.MagicMock()
-    mock_metadata_client.fetch_isbn_and_pages = AsyncMock(return_value=("9788934972464", None))
+    mock_metadata_client.get_cached_isbn_and_pages = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_isbn_only = AsyncMock(return_value="9788934972464")
+    mock_metadata_client.fetch_total_pages = AsyncMock(return_value=None)
+    mock_metadata_client.cache_isbn_and_pages = AsyncMock()
 
     tool_instance = RecommendBooksTool(
         book_search_tool=mock_search_tool,
@@ -415,3 +431,124 @@ async def test_recommend_skips_genre_backfill_without_classifier_service(
     result_text = await tool_instance.recommend(query="역사책 추천해줘", count=1)
 
     assert "- **장르**:" not in result_text
+
+
+
+# ---------------------------------------------------------------------------
+# CLIAR-282 병렬화: 페이지수 2단계 조회와 장르 분류 LLM 호출의 동시 실행
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recommend_runs_page_lookup_and_genre_classification_concurrently(
+    mocker: MockerFixture,
+) -> None:
+    """캐시 미스 시 1단계(ISBN 확보) 이후, 서로 의존성이 없는 "페이지수 2단계 조회"와
+    "장르 분류 LLM 호출"이 순차가 아니라 동시에 실행되는지 타이밍으로 검증한다.
+
+    두 호출 모두 0.05초를 지연시켰을 때, 순차라면 총 0.1초 이상 걸리지만 병렬이면
+    max(0.05, 0.05)=0.05초 근처로 끝나야 한다.
+    """
+    import asyncio as _asyncio
+
+    from discovery.api.schemas.genre import BookClassificationResponse, StandardGenre
+
+    mock_search_tool = mocker.MagicMock()
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = mocker.MagicMock()
+    raw_text = "### 📖 총, 균, 쇠\n- **저자**: 재레드 다이아몬드 (784쪽)"
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mocker.patch(
+        "discovery.domain.orchestrator.tools.recommend_tool.create_librarian_agent",
+        return_value=mock_agent,
+    )
+
+    delay_seconds = 0.05
+
+    async def _delayed_fetch_total_pages(isbn: str, auth_token: str | None = None) -> int:
+        await _asyncio.sleep(delay_seconds)
+        return 500
+
+    async def _delayed_classify_genre(request: object) -> BookClassificationResponse:
+        await _asyncio.sleep(delay_seconds)
+        return BookClassificationResponse(genre=StandardGenre.HISTORY, confidence=0.9)
+
+    mock_metadata_client = mocker.MagicMock()
+    mock_metadata_client.get_cached_isbn_and_pages = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_isbn_only = AsyncMock(return_value="9788934972464")
+    mock_metadata_client.fetch_total_pages = _delayed_fetch_total_pages
+    mock_metadata_client.cache_isbn_and_pages = AsyncMock()
+
+    mock_genre_service = mocker.MagicMock()
+    mock_genre_service.classify_genre = _delayed_classify_genre
+
+    tool_instance = RecommendBooksTool(
+        book_search_tool=mock_search_tool,
+        settings=settings,
+        book_metadata_client=mock_metadata_client,
+        genre_classifier_service=mock_genre_service,
+    )
+
+    start = _asyncio.get_event_loop().time()
+    await tool_instance.recommend(query="역사책 추천해줘", count=1)
+    elapsed = _asyncio.get_event_loop().time() - start
+
+    # 순차라면 2 * delay_seconds(0.1초) 이상, 병렬이면 delay_seconds(0.05초) 근처.
+    # 테스트 환경 오버헤드를 감안해 1.5배 여유를 둔 임계값으로 검증한다.
+    assert elapsed < delay_seconds * 1.5
+
+
+@pytest.mark.asyncio
+async def test_recommend_uses_cached_isbn_and_pages_without_http_call(
+    mocker: MockerFixture,
+) -> None:
+    """캐시 히트 시 알라딘 HTTP 호출(fetch_isbn_only/fetch_total_pages) 없이 캐시된
+    값을 즉시 사용한다."""
+    mock_search_tool = mocker.MagicMock()
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = mocker.MagicMock()
+    raw_text = (
+        "### 📖 총, 균, 쇠\n"
+        "- **저자**: 재레드 다이아몬드 (약 700쪽)\n"
+        "- **추천 이유**: 문명의 흥망성쇠를 다룬다."
+    )
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mocker.patch(
+        "discovery.domain.orchestrator.tools.recommend_tool.create_librarian_agent",
+        return_value=mock_agent,
+    )
+
+    mock_metadata_client = mocker.MagicMock()
+    mock_metadata_client.get_cached_isbn_and_pages = AsyncMock(
+        return_value=("9788934972464", 784)
+    )
+    mock_metadata_client.fetch_isbn_only = AsyncMock()
+    mock_metadata_client.fetch_total_pages = AsyncMock()
+    mock_metadata_client.cache_isbn_and_pages = AsyncMock()
+
+    tool_instance = RecommendBooksTool(
+        book_search_tool=mock_search_tool,
+        settings=settings,
+        book_metadata_client=mock_metadata_client,
+    )
+
+    result_text = await tool_instance.recommend(query="역사책 추천해줘", count=1)
+
+    assert "(784쪽)" in result_text
+    mock_metadata_client.fetch_isbn_only.assert_not_awaited()
+    mock_metadata_client.fetch_total_pages.assert_not_awaited()
+    mock_metadata_client.cache_isbn_and_pages.assert_not_awaited()
