@@ -65,7 +65,12 @@ class RecommendBooksTool:
         agent_creation_ms = round((time.perf_counter() - agent_creation_start) * 1000, 2)
 
         invoke_start = time.perf_counter()
-        prompt = f"{query}\n\n[요청] 반드시 {clamped_count}권의 도서만 추천해주세요."
+        prompt = (
+            f"{query}\n\n"
+            f"[요청] 반드시 {clamped_count}권의 도서만 추천해주세요. "
+            "search_books 도구는 정확히 1회만 호출하고, 그 한 번의 검색어로 "
+            f"{clamped_count}권 분량의 후보와 서지 정보를 한꺼번에 확보하세요."
+        )
         result = await agent.invoke_async(prompt=prompt)
         invoke_ms = round((time.perf_counter() - invoke_start) * 1000, 2)
 

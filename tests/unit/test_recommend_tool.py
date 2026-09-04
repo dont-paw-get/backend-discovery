@@ -56,7 +56,12 @@ async def test_recommend_tool_calls_create_librarian_agent(mocker: MockerFixture
         tools=[mock_search_as_tool],
         enable_prompt_caching=False,
     )
-    expected_prompt = "SF 소설 추천해줘\n\n[요청] 반드시 1권의 도서만 추천해주세요."
+    expected_prompt = (
+        "SF 소설 추천해줘\n\n"
+        "[요청] 반드시 1권의 도서만 추천해주세요. "
+        "search_books 도구는 정확히 1회만 호출하고, 그 한 번의 검색어로 "
+        "1권 분량의 후보와 서지 정보를 한꺼번에 확보하세요."
+    )
     mock_agent.invoke_async.assert_awaited_once_with(prompt=expected_prompt)
 
 
