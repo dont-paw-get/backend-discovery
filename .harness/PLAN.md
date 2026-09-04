@@ -56,6 +56,48 @@ CloudWatch 커스텀 메트릭 기반의 완전 분리 경로**로 구현했다(
 
 ---
 
+## [진행 중] CLIAR-281: [오케스트레이터] 추천 에이전트 속도 원인 진단 후 수정
+
+**배경 (2026-09-04)**: CLIAR-278(Sonnet 5 → Haiku 4.5 교체)로 45초 → 12초까지 줄었으나,
+사용자가 "사서 에이전트를 합치면 더 줄어들지" 문의. dev 클러스터에서 discovery Pod →
+`backend-librarian` Pod 직접 HTTP 실측(콜드스타트 제외 28~30ms)으로 **사서 상담 구간은
+이미 무시할 수준**임을 확인해 통합 방향은 폐기했다. 대신 dev 실제 로그(`agent_metrics`)
+분석으로 진짜 병목을 특정했다:
+
+- `recommend_books`(추천 에이전트) 도구가 오케스트레이터 전체 시간의 **58~76%**를 차지
+  (예: 41.5초 중 23.9초, 47.5초 중 36.2초).
+- `recommend_books` 내부에서도 Strands가 재는 LLM 사이클 시간(15~21초)과 실제
+  `total_duration_ms`(24~36초) 사이에 **8.7~14.8초의 미계측 간극**이 존재.
+- 코드 분석 결과 유력 후보: `_verify_page_counts`가 추천된 도서마다 `backend-book`에
+  "제목·저자→ISBN(`by-title-author`)→페이지수(`search?isbn=`)" **2단 순차 HTTP**를
+  보내고 있음(권당 왕복 2회, 알라딘 경유라 지연 가능성). 이 구간이 로그에 전혀 안 찍혀
+  간극의 정체를 몰랐다.
+- 진단을 위해 `recommend_tool.py`의 `recommend()`에 구간별 계측(`agent_creation_ms`,
+  `agent_invoke_ms`, `verify_page_counts_ms`)을 이미 추가함(미커밋, 이번 브랜치로 이동).
+
+**Task**:
+- [x] Task 1: `recommend_tool.py`에 구간별 `time.perf_counter()` 계측 추가
+      (에이전트 생성/`invoke_async`/`_verify_page_counts` 3구간 분리, `log_agent_metrics`의
+      `direct_metrics`에 포함). `ruff`/`mypy`/단위 테스트(281건) 통과 확인.
+- [ ] Task 2: `ruff`/`mypy`/`pytest -m "not integration"` 재확인 후 커밋, PR 생성 및
+      `develop` 머지(사용자 승인 시) → dev 자동 배포(GitHub Actions, `develop` push 트리거).
+- [ ] Task 3: dev 배포 후 실제 사용자 추천 요청 로그(`agent_metrics`, phase=`recommend_agent`)에서
+      `verify_page_counts_ms`/`agent_invoke_ms`/`agent_creation_ms` 실측값 확인. 이 로그
+      기반으로 "미계측 간극"의 실제 원인을 확정한다(가설: `_verify_page_counts`가 범인).
+- [ ] Task 4 (Task 3 결과에 따라 분기):
+  - 가설이 맞으면(검증 구간이 크면): 2단 순차 HTTP를 줄이는 방향 검토 —
+    (a) `.harness/BACKLOG.md`에 이미 있는 "backend-book이 `by-title-author`에서
+    `totalPages`를 직접 채워주도록 팀 요청"(근본 해결, 팀 의존), (b) 단기로는 결과 캐싱
+    (같은 제목·저자 반복 조회 방지, TTL 검토) 또는 타임아웃/재시도 정책 재검토.
+  - 가설이 틀리면(다른 구간이 크면): 그 구간(에이전트 생성 오버헤드 등) 기준으로 재조사.
+- [ ] Task 5: 수정 적용 후 전후 비교(수정 전 vs 후 `recommend_agent` 총 시간) 및 하네스
+      문서(`STATE.md`/`DECISIONS.md`) 동기화.
+
+**폐기된 방향**: 사서 에이전트(`backend-librarian`)를 discovery로 통합하는 것 — 실측상
+효과가 없어(28ms) 이번 티켓 범위에서 제외.
+
+---
+
 ## [코드 완료 · dev 배포/스크레이핑 확인 대기] 관측 인프라(dont-paw-get/infra) 연동 — dev 환경
 
 브랜치: `관측-인프라-연동` (티켓 없음 — 배포용 임시 작업, 커밋 `[CLIAR-XX]` 태그 생략, 사용자 확정 2026-09-02)
