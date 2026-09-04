@@ -7,7 +7,11 @@ from typing import Any
 
 from strands import tool
 
-from discovery.api.schemas.genre import BookClassificationRequest, StandardGenre
+from discovery.api.schemas.genre import (
+    BookClassificationRequest,
+    BookClassificationResponse,
+    StandardGenre,
+)
 from discovery.application.genre_classifier_service import GenreClassifierService
 from discovery.core.config import Settings
 from discovery.core.observability import log_agent_metrics
@@ -139,6 +143,12 @@ class RecommendBooksTool:
         (기존 `POST /api/v1/classify-genre` API의 서비스 레이어, ISBN 기반 LLM 분류)를
         재호출해 결정론적으로 보강한다. `genre_classifier_service`가 배선되지 않았거나
         ISBN을 못 구했거나 분류 결과가 `NONE`이면 원본을 그대로 둔다(추가 손해 없음).
+
+        CLIAR-282 병렬화: 책마다 `_resolve_isbn_pages_and_genre`가 "ISBN 확보(1단계)" →
+        "페이지수 2단계 조회"와 "장르 분류 LLM 호출"을 `asyncio.gather`로 동시 실행한다
+        (두 호출은 ISBN만 공유하고 서로 결과에 의존하지 않아 안전하게 병렬화된다).
+        이 책 단위 처리 자체도 전체 도서 목록에 대해 `asyncio.gather`로 동시 실행되어,
+        dev 실측상 순차(권당 3~6초) 대비 최대 절반까지 후처리 구간을 단축한다.
         """
         if self._book_metadata_client is None:
             return markdown
@@ -150,25 +160,76 @@ class RecommendBooksTool:
         if not author_by_title:
             return markdown
 
+        genre_by_title_hint = {b["title"]: b["genre"] for b in parsed}
         titles = list(author_by_title.keys())
-        results = await asyncio.gather(
+
+        resolved = await asyncio.gather(
             *(
-                self._book_metadata_client.fetch_isbn_and_pages(
-                    t, author_by_title[t], auth_token=auth_token
+                self._resolve_isbn_pages_and_genre(
+                    title=t,
+                    author=author_by_title[t],
+                    needs_genre=genre_by_title_hint.get(t) == StandardGenre.NONE,
+                    auth_token=auth_token,
                 )
                 for t in titles
             )
         )
-        isbn_and_pages_by_title = dict(zip(titles, results, strict=True))
 
-        for title, (_, verified_page) in isbn_and_pages_by_title.items():
+        for title, (verified_page, genre_response) in zip(titles, resolved, strict=True):
             if verified_page:
                 markdown = _replace_page_count_for_title(markdown, title, verified_page)
+            if genre_response is not None and genre_response.genre != StandardGenre.NONE:
+                markdown = _upsert_genre_for_title(markdown, title, genre_response.genre.value)
 
-        markdown = await self._backfill_missing_genres(
-            markdown, parsed, isbn_and_pages_by_title
-        )
         return markdown
+
+    async def _resolve_isbn_pages_and_genre(
+        self,
+        title: str,
+        author: str,
+        needs_genre: bool,
+        auth_token: str | None,
+    ) -> tuple[int | None, BookClassificationResponse | None]:
+        """한 도서의 (검증된 페이지수, 장르 분류 결과)를 확보한다.
+
+        `BookMetadataCache`에 히트하면 캐시된 (ISBN, 페이지수)를 그대로 쓰고 이 책에
+        대한 HTTP 호출은 발생하지 않는다(장르는 캐시되지 않으므로 `needs_genre`이면
+        여전히 LLM 분류를 수행한다). 캐시 미스이면 1단계(`by-title-author`)로 ISBN을
+        먼저 확보한 뒤, 서로 의존성이 없는 "페이지수 2단계 조회"와 "장르 분류
+        LLM 호출"을 `asyncio.gather`로 동시 실행한다.
+        """
+        client = self._book_metadata_client
+        assert client is not None  # 호출부에서 이미 None 체크됨
+
+        cached = await client.get_cached_isbn_and_pages(title, author)
+        if cached is not None:
+            isbn, pages = cached
+        else:
+            isbn = await client.fetch_isbn_only(title, author, auth_token=auth_token)
+
+        genre_task = (
+            self._genre_classifier_service.classify_genre(
+                BookClassificationRequest(isbn=isbn or "")
+            )
+            if needs_genre and isbn and self._genre_classifier_service is not None
+            else None
+        )
+
+        if cached is None and isbn is not None:
+            pages_task = client.fetch_total_pages(isbn, auth_token=auth_token)
+            if genre_task is not None:
+                pages, genre_response = await asyncio.gather(pages_task, genre_task)
+            else:
+                pages = await pages_task
+                genre_response = None
+            await client.cache_isbn_and_pages(title, author, isbn, pages)
+        elif cached is None:
+            pages = None
+            genre_response = await genre_task if genre_task is not None else None
+        else:
+            genre_response = await genre_task if genre_task is not None else None
+
+        return (pages, genre_response)
 
     async def _backfill_missing_genres(
         self,
@@ -176,7 +237,13 @@ class RecommendBooksTool:
         parsed: list[RecommendedBookFields],
         isbn_and_pages_by_title: dict[str, tuple[str | None, int | None]],
     ) -> str:
-        """장르가 `NONE`인 도서 블록에 `GenreClassifierService`로 결정론적 장르를 보강한다."""
+        """장르가 `NONE`인 도서 블록에 `GenreClassifierService`로 결정론적 장르를 보강한다.
+
+        CLIAR-282 병렬화 이후에는 `_verify_page_counts`가 `_resolve_isbn_pages_and_genre`로
+        장르 분류까지 함께 병렬 처리하므로 실제 호출 경로에서는 쓰이지 않는다. 다만
+        기존 계약(순차 폴백 경로)을 참조하는 테스트/외부 코드가 있을 수 있어 메서드
+        자체는 하위 호환으로 유지한다.
+        """
         if self._genre_classifier_service is None:
             return markdown
 
