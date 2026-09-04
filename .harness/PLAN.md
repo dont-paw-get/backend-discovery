@@ -78,23 +78,35 @@ CloudWatch 커스텀 메트릭 기반의 완전 분리 경로**로 구현했다(
 **Task**:
 - [x] Task 1: `recommend_tool.py`에 구간별 `time.perf_counter()` 계측 추가
       (에이전트 생성/`invoke_async`/`_verify_page_counts` 3구간 분리, `log_agent_metrics`의
-      `direct_metrics`에 포함). `ruff`/`mypy`/단위 테스트(281건) 통과 확인.
-- [ ] Task 2: `ruff`/`mypy`/`pytest -m "not integration"` 재확인 후 커밋, PR 생성 및
-      `develop` 머지(사용자 승인 시) → dev 자동 배포(GitHub Actions, `develop` push 트리거).
-- [ ] Task 3: dev 배포 후 실제 사용자 추천 요청 로그(`agent_metrics`, phase=`recommend_agent`)에서
-      `verify_page_counts_ms`/`agent_invoke_ms`/`agent_creation_ms` 실측값 확인. 이 로그
-      기반으로 "미계측 간극"의 실제 원인을 확정한다(가설: `_verify_page_counts`가 범인).
-- [ ] Task 4 (Task 3 결과에 따라 분기):
-  - 가설이 맞으면(검증 구간이 크면): 2단 순차 HTTP를 줄이는 방향 검토 —
-    (a) `.harness/BACKLOG.md`에 이미 있는 "backend-book이 `by-title-author`에서
-    `totalPages`를 직접 채워주도록 팀 요청"(근본 해결, 팀 의존), (b) 단기로는 결과 캐싱
-    (같은 제목·저자 반복 조회 방지, TTL 검토) 또는 타임아웃/재시도 정책 재검토.
-  - 가설이 틀리면(다른 구간이 크면): 그 구간(에이전트 생성 오버헤드 등) 기준으로 재조사.
-- [ ] Task 5: 수정 적용 후 전후 비교(수정 전 vs 후 `recommend_agent` 총 시간) 및 하네스
-      문서(`STATE.md`/`DECISIONS.md`) 동기화.
+      `direct_metrics`에 포함). `ruff`/`mypy`/단위 테스트(281건) 통과. PR #52 머지·dev 배포 완료.
+- [x] Task 2: dev 배포 후 실제 사용자 추천 요청 로그(`agent_metrics`, phase=`recommend_agent`)
+      실측 확인(2026-09-04, 45.9초 요청). 결과: `verify_page_counts_ms`=1.77초(4%, 병목
+      아님), `agent_creation_ms`=0.14초(무시), **`agent_invoke_ms`=24.6초(93%, 진짜 범인)**.
+      가설(`_verify_page_counts`가 범인)은 반증됨.
+- [x] Task 3: `agent_invoke_ms`(24.6초) 내부 분석. `strands_metrics.total_cycles: 3`,
+      `search_books` `call_count: 3` 확인 — LLM이 시스템 프롬프트의 "1~2회 이내로
+      효율적으로"라는 권장 문구를 지키지 않고 3회 도구 호출 사이클을 돌고 있었다.
+      Strands가 재는 순수 사이클 시간(11.9초)과 실제 `agent_invoke_ms`(24.6초) 사이
+      12.7초 간극은 Strands SDK 내부(사이클마다 반복되는 Bedrock 크로스리전 오버헤드
+      추정)라 완전히 규명하지 못했으나, **사이클 수 자체를 줄이는 것이 간극도 함께
+      줄이는 근본 해결**이라고 판단(사이클이 늘수록 간극도 비례해 누적되는 구조).
+      더 정밀한 계측(`stream_async` 전환)은 기존 단위 테스트 5건이 mock 방식과 충돌해
+      침습성이 커 보류(`invoke_async` 유지).
+- [x] Task 4 (근본 수정): `domain/librarian/agent.py`의 CAT/STORK 시스템 프롬프트에서
+      "1~2회 이내로 효율적으로 활용"(권장, 강제력 없음)을 "**정확히 1회만** 호출,
+      2번째 검색 금지, 주제 단위로 폭넓게 검색해 한 번에 후보 확보"로 명확화.
+      `recommend_tool.py`의 사용자 프롬프트에도 "search_books는 정확히 1회만 호출"
+      지시를 이중으로 추가(시스템 프롬프트 미준수 방어). 단위 테스트 1건(`invoke_async`
+      호출 prompt 문자열 assert) 갱신, `ruff`/`mypy`/`pytest -m "not integration"`
+      281건 전체 통과(무회귀).
+- [ ] Task 5: dev 배포 후 전후 비교 — 수정 전(`total_cycles: 3`, `search_books call_count: 3`,
+      `agent_invoke_ms` ~24.6초) vs 수정 후(목표: `total_cycles` 1~2, `call_count` 1,
+      `agent_invoke_ms` 유의미하게 감소) 실측 확인.
+- [ ] Task 6: 하네스 문서(`STATE.md`/`DECISIONS.md`) 동기화.
 
 **폐기된 방향**: 사서 에이전트(`backend-librarian`)를 discovery로 통합하는 것 — 실측상
-효과가 없어(28ms) 이번 티켓 범위에서 제외.
+효과가 없어(28ms) 이번 티켓 범위에서 제외. `_verify_page_counts`(backend-book 2단 조회)
+최적화도 실측상 4%(1.77초)라 이번 범위에서 후순위로 내림.
 
 ---
 
