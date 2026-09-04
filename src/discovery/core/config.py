@@ -49,7 +49,11 @@ class Settings(BaseSettings):
     # aws_region: str | None = "ap-northeast-2"
     # librarian_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
     # orchestrator_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
-    genre_classifier_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    # CLIAR-282: 구형 Claude 3 Haiku(2024-03)에서 Haiku 4.5 글로벌 프로필로 교체.
+    # 추천 도서 장르 결정론적 보강(_backfill_missing_genres)이 이 모델을 추가 호출하며
+    # verify_page_counts_ms를 늘렸는데(2.8초→5.3초 dev 실측), 장르 분류 자체를
+    # 빠른 모델로 바꿔 그 증가분을 상쇄한다.
+    genre_classifier_model_id: str = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     librarian_agent_url: str | None = None
     librarian_default_id: str = "cat"
     librarian_http_timeout_seconds: float = 20.0
