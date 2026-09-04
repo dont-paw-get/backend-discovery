@@ -79,8 +79,19 @@ class RecommendBooksTool:
             "search_books 도구는 정확히 1회만 호출하고, 그 한 번의 검색어로 "
             f"{clamped_count}권 분량의 후보와 서지 정보를 한꺼번에 확보하세요."
         )
+        event_timeline: list[tuple[float, str]] = []
+
+        def _on_event(**kwargs: Any) -> None:
+            elapsed_ms = round((time.perf_counter() - invoke_start) * 1000, 2)
+            # 이벤트 종류를 유추할 수 있는 키만 라벨로 남긴다(본문/프롬프트는 기록하지
+            # 않음 — 개인정보 및 페이로드 크기 방어, AGENTS.md 로깅 정책과 일치).
+            label = next(iter(kwargs.keys()), "unknown")
+            event_timeline.append((elapsed_ms, label))
+
+        agent.callback_handler = _on_event
         result = await agent.invoke_async(prompt=prompt)
         invoke_ms = round((time.perf_counter() - invoke_start) * 1000, 2)
+        gap_ms, gap_after_label = _largest_event_gap_ms(event_timeline, invoke_ms)
 
         raw_text = extract_text_from_message(result.message)
         truncated_text = truncate_books_by_count(raw_text, count=clamped_count)
@@ -107,6 +118,9 @@ class RecommendBooksTool:
                 "agent_creation_ms": agent_creation_ms,
                 "agent_invoke_ms": invoke_ms,
                 "verify_page_counts_ms": verify_ms,
+                "largest_event_gap_ms": gap_ms,
+                "largest_event_gap_after": gap_after_label,
+                "event_count": len(event_timeline),
             },
         )
         return processed_text
@@ -221,6 +235,43 @@ class RecommendBooksTool:
             )
 
         return recommend_books_tool
+
+
+def _largest_event_gap_ms(
+    event_timeline: list[tuple[float, str]], total_invoke_ms: float
+) -> tuple[float, str]:
+    """CLIAR-282 진단: Strands 콜백 이벤트 사이의 가장 큰 시간 간극과, 그 간극이
+    어느 이벤트 뒤에서 발생했는지 반환한다.
+
+    `strands_metrics.total_duration`(이벤트 루프 사이클 시간)과 실제
+    `agent_invoke_ms`(wall-clock) 사이에 설명되지 않는 간극이 반복적으로 관측되어
+    (dev 실측, 2026-09-04), 콜백 이벤트 사이 간격을 직접 재서 "어느 이벤트 이후"에
+    시간이 새는지 좁히기 위한 진단 계측이다. 이벤트가 없으면(콜백이 전혀 안 불린
+    경우 등) 첫 이벤트 이전 구간 전체를 간극으로 본다.
+
+    Args:
+        event_timeline: `(경과 시간(ms), 이벤트 종류 라벨)` 튜플 목록, 발생 순서대로.
+        total_invoke_ms: `agent.invoke_async` 전체 소요시간(ms). 마지막 이벤트 이후
+            결과 조립까지 남는 시간을 재기 위해 종료 시각으로 사용한다.
+
+    Returns:
+        `(가장 큰 간극(ms), 그 간극 직전 이벤트 라벨)`. 이벤트가 없으면
+        `(total_invoke_ms, "no_events")`.
+    """
+    if not event_timeline:
+        return (total_invoke_ms, "no_events")
+
+    boundaries = [0.0, *[t for t, _ in event_timeline], total_invoke_ms]
+    labels = ["start", *[label for _, label in event_timeline]]
+
+    max_gap = 0.0
+    max_gap_after = labels[0]
+    for i in range(1, len(boundaries)):
+        gap = round(boundaries[i] - boundaries[i - 1], 2)
+        if gap > max_gap:
+            max_gap = gap
+            max_gap_after = labels[i - 1]
+    return (max_gap, max_gap_after)
 
 
 def _replace_page_count_for_title(markdown: str, title: str, verified_page: int) -> str:

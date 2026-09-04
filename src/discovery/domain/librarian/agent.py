@@ -140,6 +140,7 @@ def create_librarian_agent(
     system_prompt: str | None = None,
     enable_prompt_caching: bool = False,
     max_tokens: int = 1536,
+    callback_handler: Any = None,
 ) -> Agent:
     """추천 에이전트를 생성한다.
 
@@ -157,6 +158,8 @@ def create_librarian_agent(
         system_prompt: 사서 시스템 프롬프트.
         enable_prompt_caching: Bedrock 자동 프롬프트 캐싱 활성화 여부.
         max_tokens: 최대 출력 토큰 수 (도서 2권 카드 마크다운 생성에 최적화된 1536).
+        callback_handler: Strands `Agent`가 이벤트 발생마다 동기 호출하는 콜백(CLIAR-282
+            진단용). None이면 Strands 기본 콜백(PrintingCallbackHandler)이 쓰인다.
 
     Note:
         `temperature`와 `top_p`는 Claude Sonnet 5에서 둘 다 deprecated되어
@@ -186,4 +189,6 @@ def create_librarian_agent(
         kwargs["tools"] = tools
     if messages is not None:
         kwargs["messages"] = messages
+    if callback_handler is not None:
+        kwargs["callback_handler"] = callback_handler
     return Agent(**kwargs)

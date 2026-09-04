@@ -1,8 +1,12 @@
 # PLAN — backend-discovery
 
-## [코드 완료 · dev 배포/실측 대기] CLIAR-282: [오케스트레이터] 속도 및 정확도 최적화
+## [코드 완료 · PR #55 머지 대기 · dev 배포/실측 대기] CLIAR-282: [오케스트레이터] 속도 및 정확도 최적화
 
 브랜치: `CLIAR-282-Orchestrator-Speed-Accuracy-Optimization` (`develop`에서 분기, 2026-09-04)
+
+**PR 상태 (2026-09-04 세션 종료 시점, 중요)**: 1차 PR #54(boto3 재사용 + 장르 보강,
+커밋 `558824d`)는 **머지·dev 배포 완료**. 2차 PR #55(장르 모델 교체 + 이벤트 간극 계측,
+커밋 `458e119`)는 **생성됨, 아직 미머지** — 다음 세션이 사용자 승인 받아 머지 처리할 것.
 
 **배경**: CLIAR-278(Haiku 4.5)·CLIAR-281(search_books 1회 강제) 이후에도 12.7초→5초로
 줄었을 뿐 남은 미계측 간극이 있었고, 별도로 추천 카드 장르 칩이 dev 실측에서 안 뜨는
@@ -38,14 +42,38 @@
 - `genre_classifier_service`가 배선되지 않았거나 ISBN을 못 구했거나 분류가 `NONE`이면
   원본을 그대로 둔다(추가 손해 없음, graceful).
 
-**검증**: `ruff`/`mypy` 84파일 통과. 단위 테스트 신규 3건(장르 보강/기존 유지/서비스
-미배선 스킵) + 기존 2건(메서드명 변경) 갱신, 전체 284건 통과(무회귀).
+**Task 3 (진단, 2차): 미계측 간극 원인 규명 시도**
+- Task 1(boto3 재사용) dev 배포 후 실측 결과, `agent_creation_ms`는 실제로 줄었으나
+  (103ms→5.7ms) 원래 크기가 미미해 전체 시간에 영향 없었고, 5초 미계측 간극은
+  boto3 세션과 무관함이 확정됨(가설 반증). 오히려 Task 2(장르 보강)가 추가한 LLM
+  호출로 `verify_page_counts_ms`가 2.8초→5.3초로 늘어 총 시간이 소폭 증가함(트레이드오프).
+- `genre_classifier_model_id`를 구형 `anthropic.claude-3-haiku-20240307-v1:0`에서
+  Haiku 4.5 글로벌 프로필로 교체(증가분 상쇄 목적).
+- `create_librarian_agent`에 `callback_handler` 파라미터 추가, `RecommendBooksTool.recommend`가
+  `agent.callback_handler`에 이벤트 발생마다 `(경과ms, 이벤트라벨)`을 기록하는 콜백을
+  주입(생성 후 속성 재할당 — 기존 mock 테스트가 `create_librarian_agent`를 통째로
+  mock하므로 영향 없음, 지난 세션의 `stream_async` 전환 시도와 달리 테스트 충돌 없음).
+  `_largest_event_gap_ms`로 콜백 이벤트 사이 가장 큰 간극과 그 직전 이벤트 라벨을
+  `direct_metrics.largest_event_gap_ms`/`largest_event_gap_after`로 로깅.
+
+**검증**: `ruff`/`mypy` 84파일 통과, 단위 테스트 284건 전체 통과(무회귀, 이벤트 콜백
+계측은 진단 목적 로깅만 추가하고 반환값 변경 없어 신규 테스트 불필요로 판단).
 
 **남은 작업**:
-- [ ] dev 배포 후 재실측: (1) `agent_invoke_ms`와 Strands 순수 사이클 시간 사이 간극이
-      boto3 재사용으로 더 줄었는지 확인. (2) 같은 세션에서 여러 턴 도서 추천 요청 시
-      장르 칩이 프론트에 정상적으로 뜨는지 확인(이전엔 멀티턴 후반부에서 누락 재현됨).
-- [ ] 하네스 문서(`STATE.md`/`DECISIONS.md`) 최종 동기화(초안은 이미 반영, 실측 후 보강).
+- [ ] dev 배포 후 실측: `largest_event_gap_ms`/`largest_event_gap_after` 로그로 5초
+      간극이 정확히 어느 이벤트 뒤에서 발생하는지 확정(모델 스트림 시작 전 대기,
+      도구 실행 후 재추론 대기, 마지막 이벤트~결과 조립 등 후보 중 확정).
+- [ ] `genre_classifier_model_id` Haiku 4.5 교체로 `verify_page_counts_ms` 증가분이
+      상쇄되는지 재실측.
+- [ ] 하네스 문서(`STATE.md`/`DECISIONS.md`) 최종 동기화(실측 후 보강).
+- [x] **완료(2026-09-04, 사용자 제보)**: 장르 칩은 정상 노출되지만 페이지수가 안
+      채워지는 현상. dev 로그(`kubectl logs`) 직접 확인으로 `httpx.ReadTimeout` 확정
+      (`fetch_total_pages`의 2단계 알라딘 상세조회가 `book_metadata_timeout_seconds=3.0`초를
+      넘김 — 정상 응답은 실측 ~1.8초였는데 편차로 3초를 넘는 사례 발생, 1단계
+      `by-title-author`는 ISBN까지는 성공하므로 장르 보강만 살아남고 페이지수만 `None`).
+      `book_metadata_timeout_seconds` 3.0→8.0초로 상향(`config.py`/`.env.example`),
+      k8s configmap에는 이 값이 없어(기본값 사용) 추가 배포 파일 변경 불필요.
+      `ruff`/`mypy`/`pytest -m "not integration"` 284건 통과. dev 재배포 후 재실측 필요.
 
 ---
 

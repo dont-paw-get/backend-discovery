@@ -1165,3 +1165,105 @@
 4. 여유 있으면 Task 7(CloudWatch Alarm → SNS → Lambda(Discord), 기존 Grafana→Discord RCA
    Agent와 별개 채널로 분리) 착수.
 5. Task 8(`ARCHITECTURE.md`에 "독립 CloudWatch LLM 관측(선택적, 기본 OFF)" 서술 추가).
+
+
+
+## 2026-09-04 — CLIAR-278/281/282: Haiku 4.5 전환, 추천 속도 진단·수정, 장르 결정론적 보강
+
+**배경**: 사용자가 어제 논의했던 "사서 에이전트(backend-librarian)를 discovery로 통합"을
+이번 세션에서 보류하고, 대신 모델 교체(Haiku 4.5)로 속도 개선을 시도하는 것으로 방향을
+바꿨다. 이후 실제 dev 로그 실측을 반복하며 진짜 병목을 좁혀나갔다.
+
+### CLIAR-278: Sonnet 5 → Claude Haiku 4.5 모델 교체 (완료·머지됨, PR #51)
+- `librarian_model_id`/`orchestrator_model_id` 둘 다 `global.anthropic.claude-haiku-4-5-20251001-v1:0`로 교체.
+- 이 계정에서 실제 호출 가능함을 MFA 재인증 후 `aws bedrock-runtime converse` 직접 호출로
+  확인(`.harness/BACKLOG.md`의 "전 리전 차단" 기록은 낡은 정보였음, 이번에 정정).
+- 동일 프롬프트 3회씩 실측: Sonnet 5 평균 ~3028ms vs Haiku 4.5 평균 ~1766ms(약 42% 단축).
+- `core/pricing.py`에 Haiku 4.5 단가($1/$5 per 1M) 추가(CLIAR-276 CloudWatch 비용 관측 gap 해소).
+
+### CLIAR-281: 추천 에이전트 속도 원인 진단 및 수정 (완료·머지됨, PR #52·#53)
+- **사서 에이전트 통합 방향은 폐기**: discovery Pod에서 `backend-librarian` Pod로 직접
+  HTTP 실측한 결과 28~30ms(콜드스타트 제외)로 이미 무시할 수준임을 확인. 합쳐도 얻을 게
+  없다고 결론.
+- dev 로그(`agent_metrics`) 진단 계측(`agent_creation_ms`/`agent_invoke_ms`/
+  `verify_page_counts_ms`)으로 45.9초 요청 분해: `_verify_page_counts`는 1.77초(4%,
+  병목 아님), `agent_invoke_ms`가 24.6초(93%, 진짜 범인).
+- `agent_invoke_ms` 내부에서 `strands_metrics.total_cycles: 3`, `search_books
+  call_count: 3` 확인 — LLM이 "1~2회 이내로 효율적으로"라는 권장 문구를 무시하고 도구를
+  3회 호출. `domain/librarian/agent.py`의 CAT/STORK 프롬프트를 "정확히 1회만, 2번째
+  검색 금지"로 강제 문구로 변경, `recommend_tool.py` 사용자 프롬프트에도 이중 추가.
+- dev 재배포 후 실측: `search_books call_count` 3→1, `total_cycles` 3→2, 미계측 간극
+  12.7초→5.0초로 감소. 다만 전체 체감 시간 개선은 크지 않음(39.3초).
+
+### CLIAR-282: 오케스트레이터 속도 및 정확도 최적화 (진행 중 — 1차 PR #54 머지 완료,
+2차 PR #55 **머지 대기 중, 다음 세션이 처리**)
+
+**1차 (PR #54, 머지됨, 커밋 `558824d`)**:
+- Task 1(속도 가설): `main.py` lifespan에서 `boto3.Session`을 프로세스 생명주기 동안
+  1회 생성해 공유(`app.state.boto_session`), `create_librarian_agent`/
+  `create_orchestrator_agent`/`genre_classifier_service`가 매 요청 새 세션을 만들던
+  것을 교체. 사서팀(backend-librarian) 코드 분석에서 얻은 힌트(동일 문제 패턴)를
+  근거로 시도.
+- Task 2(정확도): 프론트에서 추천 카드 장르 칩이 안 뜨는 버그를 Redis 세션 원문으로
+  직접 확인(LLM이 멀티턴 후반부에서 `- **장르**:` 마크다운 라인 자체를 빼먹음).
+  `BookMetadataClient.fetch_isbn_and_pages`(신규, ISBN+페이지수 함께 반환) +
+  `RecommendBooksTool._backfill_missing_genres`(장르 `NONE`인 도서만 골라 기존
+  `GenreClassifierService.classify_genre` 재사용) + `_upsert_genre_for_title`(마크다운
+  라인 삽입/교체)로 결정론적 보강.
+- **dev 배포 후 실측 결과(사용자 피드백, 중요)**: 정확도는 개선됐다고 보이나(화면 확인
+  전), **속도는 개선되지 않았고 개발자도구 기준 40초대가 그대로 관측됨**. 로그로 확인한
+  진짜 원인: (1) `agent_creation_ms`는 103ms→5.7ms로 줄었으나 원래 크기가 미미해 전체
+  시간에 영향 없음 — **boto3 재사용 가설은 반증됨**. (2) 오히려 Task 2가 추가한 장르
+  분류 LLM 호출 때문에 `verify_page_counts_ms`가 2.8초→5.3초로 늘어 총 시간이 소폭
+  증가(22.5초→25.8초, recommend_agent 기준)하는 트레이드오프가 발생.
+
+**2차 (PR #55, 커밋 `458e119`, 다음 세션이 머지 처리)**:
+- `genre_classifier_model_id`를 구형 `anthropic.claude-3-haiku-20240307-v1:0`(2024-03)에서
+  Haiku 4.5로 교체(Task 2가 늘린 시간 상쇄 목적).
+- 5초 미계측 간극(Strands `total_duration` vs 실제 `agent_invoke_ms`)의 정확한 발생
+  지점을 규명하기 위해 `create_librarian_agent`에 `callback_handler` 파라미터 추가,
+  `RecommendBooksTool.recommend`가 에이전트 생성 후 `agent.callback_handler` 속성을
+  재할당해 Strands 이벤트 발생마다 `(경과ms, 이벤트라벨)`을 기록하고 `_largest_event_gap_ms`
+  로 가장 큰 간극과 그 직전 이벤트를 `direct_metrics.largest_event_gap_ms`/
+  `largest_event_gap_after`로 로깅. **`invoke_async` API 자체는 바꾸지 않아** 기존
+  mock 기반 단위 테스트 5건이 깨지는 문제(지난 세션에 `stream_async` 전환 시도 때 발생,
+  당시 보류)를 이번에는 회피했다.
+- `ruff`/`mypy`/`pytest -m "not integration"` 284건 통과(무회귀). **아직 PR #54처럼
+  develop에 머지되지 않은 상태로 이 세션이 종료됨.**
+
+### 이번 세션의 사고 및 복구 (중요, 재발 방지용 기록)
+- 브랜치 전환 중 두 차례 실수로 다른 세션(CLIAR-266, 대화 세션 TTL 30일 상향 작업)의
+  워킹 디렉토리 변경사항을 잘못 건드릴 뻔했다. 첫 번째는 git 내부 unreachable blob에서
+  전량 복구했고, 두 번째는 stash로 안전하게 격리했다. **현재 CLIAR-266 브랜치
+  (`CLIAR-266-Chat-Session-TTL-And-History-Plan`)에는 커밋되지 않은 변경사항이
+  `git stash list`에 두 항목으로 안전하게 보관 중이다**:
+  - `stash@{0}`: "CLIAR-266-WIP-2-DO-NOT-TOUCH"
+  - `stash@{1}`: "CLIAR-266-WIP-DO-NOT-TOUCH: 대화 세션 TTL 30일 상향 (다른 세션 담당)"
+  - **다음 세션이 CLIAR-266을 이어간다면**: `git switch CLIAR-266-Chat-Session-TTL-And-History-Plan`
+    후 `git stash pop`(오래된 stash부터, 즉 인덱스가 큰 것부터)으로 순서대로 복원할 것.
+    두 stash 모두 `.env.example`/`.harness/DECISIONS.md`(중복 가능성 있음, 충돌 시 수동
+    병합 필요)/`k8s/base/configmap.yaml`/`src/discovery/core/config.py`/
+    `tests/unit/test_session_store.py`를 담고 있다.
+  - **교훈**: 브랜치 전환 전에는 반드시 `git status --short`로 다른 티켓 파일이 섞여있는지
+    확인하고, 섞여있으면 그 파일만 정확히 지정해 `git stash push -- <파일들>`로 분리한 뒤
+    전환할 것. 이번처럼 같은 이름의 브랜치가 이미 존재하는데 `git switch -c`가 아니라
+    실수로 `git switch`(기존 브랜치로 이동)가 실행된 것도 원인 중 하나로 의심됨 — 브랜치
+    생성 직후 `git branch --show-current`와 `git log --oneline -3`으로 항상 재확인할 것.
+
+### 다음 세션이 할 일 (우선순위 순)
+1. **PR #55(`CLIAR-282-Orchestrator-Speed-Accuracy-Optimization` → `develop`)를 사용자
+   승인 시 머지 → dev 자동 배포 확인.**
+2. dev 배포 후 실제 도서 추천 요청 테스트, `kubectl logs`로 `agent_metrics`
+   (phase=`recommend_agent`) 확인:
+   - `largest_event_gap_ms`/`largest_event_gap_after` 값으로 5초 미계측 간극이 정확히
+     어느 Strands 이벤트 뒤에서 발생하는지 확정(모델 스트림 시작 전 대기, 도구 실행 후
+     재추론 대기, 마지막 이벤트~결과 조립 등 후보 중 어느 것인지).
+   - `verify_page_counts_ms`가 Haiku 4.5 장르 분류 모델 교체로 얼마나 줄었는지(목표:
+     5.3초에서 상당히 감소).
+   - 실제 화면에서 장르 칩이 정상적으로 뜨는지(특히 멀티턴 대화 후반부에서).
+3. 간극 원인이 확정되면 그에 맞는 근본 수정 진행(예: 특정 이벤트 뒤 대기가 크면 그
+   구간을 우회하거나 병렬화하는 방향 검토).
+4. CLIAR-266(다른 세션 담당, 위 stash 참고)과 절대 같은 브랜치/워킹 디렉토리 상태를
+   혼동하지 않도록 주의.
+5. `.harness/BACKLOG.md`의 "by-title-author가 totalPages를 직접 채우도록 backend-book
+   개선 요청" 등 기존 백로그 항목은 이번 세션에서 다루지 않았으므로 여전히 유효.

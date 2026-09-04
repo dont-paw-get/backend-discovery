@@ -49,7 +49,11 @@ class Settings(BaseSettings):
     # aws_region: str | None = "ap-northeast-2"
     # librarian_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
     # orchestrator_model_id: str = "anthropic.claude-3-5-sonnet-20240620-v1:0"
-    genre_classifier_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    # CLIAR-282: 구형 Claude 3 Haiku(2024-03)에서 Haiku 4.5 글로벌 프로필로 교체.
+    # 추천 도서 장르 결정론적 보강(_backfill_missing_genres)이 이 모델을 추가 호출하며
+    # verify_page_counts_ms를 늘렸는데(2.8초→5.3초 dev 실측), 장르 분류 자체를
+    # 빠른 모델로 바꿔 그 증가분을 상쇄한다.
+    genre_classifier_model_id: str = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
     librarian_agent_url: str | None = None
     librarian_default_id: str = "cat"
     librarian_http_timeout_seconds: float = 20.0
@@ -68,7 +72,11 @@ class Settings(BaseSettings):
     book_metadata_api_url: str = (
         "http://k8s-dpybbook-backendb-d17a725d36-1113312703.ap-northeast-2.elb.amazonaws.com"
     )
-    book_metadata_timeout_seconds: float = 3.0
+    # CLIAR-282 후속: dev 실측(2026-09-04)에서 정상 응답은 ~1.8초인데 3.0초 타임아웃을
+    # 넘겨 httpx.ReadTimeout으로 실패하는 사례가 로그로 확인됨(알라딘 경유 조회 특성상
+    # 응답 편차가 큼). 실패 시 ISBN은 얻어도(장르 보강 성공) 페이지수만 None으로 빠지는
+    # 버그의 원인이라, 정상 응답 시간의 3배 이상 여유를 두도록 상향.
+    book_metadata_timeout_seconds: float = 8.0
     tavily_api_key: str
     tavily_cache_ttl_seconds: int = 86400
     tavily_monthly_credit_limit: int = 900
