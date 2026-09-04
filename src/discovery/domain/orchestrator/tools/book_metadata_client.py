@@ -33,6 +33,7 @@ from discovery.domain.orchestrator.book_metadata_response import (
     BookMetadataSearchResponse,
     BookSearchByTitleAuthorResponse,
 )
+from discovery.infrastructure.cache.book_metadata_cache import BookMetadataCache
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +59,11 @@ class BookMetadataClient:
         self,
         settings: Settings,
         http_client: httpx.AsyncClient | None = None,
+        cache: BookMetadataCache | None = None,
     ) -> None:
         self._settings = settings
         self._http_client = http_client
+        self._cache = cache
 
     async def _get(
         self, url: str, params: dict[str, str], auth_token: str | None
@@ -193,6 +196,12 @@ class BookMetadataClient:
         HTTP 조회를 수행하지만 ISBN도 함께 반환한다는 점만 다르다(하위 호환을 위해
         기존 메서드는 그대로 유지하고 별도 메서드로 분리).
 
+        CLIAR-282 Task 5: `cache`가 배선되어 있으면 제목·저자로 먼저 캐시를 조회한다.
+        Hit 시 알라딘 HTTP 호출 없이 즉시 반환한다(dev 실측으로 확인된 1.3~5.3초 지연을
+        수 ms로 단축). Miss 시 기존 2단 조회를 그대로 수행하고, 조회에 성공한 경우에만
+        결과를 캐시에 저장한다(실패로 `(None, None)`이 나온 경우는 캐싱하지 않음 —
+        일시적 네트워크 오류를 TTL 기간 내내 실패로 고정시키지 않기 위함).
+
         네트워크 오류, 타임아웃, 4xx/5xx(무인증 401 포함), 응답 파싱 실패, 검색 결과
         없음 등 어떤 이유로든 조회에 실패하면 예외를 전파하지 않고 `(None, None)`을
         반환한다(graceful degradation).
@@ -208,6 +217,22 @@ class BookMetadataClient:
         if not title or not title.strip() or not author or not author.strip():
             return (None, None)
 
+        if self._cache is not None:
+            cached = await self._cache.get(title, author)
+            if cached is not None:
+                return cached
+
+        result = await self._fetch_isbn_and_pages_uncached(title, author, auth_token)
+
+        if self._cache is not None and result != (None, None):
+            await self._cache.set(title, author, result[0], result[1])
+
+        return result
+
+    async def _fetch_isbn_and_pages_uncached(
+        self, title: str, author: str, auth_token: str | None
+    ) -> tuple[str | None, int | None]:
+        """캐시를 거치지 않고 알라딘 2단 조회를 직접 수행한다."""
         base = self._settings.book_metadata_api_url.rstrip("/")
         url = f"{base}/api/v1/books/search/by-title-author"
         params = {"title": title.strip(), "author": author.strip()}

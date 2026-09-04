@@ -346,3 +346,87 @@ async def test_fetch_no_authorization_header_when_token_missing(
 
     headers = mock_client.get.await_args.kwargs["headers"]
     assert "Authorization" not in headers
+
+
+# ---------------------------------------------------------------------------
+# CLIAR-282 Task 5: fetch_isbn_and_pages 캐시 연동 (히트 시 HTTP 완전 스킵)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_fetch_isbn_and_pages_returns_cached_result_without_http_call(
+    settings: Settings, mocker: MockerFixture
+) -> None:
+    """캐시 히트 시 알라딘 HTTP 호출을 전혀 하지 않고 즉시 반환한다."""
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_cache = mocker.AsyncMock()
+    mock_cache.get.return_value = ("9788932917245", 136)
+
+    client = BookMetadataClient(settings=settings, http_client=mock_client, cache=mock_cache)
+    result = await client.fetch_isbn_and_pages("어린 왕자", "앙투안 드 생텍쥐페리")
+
+    assert result == ("9788932917245", 136)
+    mock_cache.get.assert_awaited_once_with("어린 왕자", "앙투안 드 생텍쥐페리")
+    mock_client.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_isbn_and_pages_stores_result_in_cache_on_miss(
+    settings: Settings, mocker: MockerFixture
+) -> None:
+    """캐시 미스 시 알라딘 조회를 수행하고, 성공한 결과를 캐시에 저장한다."""
+    resp_title_author = mocker.MagicMock(spec=httpx.Response)
+    resp_title_author.status_code = 200
+    resp_title_author.json.return_value = {
+        "book": {"title": "어린 왕자", "isbn": "9788932917245", "totalPages": None}
+    }
+    resp_isbn = mocker.MagicMock(spec=httpx.Response)
+    resp_isbn.status_code = 200
+    resp_isbn.json.return_value = {"book": {"isbn": "9788932917245", "totalPages": 136}}
+
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get.side_effect = [resp_title_author, resp_isbn]
+    mock_cache = mocker.AsyncMock()
+    mock_cache.get.return_value = None
+
+    client = BookMetadataClient(settings=settings, http_client=mock_client, cache=mock_cache)
+    result = await client.fetch_isbn_and_pages("어린 왕자", "앙투안 드 생텍쥐페리")
+
+    assert result == ("9788932917245", 136)
+    mock_cache.set.assert_awaited_once_with(
+        "어린 왕자", "앙투안 드 생텍쥐페리", "9788932917245", 136
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_isbn_and_pages_does_not_cache_total_failure(
+    settings: Settings, mocker: MockerFixture
+) -> None:
+    """조회가 완전히 실패해 (None, None)이 나오면 캐시에 저장하지 않는다(일시적 오류 방어)."""
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get.side_effect = httpx.ConnectTimeout("timeout")
+    mock_cache = mocker.AsyncMock()
+    mock_cache.get.return_value = None
+
+    client = BookMetadataClient(settings=settings, http_client=mock_client, cache=mock_cache)
+    result = await client.fetch_isbn_and_pages("어린 왕자", "앙투안 드 생텍쥐페리")
+
+    assert result == (None, None)
+    mock_cache.set.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_fetch_isbn_and_pages_works_without_cache(
+    settings: Settings, mocker: MockerFixture
+) -> None:
+    """cache=None(기존 하위 호환)이면 캐시 관련 동작 없이 기존처럼 동작한다."""
+    resp = mocker.MagicMock(spec=httpx.Response)
+    resp.status_code = 200
+    resp.json.return_value = {"book": {"isbn": "9788932917245", "totalPages": 136}}
+    mock_client = mocker.AsyncMock(spec=httpx.AsyncClient)
+    mock_client.get.return_value = resp
+
+    client = BookMetadataClient(settings=settings, http_client=mock_client)
+    result = await client.fetch_isbn_and_pages("어린 왕자", "앙투안 드 생텍쥐페리")
+
+    assert result == ("9788932917245", 136)

@@ -22,6 +22,7 @@ from discovery.domain.genre.classifier import (
     match_standard_genre,
     parse_classification_response,
 )
+from discovery.infrastructure.cache.genre_classifier_cache import GenreClassifierCache
 
 logger = logging.getLogger(__name__)
 
@@ -42,9 +43,15 @@ def _extract_text_from_message(message: Any) -> str:
 class GenreClassifierService:
     """도서 표준 장르 분류를 수행하는 애플리케이션 서비스."""
 
-    def __init__(self, settings: Settings, boto_session: Any = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        boto_session: Any = None,
+        cache: GenreClassifierCache | None = None,
+    ) -> None:
         self._settings = settings
         self._boto_session = boto_session
+        self._cache = cache
 
     def _classify_mock(self, request: BookClassificationRequest) -> BookClassificationResponse:
         """테스트 및 로컬 mock 환경을 위한 결정론적 규칙 기반 분류."""
@@ -60,7 +67,32 @@ class GenreClassifierService:
     async def classify_genre(
         self, request: BookClassificationRequest
     ) -> BookClassificationResponse:
-        """도서 ISBN 정보를 기반으로 ERD 표준 16개 장르 중 1개로 분류한다."""
+        """도서 ISBN 정보를 기반으로 ERD 표준 16개 장르 중 1개로 분류한다.
+
+        CLIAR-282 Task 5: `cache`가 배선되어 있고 ISBN이 제공되면 먼저 캐시를 조회한다.
+        Hit 시 Bedrock LLM 호출 없이 즉시 반환한다. Miss 시 기존 분류를 수행하고,
+        결과가 `NONE`이 아닌 경우에만 캐시에 저장한다(불확실한 `NONE` 결과를 TTL
+        기간 내내 고정시키지 않기 위함).
+        """
+        if self._cache is not None and request.isbn:
+            cached = await self._cache.get(request.isbn)
+            if cached is not None:
+                genre_str, confidence = cached
+                matched = match_standard_genre(genre_str)
+                if matched is not None:
+                    return BookClassificationResponse(genre=matched, confidence=confidence)
+
+        response = await self._classify_genre_uncached(request)
+
+        if self._cache is not None and request.isbn and response.genre != StandardGenre.NONE:
+            await self._cache.set(request.isbn, response.genre.value, response.confidence)
+
+        return response
+
+    async def _classify_genre_uncached(
+        self, request: BookClassificationRequest
+    ) -> BookClassificationResponse:
+        """캐시를 거치지 않고 실제 분류(mock 또는 Bedrock LLM)를 수행한다."""
         if self._settings.llm_provider == "mock":
             return self._classify_mock(request)
 
