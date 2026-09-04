@@ -66,12 +66,14 @@
 - [ ] `genre_classifier_model_id` Haiku 4.5 교체로 `verify_page_counts_ms` 증가분이
       상쇄되는지 재실측.
 - [ ] 하네스 문서(`STATE.md`/`DECISIONS.md`) 최종 동기화(실측 후 보강).
-- [ ] **신규(2026-09-04, 사용자 제보)**: 장르 칩은 정상 노출되지만 페이지수가 안
-      채워지는 현상 재확인. `RecommendBooksTool._verify_page_counts`의 2단 조회
-      (`by-title-author`→ISBN→`search?isbn=`→페이지수) 중 2단계(`fetch_total_pages`)만
-      실패하는 경로로 추정(장르 보강은 ISBN만 있으면 되므로 영향 없음). dev 로그의
-      `Book metadata API returned status ...` 경고로 실패 원인(401/타임아웃/응답 없음)
-      확정 필요.
+- [x] **완료(2026-09-04, 사용자 제보)**: 장르 칩은 정상 노출되지만 페이지수가 안
+      채워지는 현상. dev 로그(`kubectl logs`) 직접 확인으로 `httpx.ReadTimeout` 확정
+      (`fetch_total_pages`의 2단계 알라딘 상세조회가 `book_metadata_timeout_seconds=3.0`초를
+      넘김 — 정상 응답은 실측 ~1.8초였는데 편차로 3초를 넘는 사례 발생, 1단계
+      `by-title-author`는 ISBN까지는 성공하므로 장르 보강만 살아남고 페이지수만 `None`).
+      `book_metadata_timeout_seconds` 3.0→8.0초로 상향(`config.py`/`.env.example`),
+      k8s configmap에는 이 값이 없어(기본값 사용) 추가 배포 파일 변경 불필요.
+      `ruff`/`mypy`/`pytest -m "not integration"` 284건 통과. dev 재배포 후 재실측 필요.
 
 ---
 
