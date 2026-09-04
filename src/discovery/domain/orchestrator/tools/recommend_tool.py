@@ -54,6 +54,7 @@ class RecommendBooksTool:
         """
         start_time = time.perf_counter()
         clamped_count = max(1, min(count, 5))
+        agent_creation_start = time.perf_counter()
         agent = create_librarian_agent(
             model_id=self._settings.librarian_model_id,
             region_name=self._settings.aws_region,
@@ -61,11 +62,19 @@ class RecommendBooksTool:
             tools=[self._book_search_tool.as_tool()],
             enable_prompt_caching=self._settings.enable_prompt_caching,
         )
+        agent_creation_ms = round((time.perf_counter() - agent_creation_start) * 1000, 2)
+
+        invoke_start = time.perf_counter()
         prompt = f"{query}\n\n[요청] 반드시 {clamped_count}권의 도서만 추천해주세요."
         result = await agent.invoke_async(prompt=prompt)
+        invoke_ms = round((time.perf_counter() - invoke_start) * 1000, 2)
+
         raw_text = extract_text_from_message(result.message)
         truncated_text = truncate_books_by_count(raw_text, count=clamped_count)
+
+        verify_start = time.perf_counter()
         processed_text = await self._verify_page_counts(truncated_text, auth_token=auth_token)
+        verify_ms = round((time.perf_counter() - verify_start) * 1000, 2)
 
         duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
         metrics_summary = (
@@ -80,7 +89,12 @@ class RecommendBooksTool:
             mode="sync",
             message_length=len(query),
             metrics_summary=metrics_summary,
-            direct_metrics={"total_duration_ms": duration_ms},
+            direct_metrics={
+                "total_duration_ms": duration_ms,
+                "agent_creation_ms": agent_creation_ms,
+                "agent_invoke_ms": invoke_ms,
+                "verify_page_counts_ms": verify_ms,
+            },
         )
         return processed_text
 
