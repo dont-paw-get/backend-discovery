@@ -12,6 +12,7 @@ OTLP exporter를 붙인다. 미설정(로컬)에서도 앱은 정상 기동한�
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import boto3
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -34,6 +35,10 @@ configure_tracing()
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings = get_settings()
     app.state.redis = create_redis_client(settings)
+    # CLIAR-282: BedrockModel(Strands)이 매 요청마다 새 boto3.Session()을 만들어
+    # 커넥션 풀/TLS 핸드셰이크를 반복하던 것을 프로세스 생명주기 동안 재사용하는
+    # 단일 세션으로 교체한다. region_name은 세션 생성 시 1회만 고정한다.
+    app.state.boto_session = boto3.Session(region_name=settings.aws_region)
     try:
         yield
     finally:

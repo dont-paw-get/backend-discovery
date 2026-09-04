@@ -182,3 +182,62 @@ class BookMetadataClient:
                 exc_info=True,
             )
             return None
+
+    async def fetch_isbn_and_pages(
+        self, title: str, author: str, auth_token: str | None = None
+    ) -> tuple[str | None, int | None]:
+        """제목·저자로 알라딘 교집합 검색을 수행해 ISBN과 총 페이지 수를 함께 조회한다.
+
+        CLIAR-282: 추천 도서 장르를 결정론적으로 보강하기 위해 `GenreClassifierService`에
+        넘길 ISBN이 필요해졌다. `fetch_by_title_author`(페이지수만 반환)와 동일한
+        HTTP 조회를 수행하지만 ISBN도 함께 반환한다는 점만 다르다(하위 호환을 위해
+        기존 메서드는 그대로 유지하고 별도 메서드로 분리).
+
+        네트워크 오류, 타임아웃, 4xx/5xx(무인증 401 포함), 응답 파싱 실패, 검색 결과
+        없음 등 어떤 이유로든 조회에 실패하면 예외를 전파하지 않고 `(None, None)`을
+        반환한다(graceful degradation).
+
+        Args:
+            title: 도서 제목.
+            author: 저자명.
+            auth_token: 사용자 Bearer 토큰(라우터에서 패스스루). 미전달 시 401로 (None, None).
+
+        Returns:
+            `(isbn, total_pages)` 튜플. 조회 실패 또는 검색 결과 없음이면 각각 `None`.
+        """
+        if not title or not title.strip() or not author or not author.strip():
+            return (None, None)
+
+        base = self._settings.book_metadata_api_url.rstrip("/")
+        url = f"{base}/api/v1/books/search/by-title-author"
+        params = {"title": title.strip(), "author": author.strip()}
+
+        try:
+            response = await self._get(url, params, auth_token)
+            if response is None or response.status_code != 200:
+                logger.warning(
+                    "Book search-by-title-author API returned status %s for title=%s",
+                    response.status_code if response is not None else "N/A",
+                    title,
+                )
+                return (None, None)
+
+            data = response.json()
+            parsed = BookSearchByTitleAuthorResponse.model_validate(data)
+            isbn = parsed.isbn
+
+            if parsed.total_pages is not None:
+                return (isbn, parsed.total_pages)
+
+            if isbn:
+                pages = await self.fetch_total_pages(isbn, auth_token=auth_token)
+                return (isbn, pages)
+            return (isbn, None)
+        except Exception:
+            logger.warning(
+                "Failed to fetch isbn/pages for title=%s, author=%s (falling back to None)",
+                title,
+                author,
+                exc_info=True,
+            )
+            return (None, None)

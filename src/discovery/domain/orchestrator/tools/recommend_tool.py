@@ -7,10 +7,13 @@ from typing import Any
 
 from strands import tool
 
+from discovery.api.schemas.genre import BookClassificationRequest, StandardGenre
+from discovery.application.genre_classifier_service import GenreClassifierService
 from discovery.core.config import Settings
 from discovery.core.observability import log_agent_metrics
 from discovery.domain.librarian.agent import create_librarian_agent
 from discovery.domain.librarian.post_processor import (
+    RecommendedBookFields,
     extract_text_from_message,
     parse_recommended_books_from_markdown,
     truncate_books_by_count,
@@ -27,10 +30,14 @@ class RecommendBooksTool:
         book_search_tool: BookSearchTool,
         settings: Settings,
         book_metadata_client: BookMetadataClient | None = None,
+        genre_classifier_service: GenreClassifierService | None = None,
+        boto_session: Any = None,
     ) -> None:
         self._book_search_tool = book_search_tool
         self._settings = settings
         self._book_metadata_client = book_metadata_client
+        self._genre_classifier_service = genre_classifier_service
+        self._boto_session = boto_session
 
     async def recommend(
         self,
@@ -58,6 +65,7 @@ class RecommendBooksTool:
         agent = create_librarian_agent(
             model_id=self._settings.librarian_model_id,
             region_name=self._settings.aws_region,
+            boto_session=self._boto_session,
             librarian_id=librarian_id,
             tools=[self._book_search_tool.as_tool()],
             enable_prompt_caching=self._settings.enable_prompt_caching,
@@ -104,12 +112,19 @@ class RecommendBooksTool:
         return processed_text
 
     async def _verify_page_counts(self, markdown: str, auth_token: str | None = None) -> str:
-        """마크다운의 각 `### 📖` 도서 블록에서 제목/저자를 추출해 페이지수를 검증하고,
-        검증된 값으로 `({페이지수}쪽)` 표기를 덮어쓴다.
+        """마크다운의 각 `### 📖` 도서 블록에서 제목/저자를 추출해 페이지수와 장르를 검증하고,
+        검증된 값으로 `({페이지수}쪽)` 표기 및 `- **장르**:` 라인을 덮어쓴다.
 
         `book_metadata_client`가 배선되지 않았거나 제목/저자를 파싱할 수 있는 블록이
         하나도 없으면 원본을 그대로 반환한다. `auth_token`은 backend-book 서지 조회
-        API가 요구하는 사용자 인증 토큰으로, `fetch_by_title_author`까지 패스스루된다.
+        API가 요구하는 사용자 인증 토큰으로, `fetch_isbn_and_pages`까지 패스스루된다.
+
+        CLIAR-282: LLM이 마크다운 형식(특히 `- **장르**:` 라인)을 멀티턴 대화 후반부에서
+        자주 빼먹는 것이 dev 실측으로 확인되어(장르 칩이 프론트에 안 뜨는 버그), 장르가
+        비어있는(`NONE`) 도서는 backend-book에서 얻은 ISBN으로 `GenreClassifierService`
+        (기존 `POST /api/v1/classify-genre` API의 서비스 레이어, ISBN 기반 LLM 분류)를
+        재호출해 결정론적으로 보강한다. `genre_classifier_service`가 배선되지 않았거나
+        ISBN을 못 구했거나 분류 결과가 `NONE`이면 원본을 그대로 둔다(추가 손해 없음).
         """
         if self._book_metadata_client is None:
             return markdown
@@ -122,23 +137,57 @@ class RecommendBooksTool:
             return markdown
 
         titles = list(author_by_title.keys())
-        verified_pages = await asyncio.gather(
+        results = await asyncio.gather(
             *(
-                self._book_metadata_client.fetch_by_title_author(
+                self._book_metadata_client.fetch_isbn_and_pages(
                     t, author_by_title[t], auth_token=auth_token
                 )
                 for t in titles
             )
         )
-        page_by_title = {
-            title: pages for title, pages in zip(titles, verified_pages, strict=True) if pages
-        }
+        isbn_and_pages_by_title = dict(zip(titles, results, strict=True))
 
-        if not page_by_title:
+        for title, (_, verified_page) in isbn_and_pages_by_title.items():
+            if verified_page:
+                markdown = _replace_page_count_for_title(markdown, title, verified_page)
+
+        markdown = await self._backfill_missing_genres(
+            markdown, parsed, isbn_and_pages_by_title
+        )
+        return markdown
+
+    async def _backfill_missing_genres(
+        self,
+        markdown: str,
+        parsed: list[RecommendedBookFields],
+        isbn_and_pages_by_title: dict[str, tuple[str | None, int | None]],
+    ) -> str:
+        """장르가 `NONE`인 도서 블록에 `GenreClassifierService`로 결정론적 장르를 보강한다."""
+        if self._genre_classifier_service is None:
             return markdown
 
-        for title, verified_page in page_by_title.items():
-            markdown = _replace_page_count_for_title(markdown, title, verified_page)
+        titles_needing_genre = [
+            book["title"]
+            for book in parsed
+            if book["genre"] == StandardGenre.NONE
+            and isbn_and_pages_by_title.get(book["title"], (None, None))[0]
+        ]
+        if not titles_needing_genre:
+            return markdown
+
+        classified = await asyncio.gather(
+            *(
+                self._genre_classifier_service.classify_genre(
+                    BookClassificationRequest(
+                        isbn=isbn_and_pages_by_title[title][0] or ""
+                    )
+                )
+                for title in titles_needing_genre
+            )
+        )
+        for title, response in zip(titles_needing_genre, classified, strict=True):
+            if response.genre != StandardGenre.NONE:
+                markdown = _upsert_genre_for_title(markdown, title, response.genre.value)
         return markdown
 
     def as_tool(
@@ -191,3 +240,30 @@ def _replace_page_count_for_title(markdown: str, title: str, verified_page: int)
         return f"{prefix}{author_only} ({verified_page}쪽){suffix}"
 
     return block_pattern.sub(_replace, markdown, count=1)
+
+
+def _upsert_genre_for_title(markdown: str, title: str, genre_value: str) -> str:
+    """지정된 도서 블록에 `- **장르**: {genre_value}` 라인을 삽입하거나 교체한다.
+
+    CLIAR-282: LLM이 마크다운 형식에서 `- **장르**:` 라인 자체를 통째로 빼먹는 경우
+    (dev 실측 확인)가 있어, 저자 줄 뒤에 라인이 없으면 새로 추가하고 있으면 값만
+    교체한다. 도서 블록의 끝(다음 `### 📖` 헤더 시작 지점 또는 텍스트 끝)을 기준으로
+    삽입 위치를 정한다.
+    """
+    block_start_pattern = re.compile(r"(### 📖\s*" + re.escape(title) + r"\s*\n)")
+    start_match = block_start_pattern.search(markdown)
+    if not start_match:
+        return markdown
+
+    block_start = start_match.end()
+    next_header_match = re.search(r"\n(?=### 📖)", markdown[block_start:])
+    block_end = block_start + next_header_match.start() if next_header_match else len(markdown)
+    block = markdown[block_start:block_end]
+
+    genre_line_pattern = re.compile(r"-\s*\*\*장르\*\*:\s*(.+?)\s*$", re.MULTILINE)
+    if genre_line_pattern.search(block):
+        new_block = genre_line_pattern.sub(f"- **장르**: {genre_value}", block, count=1)
+    else:
+        new_block = block.rstrip("\n") + f"\n- **장르**: {genre_value}\n"
+
+    return markdown[:block_start] + new_block + markdown[block_end:]
