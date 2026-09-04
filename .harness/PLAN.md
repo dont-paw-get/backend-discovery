@@ -75,40 +75,6 @@
       k8s configmap에는 이 값이 없어(기본값 사용) 추가 배포 파일 변경 불필요.
       `ruff`/`mypy`/`pytest -m "not integration"` 284건 통과. dev 재배포 후 재실측 필요.
 
-**Task 5 (속도 최적화, 방안 B): 서지 정보 및 장르 분류 Redis 캐싱 도입**
-- **배경**: 실측 결과 `verify_page_counts_ms`에서 알라딘 2단계 조회(`by-title-author` ➔ `search?isbn=`)와
-  장르 `NONE` 시 LLM 재분류(`classify_genre`)가 직렬로 발생하여 매번 1.3초~5.3초의 추가 지연이 발생함.
-  출판된 도서의 서지 정보(ISBN, 페이지수)와 표준 장르는 영구 불변에 가까운 데이터이므로,
-  기존 Redis 인프라(`SearchResultCache` 패턴)를 활용해 캐싱하면 동일/유사 도서 재추천 시
-  알라딘 외부 2단계 HTTP 호출 및 Bedrock LLM 호출을 완전히 건너뛰어 지연을 0ms(수 ms)로 단축함.
-- **5-1. 서지 정보 캐시 (`BookMetadataCache`)**:
-  - `src/discovery/infrastructure/book_client/metadata_cache.py` 신설.
-  - 키: `book:metadata:{normalized_title}:{normalized_author}`
-  - 정규화: 소문자화, 괄호/특수문자/연속공백 정리.
-  - 값: `{"isbn": str | None, "total_pages": int | None}` (JSON 직렬화)
-  - TTL: `book_metadata_cache_ttl_seconds: int = 604800` (7일)
-  - `BookMetadataClient`에 캐시 주입(`cache: BookMetadataCache | None = None`).
-  - `fetch_isbn_and_pages`에서 캐시 선조회(Hit 시 0ms 즉시 반환), Miss 시 알라딘 2단 조회 후 성공 결과 캐싱.
-- **5-2. 장르 분류 캐시 (`GenreClassifierCache`)**:
-  - `src/discovery/domain/genre/genre_cache.py` 신설.
-  - 키: `genre:classification:{isbn}`
-  - 값: `{"genre": str, "confidence": float}`
-  - TTL: `genre_classifier_cache_ttl_seconds: int = 604800` (7일)
-  - `GenreClassifierService`에 캐시 주입(`cache: GenreClassifierCache | None = None`).
-  - `classify_genre`에서 캐시 선조회(Hit 시 LLM 호출 없이 즉시 반환), Miss 시 LLM 분류 후 캐싱.
-- **5-3. 설정 및 의존성 배선**:
-  - `core/config.py` 및 `.env.example`에 `book_metadata_cache_ttl_seconds`, `genre_classifier_cache_ttl_seconds` 추가.
-  - `api/deps.py`에서 `request.app.state.redis`를 활용해 `get_book_metadata_client`, `get_genre_classifier_service`에 각각 캐시 인스턴스 주입.
-- **5-4. 단위 테스트 및 정적 분석**:
-  - `test_book_metadata_cache.py`, `test_genre_cache.py` 단위 테스트 추가 (캐시 hit/miss, 만료, 예외 시 graceful degradation).
-  - 기존 `BookMetadataClient`, `GenreClassifierService`, `RecommendBooksTool` 무회귀 검증.
-
-**Task 5 체크리스트**:
-- [ ] Task 5-1: `BookMetadataCache` 구현 및 `BookMetadataClient` 연동
-- [ ] Task 5-2: `GenreClassifierCache` 구현 및 `GenreClassifierService` 연동
-- [ ] Task 5-3: `config.py`, `.env.example`, `deps.py` 배선
-- [ ] Task 5-4: 단위 테스트 신규 및 전체 무회귀 검증 (`ruff`, `mypy`, `pytest -m "not integration"`)
-
 ---
 
 ## [코드 완료 · dev 배포/실측 대기] CLIAR-282 Task 5: 서지 정보·장르 분류 Redis 캐싱
