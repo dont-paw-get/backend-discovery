@@ -1,5 +1,70 @@
 # PLAN — backend-discovery
 
+## [진행 중] CLIAR-286: K8s ConfigMap 모델 ID 코드-배포 동기화 및 가드레일 개선
+
+**발견 경위 (2026-09-04, PR #57 dev 실측 중)**: 사용자가 "비 올 때 읽을만한 책 추천해줘"
+(가정법)에 대해 응답이 실제 현재 날씨("오늘같이 비 내리는 날엔")로 오인 반영되고, 44초가
+걸린 것을 제보. 조사 중 `kubectl exec ... -- env`로 dev 파드의 실제 환경변수를 직접 확인한
+결과, **`src/discovery/core/config.py`의 파이썬 기본값(Haiku 4.5, CLIAR-278에서 이미
+교체됨)과 무관하게 `k8s/base/configmap.yaml`이 구형 값을 그대로 하드코딩하고 있어 dev가
+실제로는 한 번도 Haiku 4.5로 돌아간 적이 없었다**는 것이 코드로 확인됨(Pydantic Settings는
+환경변수를 코드 기본값보다 우선함).
+
+**확인된 사실 (코드 직접 읽고 dev 파드 실측으로 검증 완료)**:
+- dev 파드 실제 환경변수(`kubectl exec backend-discovery-... -n dpyb-discovery-dev -- env`):
+  ```
+  LIBRARIAN_MODEL_ID=global.anthropic.claude-sonnet-5
+  ORCHESTRATOR_MODEL_ID=global.anthropic.claude-sonnet-5
+  GENRE_CLASSIFIER_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
+  ```
+- `config.py` 코드 기본값(43~44, 56행)은 이미 셋 다 Haiku 4.5
+  (`global.anthropic.claude-haiku-4-5-20251001-v1:0`)로 CLIAR-278/282에서 교체돼 있음.
+- `k8s/base/configmap.yaml`(15~16, 21행)은 `LIBRARIAN_MODEL_ID`/`ORCHESTRATOR_MODEL_ID`를
+  `global.anthropic.claude-sonnet-5`로, `GENRE_CLASSIFIER_MODEL_ID`를 구형
+  `anthropic.claude-3-haiku-20240307-v1:0`으로 여전히 하드코딩 중.
+- `k8s/overlays/dev/configmap-patch.yaml`은 이 세 키를 오버라이드하지 않음(OTel/CloudWatch/
+  `LIBRARIAN_AGENT_URL`만 설정) → base 값이 그대로 dev에 적용됨.
+- `k8s/overlays/prod/configmap-patch.yaml`은 전체가 주석 처리(prod 미사용 확정 상태) →
+  base를 고치면 prod에도 자동으로 올바른 값이 적용됨(별도 patch 불필요).
+- **사서 에이전트(`LIBRARIAN_MODEL_ID`)는 별도 확인 필요**: dev overlay에
+  `LIBRARIAN_AGENT_URL`이 설정돼 있어 사서 상담이 `backend-discovery` 프로세스가 아니라
+  원격 `backend-librarian` 서비스로 위임되는 구조(`librarian_tool.py`, 이전 세션 확인).
+  즉 `backend-discovery`의 `LIBRARIAN_MODEL_ID` 환경변수가 실제로 이 경로에서 쓰이는지는
+  불확실 — `backend-librarian`이 실제로 어떤 모델을 쓰는지는 그 별도 저장소를 봐야
+  확정되며, 이번 티켓 범위 밖(명시).
+
+**이번 티켓의 스코프 (2개 트랙, 별도 PR로 분리)**:
+
+### 트랙 A: K8s ConfigMap 모델 ID 동기화 (진행 중)
+- [x] 1. `k8s/base/configmap.yaml`의 `LIBRARIAN_MODEL_ID`/`ORCHESTRATOR_MODEL_ID`를
+   `global.anthropic.claude-haiku-4-5-20251001-v1:0`로, `GENRE_CLASSIFIER_MODEL_ID`를
+   동일 값으로 교체(코드 기본값과 1:1 일치시킴). 상단 주석("Claude Sonnet 5 글로벌
+   프로파일 사용 시 us-east-1 필수")도 Haiku 4.5 기준으로 갱신.
+- [x] 2. `.env.example`도 동일하게 동기화(코드-configmap-예시 3자 일치 원칙, 이미
+   `config.py` 기본값과는 일치하는지 확인 필요 — 스크리닝 후 다르면 맞춘다).
+- [x] 3. `kubectl kustomize k8s/overlays/dev` 문법 검증 및 기존 단위 테스트 무회귀 검증.
+- [ ] 4. dev 재배포 후 `kubectl exec ... -- env`로 실제 반영 재확인.
+- [ ] 5. 같은 질의로 재실측(3~5회) 해 `agent_invoke_ms`/전체 응답시간 변화를 표로 기록.
+   기존 CLIAR-282 조사 계획(오케스트레이터 이벤트 계측 추가)과 통합 — 모델 교체 후에도
+   16.5초 미계측 구간이 남는지 확인.
+- [x] 6. `backend-librarian`이 실제로 어떤 모델을 쓰는지는 그 저장소 확인이 필요하다는 점을
+   `.harness/BACKLOG.md`에 후속 조사 항목으로 남긴다(이번 PR 범위 밖).
+
+### 트랙 B: 가정법/실제 상황 구분 프롬프트 가드레일 (별도 PR)
+- [ ] 1. `orchestrator/agent.py`의 `SHARED_GUARDRAILS`에 "사용자 발화가 가정법·조건문
+   (~할 때, 만약 ~라면 등)이면 시그널을 실제 현재 상황으로 서술하지 말 것" 지시 추가.
+- [ ] 2. `librarian_tool.py`의 `format_signals_for_llm()`가 만드는 "- 현재 날씨: ..." 텍스트
+   블록에도 시제 관련 안내를 보강할지 여부는 A안 프롬프트만으로 충분한지 실측 후 판단.
+- [ ] 3. 단위 테스트로 프롬프트 문자열에 가드레일 문구가 포함됐는지 검증(기존 패턴 재사용).
+- [ ] 4. dev 재배포 후 "비 올 때/만약 눈이 온다면" 등 가정법 질의로 재현 테스트.
+
+**우선순위**: 트랙 A(모델 동기화)가 코드 한 줄 수준의 설정 수정이면서 속도 문제의
+핵심 원인이므로 먼저 처리. 트랙 B(프롬프트 가드레일)는 별도 PR로 순차 진행.
+
+**브랜치**: `CLIAR-286-K8s-Model-Config-Sync` (`develop`에서 분기)
+
+---
+
 ## [코드 완료 · dev 배포 완료 · 실측 대기] CLIAR-282: 오케스트레이터 LLM 레벨 미계측 지연 원인 조사
 
 **세션 인계 메모 (2026-09-04, 새 세션에서 진행)**: PR #55/#56 모두 `develop`에 머지·dev
