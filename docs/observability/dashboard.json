@@ -17,7 +17,7 @@
         "stacked": false,
         "region": "ap-northeast-2",
         "title": "⚡ [성능] 체감 지연시간 & TTFT 추이 (ms)",
-        "period": 300,
+        "period": 900,
         "yAxis": {
           "left": {
             "label": "Milliseconds",
@@ -36,10 +36,10 @@
         "metrics": [
           [ "DPYB/Discovery/LLM", "BedrockCostUSD", "Model", "global.anthropic.claude-haiku-4-5-20251001-v1:0", { "stat": "Sum", "label": "Haiku 4.5 Cost (USD)", "color": "#d62728" } ]
         ],
-        "view": "timeSeries",
+        "view": "bar",
         "stacked": false,
         "region": "ap-northeast-2",
-        "title": "💰 [FinOps] Bedrock 누적 비용 (USD)",
+        "title": "💰 [FinOps] Bedrock 시간당 비용 (USD)",
         "period": 3600,
         "yAxis": {
           "left": {
@@ -66,7 +66,7 @@
         "stacked": false,
         "region": "ap-northeast-2",
         "title": "📊 [토큰 & 캐시] 토큰 사용량 및 프롬프트 캐시 절감율",
-        "period": 300,
+        "period": 900,
         "yAxis": {
           "left": {
             "label": "Tokens",
@@ -85,31 +85,43 @@
       "type": "metric",
       "x": 12,
       "y": 6,
-      "width": 12,
+      "width": 8,
       "height": 6,
       "properties": {
         "metrics": [
           [ "DPYB/Discovery/LLM", "SearchCacheHit", { "stat": "Sum", "label": "Cache Hit", "id": "m_hit", "color": "#2ca02c" } ],
-          [ ".", "SearchCacheMiss", { "stat": "Sum", "label": "Cache Miss", "id": "m_miss", "color": "#ff7f0e" } ],
-          [ { "expression": "m_hit / (m_hit + m_miss) * 100", "label": "도서 검색 캐시 히트율 (%)", "id": "e_search_ratio", "yAxis": "right" } ]
+          [ ".", "SearchCacheMiss", { "stat": "Sum", "label": "Cache Miss", "id": "m_miss", "color": "#ff7f0e" } ]
         ],
-        "view": "timeSeries",
-        "stacked": false,
+        "view": "bar",
+        "stacked": true,
         "region": "ap-northeast-2",
-        "title": "🔍 [검색 캐시] Tavily 도서 검색 Redis 캐시 히트율",
-        "period": 300,
+        "title": "🔍 [검색 캐시] Tavily 도서 검색 Redis 캐시 Hit/Miss",
+        "period": 900,
         "yAxis": {
           "left": {
             "label": "Counts",
             "showUnits": false
-          },
-          "right": {
-            "label": "Hit Ratio (%)",
-            "showUnits": false,
-            "max": 100,
-            "min": 0
           }
         }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 20,
+      "y": 6,
+      "width": 4,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "DPYB/Discovery/LLM", "SearchCacheHit", { "stat": "Sum", "id": "m_hit", "visible": false } ],
+          [ ".", "SearchCacheMiss", { "stat": "Sum", "id": "m_miss", "visible": false } ],
+          [ { "expression": "m_hit / (m_hit + m_miss) * 100", "label": "도서 검색 캐시 히트율 (%)", "id": "e_search_ratio" } ]
+        ],
+        "view": "singleValue",
+        "region": "ap-northeast-2",
+        "title": "검색 캐시 히트율",
+        "period": 900,
+        "sparkline": true
       }
     }
   ]

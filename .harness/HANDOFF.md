@@ -1496,3 +1496,61 @@
 2. us-east-1에 남아있을 수 있는 잔여 IAM 인라인 정책(`DiscoveryBedrockGuardrailPolicy`, 서울 스택 배포로
    덮어써졌을 가능성이 높으나 미확인)이나 고아 리소스가 있는지 여유 있을 때 점검.
 3. Jira에 CLIAR-300 티켓을 사후 등록할지 확인(이번엔 장애 대응이라 티켓 없이 브랜치명만 임의로 붙여 진행함).
+
+
+
+## 2026-09-05 — CloudWatch 대시보드 "No data" 실전 진단 및 그래프 유형 튜닝
+
+- 사용자가 "CloudWatch 설정 다 하고 대시보드 만들었는데 데이터 안 넘어온다"고 제보. 순차적으로
+  가설을 좁혀나갔다(모두 `kubectl`/`aws` CLI 실측, 추측 없음):
+  1. `ENABLE_CLOUDWATCH_METRICS` 플래그 미배포 가설 → **반증**: `kubectl get configmap`으로
+     `"true"`가 이미 배포돼 있음을 확인.
+  2. AWS_REGION 불일치(us-east-1 vs 서울) 가설 → **반증**: 사용자가 이미 서울 리전 콘솔에서
+     보고 있었음. (참고로 IRSA가 `AWS_REGION`을 `ap-northeast-2`로 강제 override하는 것도
+     이 과정에서 확인함 — configmap 파일의 `us-east-1`은 실제로 무시됨.)
+  3. **실제 1차 원인(별개 문제, 먼저 해결됨)**: Bedrock Guardrail ID(`35g4g149bbe7`)가
+     us-east-1에 생성된 것인데 파드는 서울 리전에서 Bedrock을 호출해
+     `ConverseStream`이 매번 `ValidationException`으로 실패 → fallback 응답만 나가고
+     CloudWatch 발행 코드까지 도달하지 못했음. 사용자가 직접 서울 리전에 Guardrail
+     재배포 후 configmap의 `BEDROCK_GUARDRAIL_ID`를 새 값(`m81pa4dhk7pc`)으로 교체,
+     재배포 완료. 이후 `[CLOUDWATCH_METRICS] Published usage metrics` 로그가 정상 발생.
+  4. **2차 원인(진짜 CloudWatch 미표시 원인)**: `aws cloudwatch list-dashboards`로 확인한
+     결과, `docs/observability/cloudwatch-dashboard-stack.yaml`(CloudFormation IaC)은
+     **한 번도 실제 배포된 적이 없었고**, 대신 콘솔에서 수동 생성한 대시보드
+     (`DPYB-Discovery-LLM`)가 별도로 존재했다. 이 수동 대시보드를 편집하는 과정에서
+     `BedrockCostUSD`/`RequestLatencyMs`/`TimeToFirstByteMs` 3개 위젯의 `Model` Dimension
+     문자열에 공백이 섞여 들어감(`aws cloudwatch get-dashboard` + Python `repr()`로 확정 —
+     `'...20251001-   v1:0'`처럼 공백 3~5개가 실제로 존재, 터미널 줄바꿈이 아니라 데이터
+     자체의 문제였음). `InputTokens` 위젯만 우연히 공백이 없어 정상 표시되고 있었다.
+  5. **해결**: 레포의 `docs/observability/dashboard.json`(공백 없는 정상본)을 CloudShell에서
+     `aws cloudwatch put-dashboard --dashboard-name DPYB-Discovery-LLM`으로 그대로 덮어써
+     4개 위젯 모두 데이터가 나오기 시작함(`get-metric-statistics`로 최근 3시간 데이터
+     존재를 사전에 CLI로 직접 검증 완료).
+- **그래프 유형 튜닝**: 데이터가 나온 뒤 "그래프가 이상하게(뾰족하게 끊겨서) 그려진다"는
+  피드백에 따라, 개발 환경의 산발적 트래픽 패턴에 맞게 위젯 구성을 조정:
+  - 비용(`BedrockCostUSD`): Line → **Bar**(시간당 누적값은 막대가 더 직관적, 급경사 착시 제거).
+  - 지연시간(`RequestLatencyMs`/`TimeToFirstByteMs`)·토큰: Line 유지, `period` 300s → **900s**
+    (15분)로 완화해 희소한 데이터포인트 사이 끊김을 줄임.
+  - 검색 캐시: 기존 Line 단일 위젯(Hit/Miss 카운트 + 히트율% 혼재)을 **Bar(Hit/Miss 누적,
+    stacked) + 별도 Number(히트율%, sparkline)** 두 위젯으로 분리(이산 카운트와 비율은
+    성격이 달라 위젯을 나누는 것이 CloudWatch 권장 패턴).
+  - `docs/observability/dashboard.json`과 `docs/observability/cloudwatch-dashboard-stack.yaml`
+    (CFN 템플릿) 양쪽에 동일하게 반영해 정합성 유지(하네스 "변경 산출물 동기화" 원칙).
+    CloudShell에서 동일한 `put-dashboard` 명령으로 재적용 안내, 반영 결과는 사용자 확인 대기.
+- **문서-실제 배포 간극 확인(정정 필요, 다음 세션 과제로 이관)**:
+  `cloudwatch-dashboard-guide.md`의 "3. 선언형 IaC 배포" 섹션이 "CFN으로 배포됨"을 전제로
+  서술돼 있으나 실제로는 콘솔 수동 생성 상태다. 이 간극을 문서에 정정 반영하지 않았다
+  (사용자가 그래프 튜닝을 먼저 요청해 우선순위가 바뀜).
+
+### 다음 세션이 할 일
+1. CloudShell에서 새 `dashboard.json`(그래프 유형 튜닝 반영분)의 `put-dashboard` 적용 결과를
+   사용자에게 확인받는다(Bar/Number 위젯이 의도대로 렌더링되는지).
+2. `cloudwatch-dashboard-guide.md`의 "3. 선언형 IaC 배포" 섹션을 현황에 맞게 정정:
+   현재 CFN 미배포·콘솔 수동 대시보드로 운영 중이라는 사실 명시, 트러블슈팅에 "Model
+   Dimension 값에 공백/오타가 섞이면 위젯만 조용히 No data가 된다" 사례 추가.
+3. 향후 대시보드 갱신은 콘솔 직접 편집이 아니라 반드시 레포 `dashboard.json` 수정 →
+   `put-dashboard` 반영 순서를 따르기로 구두 합의됨 — `.harness/DECISIONS.md`에 정식 기록
+   필요(다음 세션 또는 사용자 확인 즉시).
+4. 원한다면 `dpyb-discovery-cloudwatch-dashboard` CloudFormation 스택으로 실제 전환(현재
+   미배포 상태이므로 최초 `deploy`가 곧 신규 생성이 됨 — 기존 수동 대시보드와 이름 충돌
+   여부 사전 확인 필요).
