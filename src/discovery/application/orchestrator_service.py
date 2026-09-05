@@ -546,6 +546,11 @@ class OrchestratorService:
         await _publish_cloudwatch_usage_metrics(
             self._cloudwatch_publisher, self._settings.orchestrator_model_id, orchestrator_metrics
         )
+        if self._cloudwatch_publisher is not None:
+            await self._cloudwatch_publisher.publish_latency(
+                model_id=self._settings.orchestrator_model_id,
+                total_ms=duration_ms,
+            )
         return response_text, switch_to, signals, library_books, recommended_books
 
     async def get_initial_meta(
@@ -915,5 +920,11 @@ class OrchestratorService:
         await _publish_cloudwatch_usage_metrics(
             self._cloudwatch_publisher, self._settings.orchestrator_model_id, orchestrator_metrics
         )
+        if self._cloudwatch_publisher is not None:
+            await self._cloudwatch_publisher.publish_latency(
+                model_id=self._settings.orchestrator_model_id,
+                total_ms=duration_ms,
+                ttfb_ms=ttfb_ms,
+            )
 
 

@@ -112,3 +112,65 @@ async def test_client_is_created_lazily_only_when_enabled(mocker: MagicMock) -> 
     CloudWatchMetricsPublisher(enabled=True)
 
     boto3_client.assert_not_called()
+
+
+# --- CLIAR-276 확장: 레이턴시(RequestLatencyMs / TimeToFirstByteMs) 발행 검증 ---
+
+
+@pytest.mark.asyncio
+async def test_disabled_publisher_publish_latency_is_noop(mocker: MagicMock) -> None:
+    boto3_client = mocker.patch("discovery.core.cloudwatch_metrics.boto3.client")
+    publisher = CloudWatchMetricsPublisher(enabled=False)
+
+    await publisher.publish_latency(model_id="global.anthropic.claude-sonnet-5", total_ms=1234.5)
+
+    boto3_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_publish_latency_sends_total_and_ttfb(mocker: MagicMock) -> None:
+    mock_client = mocker.MagicMock()
+    mocker.patch("discovery.core.cloudwatch_metrics.boto3.client", return_value=mock_client)
+
+    publisher = CloudWatchMetricsPublisher(enabled=True)
+    await publisher.publish_latency(
+        model_id="global.anthropic.claude-sonnet-5", total_ms=4200.12, ttfb_ms=350.5
+    )
+
+    mock_client.put_metric_data.assert_called_once()
+    call_kwargs = mock_client.put_metric_data.call_args.kwargs
+    assert call_kwargs["Namespace"] == NAMESPACE
+    metrics_by_name = {m["MetricName"]: m for m in call_kwargs["MetricData"]}
+    assert metrics_by_name.keys() == {"RequestLatencyMs", "TimeToFirstByteMs"}
+    assert metrics_by_name["RequestLatencyMs"]["Value"] == 4200.12
+    assert metrics_by_name["RequestLatencyMs"]["Unit"] == "Milliseconds"
+    assert metrics_by_name["TimeToFirstByteMs"]["Value"] == 350.5
+    for metric in call_kwargs["MetricData"]:
+        assert metric["Dimensions"] == [
+            {"Name": "Model", "Value": "global.anthropic.claude-sonnet-5"}
+        ]
+
+
+@pytest.mark.asyncio
+async def test_publish_latency_omits_ttfb_when_not_streaming(mocker: MagicMock) -> None:
+    mock_client = mocker.MagicMock()
+    mocker.patch("discovery.core.cloudwatch_metrics.boto3.client", return_value=mock_client)
+
+    publisher = CloudWatchMetricsPublisher(enabled=True)
+    await publisher.publish_latency(model_id="global.anthropic.claude-sonnet-5", total_ms=999.0)
+
+    call_kwargs = mock_client.put_metric_data.call_args.kwargs
+    metric_names = {m["MetricName"] for m in call_kwargs["MetricData"]}
+    assert metric_names == {"RequestLatencyMs"}
+
+
+@pytest.mark.asyncio
+async def test_publish_latency_failure_is_swallowed_and_does_not_raise(
+    mocker: MagicMock,
+) -> None:
+    mock_client = mocker.MagicMock()
+    mock_client.put_metric_data.side_effect = RuntimeError("network unreachable")
+    mocker.patch("discovery.core.cloudwatch_metrics.boto3.client", return_value=mock_client)
+
+    publisher = CloudWatchMetricsPublisher(enabled=True)
+    await publisher.publish_latency(model_id="global.anthropic.claude-sonnet-5", total_ms=100.0)

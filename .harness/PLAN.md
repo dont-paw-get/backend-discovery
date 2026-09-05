@@ -1,27 +1,20 @@
 # PLAN — backend-discovery
 
-## [제안] CLIAR-292: 추천 에이전트 중복 멘트 제거(레이턴시 단축) 및 날씨 질문 오인식 방어 가드레일
+## [확정] CLIAR-276: Bedrock 레이턴시(RequestLatencyMs / TimeToFirstByteMs) CloudWatch 메트릭 발행
 
-**배경**:
-1. **도서 추천 시 중복 멘트 제거 및 레이턴시 단축**:
-   - 하위 추천 에이전트(`recommend_books`)가 도서 카드(`### 📖`) 외에 긴 서두/맺음말(921토큰)을 생성하고, 상위 오케스트레이터도 또 서두/맺음말을 생성하여 화면에 인사말/마무리말이 이중 출력되고 LLM 생성 시간만 12초 이상 소모(전체 16.7초)됨.
-   - 하위 에이전트는 순수 도서 카드만 빠르게 생성(토큰 50% 절감)하도록 하고, 따뜻하고 친절한 사서 설명은 상위 오케스트레이터가 딱 1번 전담하여 자연스러운 톤앤매너와 3~4초 속도 단축을 동시에 달성.
-2. **날씨 질문 단어 오탐으로 인한 '비 타령' 거짓말 차단**:
-   - 사용자가 "지금 밖에 비와?"라고 질문했을 때, 사서 서버(`backend-librarian`)가 문맥을 오판하여 발화 속 '비' 단어로 인해 `location_source: text_stated`, `weather: rainy`를 반환하고, 이후 세션 내내 날씨가 '비'로 고착화되는 버그 발생.
-   - 오케스트레이터 가드레일에 날씨 관련 의문문 질문 시 의심스러운 `text_stated` 신호나 이전 대화의 단어 언급에 휘둘리지 않고 실제 기상청 실측 날씨 데이터를 우선하도록 방어 지침 주입.
+**배경 및 목적**:
+1. **성능·비용 최적화(FinOps)의 핵심 지표 완성**:
+   - 현재 CloudWatch 커스텀 메트릭(`DPYB/Discovery/LLM`)에는 비용(`BedrockCostUSD`), 토큰(`InputTokens`, `OutputTokens`, `CacheReadTokens`), 검색 캐시(`SearchCacheHit/Miss`)만 발행 중.
+   - 실제 사용자 체감 품질을 좌우하는 **전체 지연시간(`RequestLatencyMs`)**과 스트리밍 첫 글자 도달 시간(**`TimeToFirstByteMs`**)이 누락되어 있어, 모델 전환(Sonnet 5 ➔ Haiku 4.5) 및 프롬프트 캐싱 적용에 따른 속도 개선 효과를 대시보드에서 시계열로 관측하기 어려움.
+2. **이전 작업(`3fd148a`) 복원 및 최신 코드베이스 정합성 확보**:
+   - 로컬 브랜치(`CLIAR-276-fix-cloudwatch-await`)에 보존되어 있던 레이턴시 발행 로직을 최신 `develop`으로 안전하게 이식.
+   - 신규 추가된 `evaluate_input_gate` 조기 반환 시에도 레이턴시 발행을 제외하여 p50/p90 왜곡 방지.
+   - Haiku 4.5 모델 ID 및 최신 테스트 픽스처 동기화.
 
 **작업 체크리스트**:
-- [ ] **Task 1: 하위 추천 에이전트(`recommend_books`) 인사/맺음말 제거 및 순수 카드 생성**
-  - `src/discovery/domain/librarian/agent.py`: `LIBRARIAN_SYSTEM_PROMPT`에서 인사말, 서두 멘트, 맺음말 금지 규칙 추가 (오직 `### 📖` 카드 블록만 간결하게 출력).
-  - 서두 설명 및 마무리는 상위 오케스트레이터(`SHARED_GUARDRAILS`)가 책들을 종합하여 1회 풍부하게 전담하도록 단일화.
-- [ ] **Task 2: 날씨 질문 오인식 방어 가드레일 (환각 차단)**
-  - `src/discovery/domain/orchestrator/agent.py`: `SHARED_GUARDRAILS`에 날씨 질문 시("비 와?", "날씨 어때?" 등 의문문) 가상의 날씨를 단정하지 않고 실제 실측 날씨 기준으로 답변하는 방어 지침 주입.
-- [ ] **Task 3: 단위 테스트 및 정적 분석 무회귀 검증**
-  - `test_librarian_agent.py`, `test_orchestrator_agent.py` 단위 테스트 갱신/신설.
-  - `uv run ruff check .`, `uv run mypy .`, `uv run pytest -m "not integration"` 100% 통과 확인.
-- [ ] **Task 4: dev 배포 후 실측 검증 (사용자 승인 시)**
-  - 1) "비 와?" 질문 시 맑은 날씨 정상 응답 확인 (거짓말 차단).
-  - 2) 도서 추천 질문 시 중복 멘트 없이 사서의 깔끔한 설명 1회 출력 및 레이턴시 단축 실측.
+- [ ] **Task 4: 하네스 문서 동기화 및 PR 준비**
+  - `.harness/STATE.md`, `.harness/ARCHITECTURE.md`, `.harness/HANDOFF.md` 갱신.
+  - 브랜치 커밋 및 `develop` 대상 PR 생성 준비.
 
 ---
 

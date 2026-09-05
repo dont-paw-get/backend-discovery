@@ -16,6 +16,8 @@
 
 **발행 메트릭** (네임스페이스 `DPYB/Discovery/LLM`, 차원은 `Model`만 사용해 카디널리티를
 낮게 유지한다 — 세션ID 등 고카디널리티 값은 차원에 절대 넣지 않는다):
+- `RequestLatencyMs`: 요청 전체 소요 시간 (밀리초).
+- `TimeToFirstByteMs`: 스트리밍 응답 시 첫 번째 텍스트 청크 수신까지의 시간 (밀리초, TTFT).
 - `BedrockCostUSD`: 요청 1건의 추정 비용(USD).
 - `InputTokens` / `OutputTokens` / `CacheReadTokens` / `CacheWriteTokens`: 토큰 사용량.
 - `SearchCacheHit` / `SearchCacheMiss`: Tavily 검색 결과 캐시(Redis) 히트/미스 카운트.
@@ -127,4 +129,38 @@ class CloudWatchMetricsPublisher:
 
         metric_name = "SearchCacheHit" if hit else "SearchCacheMiss"
         metric_data = [_metric_data(metric_name, 1.0, unit="Count", model_id=None)]
+        await self._put_metric_data(metric_data)
+
+    async def publish_latency(
+        self,
+        *,
+        model_id: str,
+        total_ms: float,
+        ttfb_ms: float | None = None,
+    ) -> None:
+        """요청 1건의 지연시간(전체 시간, 스트리밍 시 TTFT)을 CloudWatch에 발행한다.
+
+        `ttfb_ms`는 스트리밍 응답(`stream_chat`)에서 첫 청크가 도착했을 때만 전달하며,
+        동기 호출(`chat`)에서는 전달하지 않는다.
+        """
+        if not self._enabled:
+            return
+
+        metric_data = [
+            _metric_data(
+                "RequestLatencyMs",
+                float(total_ms),
+                unit="Milliseconds",
+                model_id=model_id,
+            )
+        ]
+        if ttfb_ms is not None:
+            metric_data.append(
+                _metric_data(
+                    "TimeToFirstByteMs",
+                    float(ttfb_ms),
+                    unit="Milliseconds",
+                    model_id=model_id,
+                )
+            )
         await self._put_metric_data(metric_data)

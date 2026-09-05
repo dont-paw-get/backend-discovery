@@ -63,5 +63,6 @@
 | CLIAR-292 추천 에이전트 중복 멘트 제거 및 날씨 질문 오탐 방어 가드레일 | ✅ **PR #61 develop 머지 완료** | 하위 추천 에이전트 멘트 제거(카드만 출력), 날씨 질문 오탐 방어, 단위 테스트 295건 통과 |
 | CLIAR-293 서재 도서 전량 출력 보장 및 고양이 사서 말투 완전 통일 | ✅ **PR #62 develop 머지 완료** | 내 서재 조회 시 질문 조건에 맞는 모든 도서를 마크다운 카드(### 📚)로 출력하도록 가드레일 보강, 고양이 사서 말투 100% 반말체 통일 및 도서 추천 서두 압축 |
 | CLIAR-294 사서 전환 즉시 추천·계승 및 Redis 캐시 30일 연장 | ✅ **PR #63/#64 완료** | 비즈니스 질문 시 즉시 도서 카드 추천+슈빌 전환 제안, 슈빌 고양이 말투 오염 방어 및 바통 터치 계승 지침 추가, Redis 캐시(검색/서지/장르) TTL 30일(2,592,000초) 연장, 알라딘 서지 검색용 제목/저자 스마트 정규화(대표 저자 1인 및 메인 제목 추출) 적용 완료 |
+| CLIAR-276 Bedrock 레이턴시 CloudWatch 메트릭 발행 | ✅ 코드 완료 | Task 1(`CloudWatchMetricsPublisher.publish_latency` — `RequestLatencyMs` 및 `TimeToFirstByteMs`), Task 2(`OrchestratorService` chat 및 stream_chat 배선, safety/input 게이트 통계 왜곡 방지 우회), Task 3(단위 테스트 305건 100% 통과 및 ruff/mypy 무회귀 통과) 완료 |
 
 
