@@ -1371,3 +1371,27 @@
 3. **오케스트레이터 3사이클 ➔ 2사이클 축소 검토**:
    - 명시적 도서 추천 질문 시 사서 상담(`consult_librarian`)을 스킵하거나 1회로 압축할 수 있도록 오케스트레이터 프롬프트 가드레일 튜닝.
 
+
+## 2026-09-05 — CLIAR-276 Bedrock 레이턴시(RequestLatencyMs / TimeToFirstByteMs) CloudWatch 메트릭 발행 구현 완료
+
+- **브랜치**: `CLIAR-276-CloudWatch-Latency-Metrics` (`origin/develop` 최신 헤드에서 분기).
+- **배경**:
+  - 과거 `CLIAR-276-fix-cloudwatch-await` 브랜치에 커밋되어 있던 `RequestLatencyMs` 및 `TimeToFirstByteMs` 메트릭 발행 코드를 최신 `develop`의 아키텍처(Haiku 4.5, input_gate 등)에 맞춰 이식.
+- **수행 작업**:
+  - **Task 1: `CloudWatchMetricsPublisher.publish_latency` 구현**:
+    - `src/discovery/core/cloudwatch_metrics.py`: `RequestLatencyMs`(필수) 및 `TimeToFirstByteMs`(스트리밍 시 선택) 메트릭 데이터 구성, 단위 `Milliseconds`, 차원 `[{"Name": "Model", "Value": model_id}]`.
+    - `enabled=False` 시 no-op 및 네트워크 에러 graceful swallow 보장.
+  - **Task 2: `OrchestratorService` `chat` 및 `stream_chat` 배선**:
+    - `src/discovery/application/orchestrator_service.py`: `chat()` 및 `stream_chat()` LLM 응답 완료 시점에 `publish_latency` 호출.
+    - **가드레일 통계 왜곡 방지**: `evaluate_safety_gate` 및 `evaluate_input_gate` 조기 반환 시(LLM 미호출) 레이턴시 발행 대상에서 완벽히 제외.
+  - **Task 3: 단위 테스트 및 무회귀 검증**:
+    - `tests/unit/test_cloudwatch_metrics.py`: `publish_latency` 정상 발행, disabled no-op, 예외 무시 단위 테스트 4건 추가.
+    - `tests/unit/test_orchestrator_cloudwatch_metrics.py`: `chat`/`stream_chat` 배선 검증, `safety_gate` 및 `input_gate` 단락 시 미발행 검증 4건 추가.
+    - 정적 분석(`ruff check .`, `mypy .`) 100% 통과, 단위 테스트 305건 전체 통과 (`pytest -m "not integration"`).
+  - **Task 4: 하네스 산출물 동기화**:
+    - `.harness/ARCHITECTURE.md`, `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 갱신.
+
+### 다음 세션이 할 일
+1. 사용자 컨펌 후 커밋 생성(`[CLIAR-276]` 태그) 및 `develop` 대상 PR 생성.
+2. dev 배포 후 CloudWatch 콘솔에서 `RequestLatencyMs` 및 `TimeToFirstByteMs` 실측 확인.
+

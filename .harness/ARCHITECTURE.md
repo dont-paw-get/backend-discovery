@@ -167,6 +167,27 @@ Grafana/Tempo/Loki/Prometheus 및 RCA Agent와 연동. 서비스명 `<SVC>`는 �
   OTLP export하고 `OTEL_METRICS_EXPORTER=none`/`OTEL_LOGS_EXPORTER=none`.
 - **테스트**: `tests/unit/test_tracing.py`, `tests/unit/test_metrics.py`.
 
+## CloudWatch LLM 관측 — CLIAR-276 (선택적 커스텀 메트릭, 기본 OFF)
+
+목적: Bedrock 비용(USD), 토큰 사용량, 캐시 히트율, 및 체감 지연시간(TTFT, End-to-End)을
+AWS 네이티브 CloudWatch 커스텀 메트릭으로 수집하여 FinOps 및 모델/캐시 최적화 근거로 활용.
+
+- **격리 원칙**: 기존 Prometheus/Grafana/Loki 관측 스택을 일절 침범하지 않는 완전 독립 경로.
+  `Settings.enable_cloudwatch_metrics = False`(기본값)이면 boto3 클라이언트조차 생성하지 않고
+  모든 발행 호출이 즉시 no-op으로 종료됨.
+- **네임스페이스**: `DPYB/Discovery/LLM` (Prometheus 메트릭과 물리적 분리).
+- **발행 메트릭 (Model 단일 차원으로 카디널리티 최소화)**:
+  - `RequestLatencyMs`: 요청 전체 소요 시간 (밀리초).
+  - `TimeToFirstByteMs`: 스트리밍 응답 시 첫 번째 텍스트 청크 수신까지의 시간 (밀리초, TTFT).
+  - `BedrockCostUSD`: 요청 1건의 Bedrock 추정 비용 (USD, `core/pricing.py` 기반).
+  - `InputTokens`, `OutputTokens`, `CacheReadTokens`, `CacheWriteTokens`: 토큰 사용량.
+  - `SearchCacheHit`, `SearchCacheMiss`: Tavily 검색 결과 캐시(Redis) 히트/미스 카운트.
+- **통계 왜곡 방지 가드레일**: `evaluate_safety_gate` 및 `evaluate_input_gate`로 조기 반환된
+  요청(LLM 미호출)은 레이턴시 및 비용 발행 대상에서 제외(p50/p90 왜곡 방지).
+- **논블로킹 및 Graceful Degradation**: `boto3`의 동기 `put_metric_data`는 `asyncio.to_thread`로
+  별도 스레드에서 실행되며, 네트워크 장애 등 발행 실패는 로그만 남기고 조용히 삼킨다.
+- **테스트**: `tests/unit/test_cloudwatch_metrics.py`, `tests/unit/test_orchestrator_cloudwatch_metrics.py`.
+
 ## 외부 계약
 API wire 계약은 이 문서가 아니라 `docs/api/openapi.yaml`이 소유한다.
 계약 결정 근거는 `docs/api/decisions/`를 참조한다.

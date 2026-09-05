@@ -32,6 +32,14 @@ def _build_settings(**overrides: Any) -> Settings:
     )
 
 
+def _build_mock_publisher(mocker: MockerFixture) -> Any:
+    pub = mocker.MagicMock()
+    pub.publish_usage = AsyncMock()
+    pub.publish_latency = AsyncMock()
+    pub.publish_search_cache_event = AsyncMock()
+    return pub
+
+
 @pytest.mark.asyncio
 async def test_chat_publishes_cloudwatch_usage_metrics_when_publisher_given(
     mocker: MockerFixture,
@@ -61,8 +69,7 @@ async def test_chat_publishes_cloudwatch_usage_metrics_when_publisher_given(
         return_value=mock_agent,
     )
 
-    mock_publisher = mocker.MagicMock()
-    mock_publisher.publish_usage = AsyncMock()
+    mock_publisher = _build_mock_publisher(mocker)
 
     service = OrchestratorService(
         session_store=mock_session_store,
@@ -104,8 +111,7 @@ async def test_chat_does_not_touch_publisher_when_metrics_summary_missing(
         return_value=mock_agent,
     )
 
-    mock_publisher = mocker.MagicMock()
-    mock_publisher.publish_usage = AsyncMock()
+    mock_publisher = _build_mock_publisher(mocker)
 
     service = OrchestratorService(
         session_store=mock_session_store,
@@ -144,8 +150,7 @@ async def test_stream_chat_publishes_cloudwatch_usage_metrics(mocker: MockerFixt
         return_value=mock_agent,
     )
 
-    mock_publisher = mocker.MagicMock()
-    mock_publisher.publish_usage = AsyncMock()
+    mock_publisher = _build_mock_publisher(mocker)
 
     service = OrchestratorService(
         session_store=mock_session_store,
@@ -197,3 +202,143 @@ async def test_chat_without_cloudwatch_publisher_does_not_raise(mocker: MockerFi
     response, *_ = await service.chat(session_id="sess-cw-4", message="안녕")
 
     assert response == "응답"
+
+
+# --- CLIAR-276 확장: 레이턴시(RequestLatencyMs / TimeToFirstByteMs) 배선 검증 ---
+
+
+@pytest.mark.asyncio
+async def test_chat_publishes_cloudwatch_latency_metrics(mocker: MockerFixture) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    mock_result = MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": "응답"}]}
+    mock_result.metrics = None
+
+    mock_agent = mocker.MagicMock()
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    mock_publisher = _build_mock_publisher(mocker)
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=_build_settings(),
+        cloudwatch_publisher=mock_publisher,
+    )
+
+    await service.chat(session_id="sess-cw-5", message="안녕")
+
+    mock_publisher.publish_latency.assert_awaited_once()
+    call_kwargs = mock_publisher.publish_latency.call_args.kwargs
+    assert call_kwargs["model_id"] == "global.anthropic.claude-sonnet-5"
+    assert isinstance(call_kwargs["total_ms"], float)
+    # 동기 chat 경로는 스트리밍이 아니므로 ttfb_ms를 전달하지 않는다(기본값 None).
+    assert call_kwargs.get("ttfb_ms") is None
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_publishes_cloudwatch_latency_metrics_with_ttfb(
+    mocker: MockerFixture,
+) -> None:
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.append_turn = AsyncMock()
+
+    async def fake_stream_async(prompt: str) -> Any:
+        yield {"data": "청크"}
+
+    mock_agent = mocker.MagicMock()
+    mock_agent.stream_async = fake_stream_async
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    mock_publisher = _build_mock_publisher(mocker)
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=_build_settings(),
+        cloudwatch_publisher=mock_publisher,
+    )
+
+    async for _ in service.stream_chat(session_id="sess-cw-6", message="추천해줘"):
+        pass
+
+    mock_publisher.publish_latency.assert_awaited_once()
+    call_kwargs = mock_publisher.publish_latency.call_args.kwargs
+    assert call_kwargs["model_id"] == "global.anthropic.claude-sonnet-5"
+    assert isinstance(call_kwargs["total_ms"], float)
+    assert isinstance(call_kwargs["ttfb_ms"], float)
+
+
+@pytest.mark.asyncio
+async def test_safety_gate_shortcircuit_does_not_publish_latency_metrics(
+    mocker: MockerFixture,
+) -> None:
+    """안전 게이트로 조기 반환된 요청(LLM 미호출)은 레이턴시 메트릭 발행 대상에서
+    제외된다 — 게이트 우회가 섞이면 p50/p90 통계가 왜곡되기 때문(계획 문서 참고)."""
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.evaluate_safety_gate",
+        return_value="위기 대응 안내 문구",
+    )
+
+    mock_publisher = _build_mock_publisher(mocker)
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=_build_settings(),
+        cloudwatch_publisher=mock_publisher,
+    )
+
+    await service.chat(session_id="sess-cw-7", message="자해하고 싶어")
+
+    mock_publisher.publish_latency.assert_not_awaited()
+    mock_publisher.publish_usage.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_input_gate_shortcircuit_does_not_publish_latency_metrics(
+    mocker: MockerFixture,
+) -> None:
+    """비정상 입력 게이트(자모/숫자/이모지)로 조기 반환된 요청 역시 레이턴시 메트릭
+    발행 대상에서 제외된다."""
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.evaluate_input_gate",
+        return_value="올바른 단어로 입력해달라냥🐾",
+    )
+
+    mock_publisher = _build_mock_publisher(mocker)
+
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=_build_settings(),
+        cloudwatch_publisher=mock_publisher,
+    )
+
+    await service.chat(session_id="sess-cw-8", message="ㅎㅎㅎ")
+
+    mock_publisher.publish_latency.assert_not_awaited()
+    mock_publisher.publish_usage.assert_not_awaited()
