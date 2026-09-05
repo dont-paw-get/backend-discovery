@@ -110,7 +110,7 @@ def test_orchestrator_system_prompt_contains_rules() -> None:
     assert "위임" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "카드 본문 재작성 절대 금지" in ORCHESTRATOR_SYSTEM_PROMPT
     assert "사서 분석 정보" in ORCHESTRATOR_SYSTEM_PROMPT
-    assert "과잉 사과 금지" in ORCHESTRATOR_SYSTEM_PROMPT
+    assert "영업 비밀" in ORCHESTRATOR_SYSTEM_PROMPT
 
 
 def test_get_orchestrator_system_prompt_by_librarian_id() -> None:
