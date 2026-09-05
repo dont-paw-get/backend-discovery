@@ -1451,3 +1451,48 @@
 
 
 
+
+
+
+## 2026-09-05/06 — dev 장애 대응: Bedrock Guardrail 리전 불일치로 인한 전면 응답 실패(CLIAR-300)
+- 사용자 제보로 dev에서 챗봇이 모든 요청에 "통신 끊겼다냥"(BEDROCK_FALLBACK) 응답만 반환하는 장애를 조사했다.
+- **최초 가설(오검증)**: IRSA가 주입하는 `AWS_REGION=ap-northeast-2`(서울)와 CloudFormation 가드레일이
+  만들어진 리전이 불일치해서 Haiku 4.5 모델 호출 자체가 리전 문제로 실패한다는 가설을 세웠으나, 실제로
+  pod 안에서 `boto3.client('bedrock-runtime', region_name='ap-northeast-2')`로 직접 호출해 정상 응답
+  (latencyMs 684~757)을 받아 **반증했다**. Haiku 4.5 글로벌 크로스리전 프로필은 서울에서 정상 호출된다.
+  "글로벌 프로파일 사용 시 us-east-1 필수"라는 `config.py`/`configmap.yaml`의 주석은 Sonnet 5 시절 잔재이며
+  더 이상 사실이 아니다(리전 전환은 필요 없었다).
+- **실제 원인**: `kubectl logs`에서 `[BEDROCK_GUARDRAIL] Failed to evaluate guardrail (graceful fail-open):
+  ValidationException: The guardrail identifier or version provided in the request does not exist.`와
+  `[BEDROCK_FALLBACK] ... ValidationException: The guardrail identifier or version provided in the
+  request does not exist.` (Bedrock region: ap-northeast-2)를 확인. `k8s/overlays/dev/configmap-patch.yaml`의
+  `BEDROCK_GUARDRAIL_ID: "35g4g149bbe7"`(CLIAR-298에서 us-east-1에 생성됨)가 무효한 값이 되어 있었다.
+  `ApplyGuardrail`은 fail-open이라 경고만 찍고 넘어가지만, `ConverseStream`에 실리는 `guardrailConfig`는
+  fail-close라 요청 자체가 거부되며 `[BEDROCK_FALLBACK]`으로 떨어졌다.
+- **조치**: `docs/security/guardrail-stack.yaml`(기존 CloudFormation 템플릿, 코드 변경 없음)을 CloudShell에서
+  `ap-northeast-2`에 재배포해 새 Guardrail(`m81pa4dhk7pc`, Version 1)을 생성. us-east-1의 기존 스택/가드레일은
+  삭제됨(사용자가 배포 성공 확인 전에 먼저 삭제해 순서가 바뀌었으나, 서울 재배포가 실제로 `CREATE_COMPLETE`
+  상태였음을 Outputs 조회로 확인해 문제 없었다). `k8s/overlays/dev/configmap-patch.yaml`의
+  `BEDROCK_GUARDRAIL_ID`를 `m81pa4dhk7pc`로 교체하고 원인 주석 추가(브랜치
+  `CLIAR-300-fix-guardrail-region`, PR #71, `develop` 머지 완료).
+- **중요한 배포 함정 발견**: 이 클러스터는 **ArgoCD GitOps로 관리**된다(`argocd.argoproj.io/tracking-id`
+  어노테이션 확인). PR 머지 전에 `kubectl apply -k`/`kubectl rollout restart`로 클러스터를 직접 조작했으나
+  ArgoCD가 Git 상태로 즉시 되돌려 무효화됐다(diff로 image tag가 롤백되는 것을 실측 확인). **이 레포의 k8s
+  변경은 반드시 Git 커밋 → PR → develop 머지 → ArgoCD sync 경로를 거쳐야 하며, kubectl 직접 조작은 무의미하다.**
+  또한 ConfigMap 값이 ArgoCD sync로 갱신되어도 **실행 중인 pod의 프로세스 환경변수(`envFrom`)는 자동
+  갱신되지 않는다** — PR 머지·ArgoCD sync 후에도 `kubectl rollout restart deployment/backend-discovery -n
+  dpyb-discovery-dev`를 별도로 한 번 더 실행해야 새 값이 pod에 반영됐다(직접 실측 확인).
+- **최종 검증**: 재시작된 pod에서 `printenv BEDROCK_GUARDRAIL_ID`(`m81pa4dhk7pc`)/`AWS_REGION`
+  (`ap-northeast-2`) 확인, `boto3`로 실제 서비스 코드와 동일한 `ApplyGuardrail`(action: NONE)과
+  `Converse(guardrailConfig=...)`(정상 응답 생성) 양쪽 모두 pod 내부에서 직접 재현해 정상 동작 확인.
+  사용자가 실제 서비스에서도 정상 동작을 확인했다.
+- PR 본문은 최초 자유 형식으로 작성했다가 `.github/pull_request_template.md`(🎯 작업 목적 / 🛠️ 변경 사항 /
+  🌐 적용 범위 / 📸 스크린샷 / 🔗 참고 및 관련 티켓) 형식을 놓친 것을 사용자가 지적해 템플릿 형식으로
+  재작성했다(`gh pr edit`). **PR 생성 시 항상 이 템플릿 형식을 먼저 확인하고 채울 것.**
+
+### 다음 세션이 할 일
+1. `.harness/ARCHITECTURE.md`에 "이 클러스터는 ArgoCD GitOps로 관리되며 kubectl 직접 조작은 지속되지 않는다"는
+   배포 워크플로우 서술이 이미 있는지 확인하고 없으면 추가한다(이번 장애 대응에서 처음 명확히 확인된 사실).
+2. us-east-1에 남아있을 수 있는 잔여 IAM 인라인 정책(`DiscoveryBedrockGuardrailPolicy`, 서울 스택 배포로
+   덮어써졌을 가능성이 높으나 미확인)이나 고아 리소스가 있는지 여유 있을 때 점검.
+3. Jira에 CLIAR-300 티켓을 사후 등록할지 확인(이번엔 장애 대응이라 티켓 없이 브랜치명만 임의로 붙여 진행함).
