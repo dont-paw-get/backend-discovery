@@ -16,7 +16,14 @@ data:
   # 매번 실패했다(BEDROCK_FALLBACK). 서울 리전에 동일 스택을 재배포해 새 ID로 교체.
   ENABLE_BEDROCK_GUARDRAIL: "true"
   BEDROCK_GUARDRAIL_ID: "m81pa4dhk7pc"
-  BEDROCK_GUARDRAIL_VERSION: "1"
+  # 2026-09-05: 발행된 버전("1")은 발행 시점 정책이 영구 고정되는 스냅샷이라, 이후
+  # CloudFormation으로 NAME/PHONE PII 정책을 수정해도(DRAFT에는 즉시 반영됨) 파드가
+  # 계속 옛 정책을 참조하는 문제가 실측으로 확인됨(도서 저자명/사서 페르소나 이름이
+  # {NAME}으로, 위기 상담 전화번호가 {PHONE}으로 마스킹되는 오탐이 재현됨). dev
+  # 환경은 반복적으로 정책을 조정하는 단계이므로 항상 최신 정책을 즉시 반영하는
+  # DRAFT를 사용한다. 정책이 안정화되면 새 버전을 발행하고 이 값을 그 번호로
+  # 교체하는 것을 검토한다.
+  BEDROCK_GUARDRAIL_VERSION: "DRAFT"
   # --- OpenTelemetry 분산 트레이싱 (dev) ---
   # OTel Collector(OTLP HTTP)로 전송 → Grafana Tempo. stdout JSON 로그는 Alloy가
   # 수집해 Loki로 보내며, 로그의 trace_id로 Tempo ↔ Loki correlation이 된다.
