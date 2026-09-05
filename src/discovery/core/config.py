@@ -82,11 +82,11 @@ class Settings(BaseSettings):
     book_metadata_timeout_seconds: float = 8.0
     # CLIAR-282 Task 5: 서지 정보(ISBN, 페이지수)는 출판된 도서 기준 거의 불변 데이터라
     # Redis에 캐싱해 재추천 시 알라딘 외부 HTTP 2단계 조회를 완전히 건너뛴다.
-    book_metadata_cache_ttl_seconds: int = 604800  # 7일
+    book_metadata_cache_ttl_seconds: int = 2592000  # 30일
     # 표준 장르 분류 결과도 ISBN 기준 불변 데이터라 동일한 방식으로 캐싱한다.
-    genre_classifier_cache_ttl_seconds: int = 604800  # 7일
+    genre_classifier_cache_ttl_seconds: int = 2592000  # 30일
     tavily_api_key: str
-    tavily_cache_ttl_seconds: int = 86400
+    tavily_cache_ttl_seconds: int = 2592000  # 30일
     tavily_monthly_credit_limit: int = 900
     cors_allowed_origins: str = "http://localhost:3000"
 
