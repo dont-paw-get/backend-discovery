@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     librarian_default_id: str = "cat"
     librarian_http_timeout_seconds: float = 20.0
     initial_meta_timeout_seconds: float = 1.5
+    # CLIAR-289: 송파 교육장 기본 좌표 (위치 미제공 시 실시간 날씨 연동 디폴트)
+    default_latitude: float = 37.5145
+    default_longitude: float = 127.1058
     enable_prompt_caching: bool = False
     # CLIAR-276: 기존 Prometheus/Grafana/Loki 관측 스택과 완전히 분리된 CloudWatch 커스텀
     # 메트릭(비용/토큰/캐시 히트율) 발행 스위치. 기본 False — 켜기 전엔 core/cloudwatch_metrics.py

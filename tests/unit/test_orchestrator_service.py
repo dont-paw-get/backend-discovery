@@ -1766,6 +1766,68 @@ async def test_stream_chat_does_not_retry_if_chunks_already_yielded(
     assert "[BEDROCK_FALLBACK]" in caplog.text
 
 
+@pytest.mark.asyncio
+async def test_orchestrator_service_default_coordinates_auto_populated(
+    mocker: MockerFixture,
+) -> None:
+    """좌표 미제공 시 송파 교육장 기본 좌표(37.5145, 127.1058)가
+    세션 메타에 자동 적재되고 사서 도구로 전달되는지 검증.
+    """
+    mock_session_store = mocker.MagicMock()
+    mock_session_store.get_history = AsyncMock(return_value=[])
+    # 처음 세션 메타에는 아무런 좌표가 없음
+    mock_session_store.get_session_meta = AsyncMock(return_value={})
+    mock_session_store.update_session_meta = AsyncMock()
+    mock_session_store.append_turn = AsyncMock()
+
+    mock_librarian_tool = mocker.MagicMock()
+    mock_librarian_tool.as_tool.return_value = {"type": "function", "name": "consult_librarian"}
+
+    mock_agent = mocker.MagicMock()
+    mock_result = mocker.MagicMock()
+    mock_result.message = {
+        "role": "assistant",
+        "content": [{"text": "기본 좌표 테스트 완료"}],
+    }
+    mock_result.metrics = None
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+
+    mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent",
+        return_value=mock_agent,
+    )
+
+    settings = Settings(
+        llm_provider="mock",
+        tavily_api_key="mock",
+        default_latitude=37.5145,
+        default_longitude=127.1058,
+    )
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        librarian_tool=mock_librarian_tool,
+    )
+
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
+        session_id="sess-default-loc",
+        message="오늘 날씨 어때?",
+        # latitude, longitude 전달 안 함
+    )
+
+    assert response == "기본 좌표 테스트 완료"
+    # 세션 메타에 기본 송파 좌표가 저장되었는지 확인
+    mock_session_store.update_session_meta.assert_any_await(
+        "sess-default-loc", latitude=37.5145, longitude=127.1058
+    )
+    # 사서 도구에 기본 좌표가 주입되었는지 확인
+    mock_librarian_tool.as_tool.assert_called_once()
+    call_kwargs = mock_librarian_tool.as_tool.call_args.kwargs
+    assert call_kwargs["latitude"] == 37.5145
+    assert call_kwargs["longitude"] == 127.1058
+
+
+
 
 
 

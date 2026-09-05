@@ -246,8 +246,16 @@ class OrchestratorService:
                 )
             )
         if self._librarian_tool is not None:
-            latitude = meta.get("latitude")
-            longitude = meta.get("longitude")
+            latitude = (
+                meta.get("latitude")
+                if meta.get("latitude") is not None
+                else self._settings.default_latitude
+            )
+            longitude = (
+                meta.get("longitude")
+                if meta.get("longitude") is not None
+                else self._settings.default_longitude
+            )
             active_tools.append(
                 self._librarian_tool.as_tool(
                     session_id=session_id,
@@ -297,18 +305,29 @@ class OrchestratorService:
     ]:
         """단일 턴 동기 대화 응답을 생성하고 세션 히스토리 및 메타를 갱신한다."""
         start_time = time.perf_counter()
+        meta = await self._session_store.get_session_meta(session_id)
         meta_updates: dict[str, Any] = {}
         if librarian_id is not None:
             meta_updates["librarian_id"] = librarian_id
-        if latitude is not None:
-            meta_updates["latitude"] = latitude
-        if longitude is not None:
-            meta_updates["longitude"] = longitude
+
+        # CLIAR-289: 좌표가 전달되었으면 갱신, 세션 메타에도 없으면
+        # 송파 교육장 기본 좌표로 자동 적재
+        effective_latitude = latitude if latitude is not None else meta.get("latitude")
+        if effective_latitude is None:
+            effective_latitude = self._settings.default_latitude
+        if meta.get("latitude") != effective_latitude:
+            meta_updates["latitude"] = effective_latitude
+
+        effective_longitude = longitude if longitude is not None else meta.get("longitude")
+        if effective_longitude is None:
+            effective_longitude = self._settings.default_longitude
+        if meta.get("longitude") != effective_longitude:
+            meta_updates["longitude"] = effective_longitude
 
         if meta_updates:
             await self._session_store.update_session_meta(session_id, **meta_updates)
+            meta.update(meta_updates)
 
-        meta = await self._session_store.get_session_meta(session_id)
         history = await self._session_store.get_history(session_id)
 
         # Task 3: 위기/자해 대응 안전 게이트 (결정론적 우회)
@@ -552,13 +571,31 @@ class OrchestratorService:
             timeout_sec = self._settings.initial_meta_timeout_seconds
             try:
                 meta = await self._session_store.get_session_meta(session_id)
+                effective_latitude = (
+                    latitude
+                    if latitude is not None
+                    else (
+                        meta.get("latitude")
+                        if meta.get("latitude") is not None
+                        else self._settings.default_latitude
+                    )
+                )
+                effective_longitude = (
+                    longitude
+                    if longitude is not None
+                    else (
+                        meta.get("longitude")
+                        if meta.get("longitude") is not None
+                        else self._settings.default_longitude
+                    )
+                )
                 lib_res = await asyncio.wait_for(
                     self._librarian_tool.consult(
                         message=message,
                         session_id=session_id,
                         librarian_id=meta.get("librarian_id"),
-                        latitude=latitude or meta.get("latitude"),
-                        longitude=longitude or meta.get("longitude"),
+                        latitude=effective_latitude,
+                        longitude=effective_longitude,
                     ),
                     timeout=timeout_sec,
                 )
@@ -595,18 +632,28 @@ class OrchestratorService:
     ) -> AsyncGenerator[str, None]:
         """스트리밍 대화 응답을 청크 단위로 yield하고, 완료 후 세션 히스토리를 갱신한다."""
         start_time = time.perf_counter()
+        meta = await self._session_store.get_session_meta(session_id)
         meta_updates: dict[str, Any] = {}
         if librarian_id is not None:
             meta_updates["librarian_id"] = librarian_id
-        if latitude is not None:
-            meta_updates["latitude"] = latitude
-        if longitude is not None:
-            meta_updates["longitude"] = longitude
+
+        # CLIAR-289: 좌표가 전달되었으면 갱신, 세션 메타에도 없으면
+        # 송파 교육장 기본 좌표로 자동 적재
+        effective_latitude = latitude if latitude is not None else meta.get("latitude")
+        if effective_latitude is None:
+            effective_latitude = self._settings.default_latitude
+        if meta.get("latitude") != effective_latitude:
+            meta_updates["latitude"] = effective_latitude
+
+        effective_longitude = longitude if longitude is not None else meta.get("longitude")
+        if effective_longitude is None:
+            effective_longitude = self._settings.default_longitude
+        if meta.get("longitude") != effective_longitude:
+            meta_updates["longitude"] = effective_longitude
 
         if meta_updates:
             await self._session_store.update_session_meta(session_id, **meta_updates)
-
-        meta = await self._session_store.get_session_meta(session_id)
+            meta.update(meta_updates)
         history = await self._session_store.get_history(session_id)
 
         # Task 3: 위기/자해 대응 안전 게이트 (결정론적 우회)

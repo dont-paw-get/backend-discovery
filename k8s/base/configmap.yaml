@@ -27,6 +27,11 @@ data:
   LIBRARIAN_DEFAULT_ID: "cat"
   LIBRARIAN_HTTP_TIMEOUT_SECONDS: "20"
   INITIAL_META_TIMEOUT_SECONDS: "1.5"
+  # CLIAR-289: Bedrock 자동 프롬프트 캐싱 활성화 (오케스트레이터 및 추천 에이전트 TTFT/비용 단축)
+  ENABLE_PROMPT_CACHING: "true"
+  # CLIAR-289: 송파 교육장 기본 좌표 (위치 미제공 시 실시간 날씨 연동 디폴트)
+  DEFAULT_LATITUDE: "37.5145"
+  DEFAULT_LONGITUDE: "127.1058"
   # 서재 도서 CRUD API (backend-book) 서비스 URL. 필수값 — 미설정 시 앱이 기동되지 않습니다.
   LIBRARY_API_URL: "http://k8s-dpybbook-backendb-d17a725d36-1113312703.ap-northeast-2.elb.amazonaws.com"
   LIBRARY_HTTP_TIMEOUT_SECONDS: "10"
