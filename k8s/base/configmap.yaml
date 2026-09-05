@@ -11,7 +11,8 @@ data:
   # Claude Haiku 4.5 글로벌 프로파일 사용 시 us-east-1 필수
   AWS_REGION: "us-east-1"
   CHAT_HISTORY_MAX_TURNS: "20"
-  CHAT_SESSION_TTL_SECONDS: "3600"
+  # CLIAR-266: 마이페이지 연동 전까지 세션 만료로 대화 맥락이 끊기지 않도록 30일로 상향
+  CHAT_SESSION_TTL_SECONDS: "2592000"
   LIBRARIAN_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
   ORCHESTRATOR_MODEL_ID: "global.anthropic.claude-haiku-4-5-20251001-v1:0"
   # [서울 리전 초저지연 fallback 옵션 (TTFT ~600ms)]
