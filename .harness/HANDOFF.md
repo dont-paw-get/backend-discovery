@@ -1388,10 +1388,66 @@
     - `tests/unit/test_cloudwatch_metrics.py`: `publish_latency` 정상 발행, disabled no-op, 예외 무시 단위 테스트 4건 추가.
     - `tests/unit/test_orchestrator_cloudwatch_metrics.py`: `chat`/`stream_chat` 배선 검증, `safety_gate` 및 `input_gate` 단락 시 미발행 검증 4건 추가.
     - 정적 분석(`ruff check .`, `mypy .`) 100% 통과, 단위 테스트 305건 전체 통과 (`pytest -m "not integration"`).
-  - **Task 4: 하네스 산출물 동기화**:
-    - `.harness/ARCHITECTURE.md`, `.harness/STATE.md`, `.harness/PLAN.md`, `.harness/HANDOFF.md` 갱신.
+- **Task 4: 하네스 산출물 동기화 및 PR 생성**:
+    - 커밋 `f3b5650` 생성, 원격 브랜치 푸시 및 `develop` 대상 PR #65 오픈 완료.
+    - 대시보드 IaC JSON(`docs/observability/dashboard.json`) 및 설정/트러블슈팅 가이드(`docs/observability/cloudwatch-dashboard-guide.md`) 작성 완료.
+    - `k8s/base/configmap.yaml` 및 `.env`에 `ENABLE_CLOUDWATCH_METRICS: "true"` 동기화 완료.
 
 ### 다음 세션이 할 일
-1. 사용자 컨펌 후 커밋 생성(`[CLIAR-276]` 태그) 및 `develop` 대상 PR 생성.
-2. dev 배포 후 CloudWatch 콘솔에서 `RequestLatencyMs` 및 `TimeToFirstByteMs` 실측 확인.
+1. **PR #65 코드 리뷰 및 머지 (`develop`)**:
+   - 머지 후 ArgoCD / K8s dev 자동 배포 확인.
+2. **배포 후 CloudWatch 대시보드 확인**:
+   - PR #65 배포 후 챗봇 대화 시 `RequestLatencyMs`, `TimeToFirstByteMs` 및 `BedrockCostUSD`가 콘솔에 정상 적재되는지 확인.
+   - `docs/observability/dashboard.json`을 CloudWatch 콘솔의 `Actions ➔ View/edit source`에 반영하여 미려한 그래프 확인.
+3. **README 업데이트 시**:
+   - `docs/observability/cloudwatch-dashboard-guide.md` 링크 연결 및 함께 커밋/푸시.
+
+
+## 2026-09-05 — 레포지토리 정리 (QA 데이터 파일 이동 및 레거시 백로그 청소)
+
+- **배경**:
+  - `archive/` 폴더는 히스토리 보존을 위해 그대로 유지하고, `README.md`는 타 세션 작업 중이므로 보존.
+  - 루트에 노출되어 있던 QA CSV 파일들과 `.harness/BACKLOG.md` 내 폐기된 벡터 DB 레거시 항목들을 정돈.
+- **수행 작업**:
+  - **Task 1: QA 데이터 파일 이동 및 `qa_runner.py` 경로 동기화**:
+    - `chatbot_qa_testv2.csv`, `chatbot_qa_testv3.csv`를 `scripts/data/` 디렉터리로 이동 (`git mv`).
+    - `scripts/qa_runner.py`의 `CSV_PATH` 경로를 `scripts/data/chatbot_qa_testv2.csv`로 수정.
+  - **Task 2: `.harness/BACKLOG.md` 내 폐기된 벡터 DB 레거시 항목 청소**:
+    - pgvector, tsvector 형태소 분석기, 임베딩 1536 차원 재검증, vector(1536) 마이그레이션, /internal/* mTLS, sync DLQ, HNSW 파라미터 튜닝 등 폐기된 아키텍처 항목 6건 제거.
+  - **Task 3: 무회귀 검증**:
+    - `ruff check .`, `mypy .` (88개 파일) 100% 통과.
+    - 단위 테스트 305건 전체 통과 (`pytest -m "not integration"`).
+    - `.harness/STATE.md`, `.harness/PLAN.md` 동기화 완료.
+
+### 다음 세션이 할 일
+1. PR #65 코드 리뷰 및 머지.
+2. 타 세션의 README 업데이트 완료 시 확인.
+
+
+## 2026-09-05 — CLIAR-298 Amazon Bedrock Guardrails 연동 및 보안 게이트키퍼 구축 완료
+
+- **브랜치**: `CLIAR-298-Bedrock-Guardrails-Integration` (`origin/develop` 최신 헤드에서 분기).
+- **배경**:
+  - LLM 호출 전(Pre-flight)에 악의적 프롬프트 인젝션, 탈옥(Jailbreak), PII 유출, 비도서 유해 주제를 차단하여 비용 낭비와 AI 보안 사고를 방지.
+  - 외부 Lambda 호출로 인한 콜드 스타트 및 네트워크 홉 지연을 방지하기 위해 FastAPI 내부에서 직접 `boto3`의 `apply_guardrail`을 호출하는 초고속 인프로세스 게이트키퍼 구축.
+- **수행 작업**:
+  - **Task 1: 환경 설정 및 설정값 분리**:
+    - `src/discovery/core/config.py`, `.env.example`, `k8s/base/configmap.yaml`에 `ENABLE_BEDROCK_GUARDRAIL`, `BEDROCK_GUARDRAIL_ID`, `BEDROCK_GUARDRAIL_VERSION` 반영.
+  - **Task 2: `BedrockGuardrailGate` 모듈 신설**:
+    - `src/discovery/domain/orchestrator/bedrock_guardrail_gate.py`: `apply_guardrail` 비동기 논블로킹(`asyncio.to_thread`) 실행, `BLOCKED` 시 사서별 친화적 차단 메시지 반환, 네트워크 예외 시 graceful fail-open 처리.
+  - **Task 3: `OrchestratorService` 및 에이전트 배선**:
+    - `chat()` 및 `stream_chat()`에서 `safety_gate`, `input_gate` 통과 직후 `evaluate_bedrock_guardrail` 실행 및 조기 단락(LLM 미호출) 처리.
+    - `create_orchestrator_agent` 및 `create_librarian_agent`에 `guardrail_id`, `guardrail_version` 연동 (출력단 Contextual Grounding 환각 검증 확장성 확보).
+  - **Task 4: 단위 테스트 및 정적 분석 100% 검증**:
+    - `tests/unit/test_bedrock_guardrail_gate.py` 신규 작성 (정상 통과, 탈옥 차단, 커스텀 메시지, fail-open 등 10건).
+    - `tests/unit/test_orchestrator_service.py`에 가드레일 단락 배선 테스트 2건 추가 (총 12건 추가, 317건 100% 통과).
+    - 정적 분석(`ruff check .`, `mypy .` 90개 파일) 100% 통과.
+  - **Task 5: AWS 콘솔 설정 가이드 작성**:
+    - `docs/security/bedrock-guardrail-guide.md` 작성 완료 (Prompt Attack Filter 설정, Denied Topics, Contextual Grounding, IAM 정책).
+
+### 다음 세션이 할 일
+1. AWS 콘솔에서 `dpyb-discovery-guardrail` 생성 후 `Guardrail ID` 발급.
+2. dev ConfigMap에 `ENABLE_BEDROCK_GUARDRAIL: "true"`, `BEDROCK_GUARDRAIL_ID: "<id>"` 반영하여 배포 후 실측.
+
+
 

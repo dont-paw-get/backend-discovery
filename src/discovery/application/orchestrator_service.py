@@ -31,6 +31,7 @@ from discovery.domain.librarian.post_processor import (
     sanitize_html_tags,
 )
 from discovery.domain.orchestrator.agent import create_orchestrator_agent
+from discovery.domain.orchestrator.bedrock_guardrail_gate import evaluate_bedrock_guardrail
 from discovery.domain.orchestrator.fallback import get_llm_fallback_message
 from discovery.domain.orchestrator.input_gate import evaluate_input_gate
 from discovery.domain.orchestrator.librarian_response import (
@@ -212,6 +213,7 @@ class OrchestratorService:
         tools: list[Any] | None = None,
         cloudwatch_publisher: CloudWatchMetricsPublisher | None = None,
         boto_session: Any = None,
+        bedrock_client: Any = None,
     ) -> None:
         self._session_store = session_store
         self._settings = settings
@@ -221,6 +223,18 @@ class OrchestratorService:
         self._tools = tools or []
         self._cloudwatch_publisher = cloudwatch_publisher
         self._boto_session = boto_session
+        self._bedrock_client = bedrock_client
+        if self._bedrock_client is None and self._boto_session is not None:
+            try:
+                self._bedrock_client = self._boto_session.client(
+                    "bedrock-runtime",
+                    region_name=self._settings.aws_region or "us-east-1",
+                )
+            except Exception:
+                logger.warning(
+                    "[BEDROCK_GUARDRAIL] Failed to create bedrock-runtime client from boto_session",
+                    exc_info=True,
+                )
 
     def _build_agent(
         self,
@@ -278,15 +292,20 @@ class OrchestratorService:
         if not active_tools and self._tools:
             active_tools = self._tools
 
-        return create_orchestrator_agent(
-            model_id=self._settings.orchestrator_model_id,
-            region_name=self._settings.aws_region,
-            boto_session=self._boto_session,
-            librarian_id=librarian_id,
-            tools=active_tools,
-            messages=strands_messages if strands_messages else None,
-            enable_prompt_caching=self._settings.enable_prompt_caching,
-        )
+        agent_kwargs: dict[str, Any] = {
+            "model_id": self._settings.orchestrator_model_id,
+            "region_name": self._settings.aws_region,
+            "boto_session": self._boto_session,
+            "librarian_id": librarian_id,
+            "tools": active_tools,
+            "messages": strands_messages if strands_messages else None,
+            "enable_prompt_caching": self._settings.enable_prompt_caching,
+        }
+        if self._settings.enable_bedrock_guardrail and self._settings.bedrock_guardrail_id:
+            agent_kwargs["guardrail_id"] = self._settings.bedrock_guardrail_id
+            agent_kwargs["guardrail_version"] = self._settings.bedrock_guardrail_version
+
+        return create_orchestrator_agent(**agent_kwargs)
 
     async def chat(
         self,
@@ -367,6 +386,32 @@ class OrchestratorService:
                 direct_metrics={"total_duration_ms": duration_ms, "input_gate_triggered": True},
             )
             return input_gate_response, None, None, None, None
+
+        # CLIAR-298: Bedrock Guardrails 입력 검증 게이트 (프롬프트 공격, 탈옥, PII, 유해 주제 차단)
+        guardrail_response = await evaluate_bedrock_guardrail(
+            message,
+            meta.get("librarian_id"),
+            bedrock_client=self._bedrock_client,
+            guardrail_id=self._settings.bedrock_guardrail_id,
+            guardrail_version=self._settings.bedrock_guardrail_version,
+            enabled=self._settings.enable_bedrock_guardrail,
+        )
+        if guardrail_response is not None:
+            await self._session_store.append_turn(session_id, {"role": "user", "content": message})
+            await self._session_store.append_turn(
+                session_id, {"role": "assistant", "content": guardrail_response}
+            )
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            log_agent_metrics(
+                phase="orchestrator",
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                mode="sync",
+                message_length=len(message),
+                metrics_summary=None,
+                direct_metrics={"total_duration_ms": duration_ms, "guardrail_triggered": True},
+            )
+            return guardrail_response, None, None, None, None
 
         switch_to_holder: list[SwitchToSuggestion] = []
         signals_holder: list[LibrarianSignals] = []
@@ -707,6 +752,37 @@ class OrchestratorService:
                 },
             )
             yield input_gate_response
+            return
+
+        # CLIAR-298: Bedrock Guardrails 입력 검증 게이트 (프롬프트 공격, 탈옥, PII, 유해 주제 차단)
+        guardrail_response = await evaluate_bedrock_guardrail(
+            message,
+            meta.get("librarian_id"),
+            bedrock_client=self._bedrock_client,
+            guardrail_id=self._settings.bedrock_guardrail_id,
+            guardrail_version=self._settings.bedrock_guardrail_version,
+            enabled=self._settings.enable_bedrock_guardrail,
+        )
+        if guardrail_response is not None:
+            await self._session_store.append_turn(session_id, {"role": "user", "content": message})
+            await self._session_store.append_turn(
+                session_id, {"role": "assistant", "content": guardrail_response}
+            )
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            log_agent_metrics(
+                phase="orchestrator",
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                mode="stream",
+                message_length=len(message),
+                metrics_summary=None,
+                direct_metrics={
+                    "ttfb_ms": duration_ms,
+                    "total_duration_ms": duration_ms,
+                    "guardrail_triggered": True,
+                },
+            )
+            yield guardrail_response
             return
 
         switch_to_holder: list[SwitchToSuggestion] = []

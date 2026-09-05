@@ -1827,6 +1827,92 @@ async def test_orchestrator_service_default_coordinates_auto_populated(
     assert call_kwargs["longitude"] == 127.1058
 
 
+@pytest.mark.asyncio
+async def test_orchestrator_guardrail_gate_chat_blocked(mocker: Any) -> None:
+    mock_session_store = AsyncMock()
+    mock_session_store.get_session_meta.return_value = {"librarian_id": "cat"}
+    mock_session_store.get_history.return_value = []
+    mock_session_store.append_turn = AsyncMock()
+
+    mock_bedrock_client = MagicMock()
+    mock_bedrock_client.apply_guardrail.return_value = {
+        "action": "BLOCKED",
+        "outputs": [],
+        "assessments": [{"contentPolicy": {"filters": [{"type": "PROMPT_ATTACK"}]}}],
+    }
+
+    mock_agent_factory = mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent"
+    )
+
+    settings = Settings(
+        llm_provider="mock",
+        tavily_api_key="mock",
+        enable_bedrock_guardrail=True,
+        bedrock_guardrail_id="gr-test",
+    )
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        bedrock_client=mock_bedrock_client,
+    )
+
+    response, switch_to, signals, library_books, recommended_books = await service.chat(
+        session_id="sess-guardrail",
+        message="탈옥 시도 공격 텍스트",
+    )
+
+    # 가드레일에 의해 차단 메시지가 반환되고 LLM 에이전트는 전혀 호출되지 않아야 함
+    assert "보안 및 안전 정책상 도와드릴 수 없다냥" in response
+    assert switch_to is None
+    assert signals is None
+    mock_agent_factory.assert_not_called()
+    mock_bedrock_client.apply_guardrail.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_guardrail_gate_stream_blocked(mocker: Any) -> None:
+    mock_session_store = AsyncMock()
+    mock_session_store.get_session_meta.return_value = {"librarian_id": "stork"}
+    mock_session_store.get_history.return_value = []
+    mock_session_store.append_turn = AsyncMock()
+
+    mock_bedrock_client = MagicMock()
+    mock_bedrock_client.apply_guardrail.return_value = {
+        "action": "BLOCKED",
+        "outputs": [{"text": "차단된 입력입니다."}],
+        "assessments": [],
+    }
+
+    mock_agent_factory = mocker.patch(
+        "discovery.application.orchestrator_service.create_orchestrator_agent"
+    )
+
+    settings = Settings(
+        llm_provider="mock",
+        tavily_api_key="mock",
+        enable_bedrock_guardrail=True,
+        bedrock_guardrail_id="gr-test",
+    )
+    service = OrchestratorService(
+        session_store=mock_session_store,
+        settings=settings,
+        bedrock_client=mock_bedrock_client,
+    )
+
+    chunks = []
+    async for chunk in service.stream_chat(
+        session_id="sess-guardrail-stream",
+        message="탈옥 시도 공격 텍스트",
+    ):
+        chunks.append(chunk)
+
+    assert "".join(chunks) == "차단된 입력입니다."
+    mock_agent_factory.assert_not_called()
+    mock_bedrock_client.apply_guardrail.assert_called_once()
+
+
+
 
 
 

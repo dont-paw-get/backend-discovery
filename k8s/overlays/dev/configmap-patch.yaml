@@ -9,6 +9,10 @@ data:
   # CLIAR-276: 기존 Prometheus/Grafana/Loki 관측 스택과 완전히 분리된 AWS CloudWatch
   # 커스텀 메트릭(Bedrock 비용 USD, 토큰 사용량, 검색 캐시 히트율) 발행 스위치.
   ENABLE_CLOUDWATCH_METRICS: "true"
+  # CLIAR-298: Amazon Bedrock Guardrails 활성화 (CloudFormation dpyb-discovery-guardrail 스택)
+  ENABLE_BEDROCK_GUARDRAIL: "true"
+  BEDROCK_GUARDRAIL_ID: "35g4g149bbe7"
+  BEDROCK_GUARDRAIL_VERSION: "1"
   # --- OpenTelemetry 분산 트레이싱 (dev) ---
   # OTel Collector(OTLP HTTP)로 전송 → Grafana Tempo. stdout JSON 로그는 Alloy가
   # 수집해 Loki로 보내며, 로그의 trace_id로 Tempo ↔ Loki correlation이 된다.

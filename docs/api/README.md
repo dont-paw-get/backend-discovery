@@ -17,14 +17,11 @@ Schema·계약 테스트를 함께 갱신한다.
 
 ## 현재 상태
 
-2026-08-21 방향 전환으로 벡터DB(pgvector) 기반 RAG 챗봇·큐레이션 계약
-(`POST /chat`, `GET /curations/time-based`, `POST /internal/sync-book`)이
-폐기되었다. 해당 계약과 ADR(`0001-internal-sync-contract.md`)은
-`archive/vector-search-poc/docs/api/`로 이동했다 (`.harness/DECISIONS.md` 참고).
+`openapi.yaml`은 현재 다음 엔드포인트의 wire 계약을 소유하고 관리한다:
+- `POST /api/v1/chat`: 오케스트레이터 대화 (도서 추천, 서재 검색, 사서 상담, 동기 및 스트리밍 지원)
+- `POST /api/v1/classify-genre`: 도서 ISBN 기반 16개 표준 장르 자동 분류
 
-`openapi.yaml`은 현재 `paths: {}`로 비어 있다. 추천 에이전트(대화 기반 도서 추천)의
-API 계약이 정해지면(`.harness/PLAN.md` 참고) 이 문서를 다시
-채운다.
+과거 폐기된 벡터DB(pgvector) 기반 계약은 `archive/vector-search-poc/docs/api/`에 보존되어 있다 (`.harness/DECISIONS.md` 참고).
 
 ## 스펙 검증 방법
 

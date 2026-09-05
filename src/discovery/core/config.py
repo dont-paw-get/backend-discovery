@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     # 메트릭(비용/토큰/캐시 히트율) 발행 스위치. 기본 False — 켜기 전엔 core/cloudwatch_metrics.py
     # 코드 경로 자체가 실행되지 않는다(`enable_prompt_caching` 선례와 동일한 안전 기본값 패턴).
     enable_cloudwatch_metrics: bool = False
+    # CLIAR-298: Amazon Bedrock Guardrails (Prompt Attack, PII, Denied Topics 방어)
+    enable_bedrock_guardrail: bool = False
+    bedrock_guardrail_id: str | None = None
+    bedrock_guardrail_version: str = "DRAFT"
     library_api_url: str = (
         "http://k8s-dpybbook-backendb-d17a725d36-1113312703.ap-northeast-2.elb.amazonaws.com"
     )
