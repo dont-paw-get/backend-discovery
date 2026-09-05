@@ -356,6 +356,37 @@ def test_extract_fallback_text() -> None:
     mock_empty_agent.messages = []
     assert extract_fallback_text(mock_empty_agent) == ""
 
+    # 4. consult_librarian과 recommend_books가 함께 있는 경우 (카드 결과 우선 추출)
+    mock_multi_agent = MagicMock()
+    mock_multi_agent.messages = [
+        {"role": "user", "content": [{"text": "비올 때 읽을 책 추천해줘"}]},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "toolResult": {
+                        "toolUseId": "call_1",
+                        "content": [
+                            {
+                                "text": "안냥! 나는 블루다냥 🐾 [사서 정보]\n- 무드: 차분한"
+                            }
+                        ],
+                    }
+                },
+                {
+                    "toolResult": {
+                        "toolUseId": "call_2",
+                        "content": [
+                            {"text": "### 📖 나눔에 관한 열 가지 질문\n- **저자**: 안철수 외"}
+                        ],
+                    }
+                },
+            ],
+        },
+    ]
+    result_multi = extract_fallback_text(mock_multi_agent)
+    assert result_multi == "### 📖 나눔에 관한 열 가지 질문\n- **저자**: 안철수 외"
+
 
 
 @pytest.mark.asyncio

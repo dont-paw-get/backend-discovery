@@ -84,12 +84,16 @@ def is_tool_call_format_error(exc: BaseException) -> bool:
 
 
 def extract_fallback_text(agent: Agent) -> str:
-    """오케스트레이터가 도구 실행 후 텍스트를 생성하지 않았을 때 toolResult 텍스트를 추출한다."""
+    """오케스트레이터가 도구 실행 후 텍스트를 생성하지 않았거나
+    카드를 누락했을 때 toolResult 텍스트를 추출한다."""
     messages = getattr(agent, "messages", [])
     if not isinstance(messages, list):
         return ""
 
-    for msg in reversed(messages):
+    card_results: list[str] = []
+    fallback_text = ""
+
+    for msg in messages:
         if not isinstance(msg, dict):
             continue
         content = msg.get("content", [])
@@ -100,6 +104,7 @@ def extract_fallback_text(agent: Agent) -> str:
                 continue
             if "toolResult" in block and isinstance(block["toolResult"], dict):
                 tr_content = block["toolResult"].get("content", [])
+                text = ""
                 if isinstance(tr_content, list):
                     texts = [
                         item.get("text", "")
@@ -108,12 +113,20 @@ def extract_fallback_text(agent: Agent) -> str:
                         and "text" in item
                         and isinstance(item["text"], str)
                     ]
-                    combined = "".join(texts).strip()
-                    if combined:
-                        return combined
+                    text = "".join(texts).strip()
                 elif isinstance(tr_content, str) and tr_content.strip():
-                    return tr_content.strip()
-    return ""
+                    text = tr_content.strip()
+
+                if text:
+                    if "### 📖" in text or "### 📚" in text:
+                        if text not in card_results:
+                            card_results.append(text)
+                    elif not fallback_text:
+                        fallback_text = text
+
+    if card_results:
+        return "\n\n".join(card_results)
+    return fallback_text
 
 
 def _build_recommended_book_cards(response_text: str) -> list[RecommendedBookCard] | None:
