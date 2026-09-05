@@ -34,9 +34,10 @@ DPYB(Don't Paw Get Your Book)의 **AI · 탐색(Discovery) 전담 마이크로�
 | 관측(트레이싱) | OpenTelemetry SDK 1.44 + OTLP HTTP/protobuf exporter, 자동 계측(FastAPI/redis/botocore/httpx), Strands 자체 agent span 활용. dev는 OTel Collector(`monitoring` ns) → Grafana Tempo |
 | 관측(로깅) | 표준 `logging` 기반 stdout JSON (`core/logging.py`), 각 로그에 `trace_id`/`span_id` 주입. Grafana Alloy가 컨테이너 stdout 수집 → Loki |
 | 관측(메트릭) | `prometheus-client` 기반 순수 ASGI 미들웨어(`core/metrics.py`)가 `GET /metrics`로 Micrometer 호환 히스토그램(`http_server_requests_seconds_*`) 노출. dev overlay의 ServiceMonitor(`backend-discovery`)로 kube-prometheus-stack이 스크레이핑. OTel MeterProvider는 미도입(pull 방식) |
-| 관측(CloudWatch) | CloudWatch 커스텀 메트릭(`DPYB/Discovery/LLM`) + IaC 대시보드(`docs/observability/dashboard.json`) |
+| 관측(CloudWatch) | CloudWatch 커스텀 메트릭(`DPYB/Discovery/LLM`) + CloudFormation IaC(`docs/observability/cloudwatch-dashboard-stack.yaml`) + 대시보드 위젯 원본(`docs/observability/dashboard.json`) |
 | AI 보안(Guardrail) | Amazon Bedrock Guardrails (`apply_guardrail` 인프로세스 게이트), 탈옥/프롬프트인젝션/PII/환각 차단. IaC: CloudFormation 템플릿(`docs/security/guardrail-stack.yaml`) |
 | AWS IaC 원칙 | 모든 AWS 리소스(가드레일, 대시보드, IAM 정책 등)는 재현성 보장을 위해 `docs/` 하위 선언형 IaC(CloudFormation / JSON)로 버전 관리 |
+| 상세 기능 문서 | `docs/features/` (알라딘 서지 실조회 2단 파이프라인, 4계층 안전 게이트 & Fallback, 16개 표준 장르 분류기) |
 
 **2026-08-21 방향 전환으로 제거된 것**: PostgreSQL, pgvector, SQLAlchemy(async),
 asyncpg, Alembic, testcontainers(postgres). RDB로 남는 데이터가 없어 완전히
@@ -76,7 +77,7 @@ asyncpg, Alembic, testcontainers(postgres). RDB로 남는 데이터가 없어 �
 backend-discovery/
 ├── .harness/            HANDOFF · STATE · ARCHITECTURE · DECISIONS · BACKLOG · PLAN · research/
 ├── archive/vector-search-poc/   폐기된 pgvector/RAG 코드 보관 (원래 경로 구조 유지)
-├── docs/api/            openapi.yaml · README.md · decisions/
+├── docs/                README.md(종합 색인) · api/ · features/ · observability/ · security/
 ├── src/discovery/
 │   ├── main.py          FastAPI 앱 팩토리, lifespan(Redis만 초기화), /api/v1 라우터 배선,
 │   │                     import 시 configure_json_logging() + configure_tracing() 1회 실행,

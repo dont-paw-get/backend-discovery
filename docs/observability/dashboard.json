@@ -1,0 +1,116 @@
+{
+  "widgets": [
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "DPYB/Discovery/LLM", "RequestLatencyMs", "Model", "global.anthropic.claude-haiku-4-5-20251001-v1:0", { "stat": "p90", "label": "E2E Latency (p90)" } ],
+          [ "...", { "stat": "Average", "label": "E2E Latency (Avg)" } ],
+          [ ".", "TimeToFirstByteMs", ".", ".", { "stat": "p90", "label": "TTFT (p90)", "color": "#2ca02c" } ],
+          [ "...", { "stat": "Average", "label": "TTFT (Avg)", "color": "#98df8a" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "ap-northeast-2",
+        "title": "⚡ [성능] 체감 지연시간 & TTFT 추이 (ms)",
+        "period": 300,
+        "yAxis": {
+          "left": {
+            "label": "Milliseconds",
+            "showUnits": false
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 0,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "DPYB/Discovery/LLM", "BedrockCostUSD", "Model", "global.anthropic.claude-haiku-4-5-20251001-v1:0", { "stat": "Sum", "label": "Haiku 4.5 Cost (USD)", "color": "#d62728" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "ap-northeast-2",
+        "title": "💰 [FinOps] Bedrock 누적 비용 (USD)",
+        "period": 3600,
+        "yAxis": {
+          "left": {
+            "label": "USD ($)",
+            "showUnits": false
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "DPYB/Discovery/LLM", "InputTokens", "Model", "global.anthropic.claude-haiku-4-5-20251001-v1:0", { "stat": "Sum", "label": "Input Tokens", "id": "m_input" } ],
+          [ ".", "OutputTokens", ".", ".", { "stat": "Sum", "label": "Output Tokens", "id": "m_output" } ],
+          [ ".", "CacheReadTokens", ".", ".", { "stat": "Sum", "label": "Cache Read Tokens (90% 할인)", "id": "m_cache_read", "color": "#1f77b4" } ],
+          [ { "expression": "m_cache_read / (m_input + m_cache_read) * 100", "label": "프롬프트 캐시 히트율 (%)", "id": "e_cache_ratio", "yAxis": "right" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "ap-northeast-2",
+        "title": "📊 [토큰 & 캐시] 토큰 사용량 및 프롬프트 캐시 절감율",
+        "period": 300,
+        "yAxis": {
+          "left": {
+            "label": "Tokens",
+            "showUnits": false
+          },
+          "right": {
+            "label": "Ratio (%)",
+            "showUnits": false,
+            "max": 100,
+            "min": 0
+          }
+        }
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 6,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "metrics": [
+          [ "DPYB/Discovery/LLM", "SearchCacheHit", { "stat": "Sum", "label": "Cache Hit", "id": "m_hit", "color": "#2ca02c" } ],
+          [ ".", "SearchCacheMiss", { "stat": "Sum", "label": "Cache Miss", "id": "m_miss", "color": "#ff7f0e" } ],
+          [ { "expression": "m_hit / (m_hit + m_miss) * 100", "label": "도서 검색 캐시 히트율 (%)", "id": "e_search_ratio", "yAxis": "right" } ]
+        ],
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "ap-northeast-2",
+        "title": "🔍 [검색 캐시] Tavily 도서 검색 Redis 캐시 히트율",
+        "period": 300,
+        "yAxis": {
+          "left": {
+            "label": "Counts",
+            "showUnits": false
+          },
+          "right": {
+            "label": "Hit Ratio (%)",
+            "showUnits": false,
+            "max": 100,
+            "min": 0
+          }
+        }
+      }
+    }
+  ]
+}
