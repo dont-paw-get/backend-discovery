@@ -25,6 +25,7 @@ CLIAR-237 재수정(2026-09-02 실측): 두 가지가 추가로 확인됐다.
 """
 
 import logging
+import re
 
 import httpx
 
@@ -36,6 +37,30 @@ from discovery.domain.orchestrator.book_metadata_response import (
 from discovery.infrastructure.cache.book_metadata_cache import BookMetadataCache
 
 logger = logging.getLogger(__name__)
+
+
+def clean_title_for_search(title: str) -> str:
+    """알라딘 교집합 검색 성공률을 높이기 위해 제목에서 부제 및 불필요한 기호를 정제한다."""
+    if not title:
+        return ""
+    # 콜론(:), 대시(-), 슬래시(/) 기준 앞부분 메인 타이틀만 추출
+    cleaned = re.split(r"[:\-\/]", title)[0].strip()
+    # 괄호와 괄호 내부 내용 제거 (예: (개정판), [양장] 등)
+    cleaned = re.sub(r"[\(\[\<].*?[\)\]\>]", "", cleaned).strip()
+    return cleaned if cleaned else title.strip()
+
+
+def clean_author_for_search(author: str) -> str:
+    """알라딘 교집합 검색 성공률을 높이기 위해
+    저자명에서 대표 저자 1인만 추출하고 수식어를 제거한다.
+    """
+    if not author:
+        return ""
+    # 쉼표(,), '외', '및', 슬래시(/), '&' 기준 첫 번째 대표 저자 추출
+    first_author = re.split(r"[,/&]|(?:\s+외\b)|(?:\s+및\b)", author)[0].strip()
+    # '지음', '저', '글', '원작' 등 불필요한 역할 수식어 제거
+    first_author = re.sub(r"\s*(?:지음|저자|저|글|원작)$", "", first_author).strip()
+    return first_author if first_author else author.strip()
 
 
 def _build_auth_headers(auth_token: str | None) -> dict[str, str]:
@@ -305,15 +330,19 @@ class BookMetadataClient:
 
         base = self._settings.book_metadata_api_url.rstrip("/")
         url = f"{base}/api/v1/books/search/by-title-author"
-        params = {"title": title.strip(), "author": author.strip()}
+        search_title = clean_title_for_search(title)
+        search_author = clean_author_for_search(author)
+        params = {"title": search_title, "author": search_author}
 
         try:
             response = await self._get(url, params, auth_token)
             if response is None or response.status_code != 200:
                 logger.warning(
-                    "Book search-by-title-author API returned status %s for title=%s",
+                    "Book search-by-title-author API returned status %s for title=%s "
+                    "(searched as '%s')",
                     response.status_code if response is not None else "N/A",
                     title,
+                    search_title,
                 )
                 return (None, None)
 

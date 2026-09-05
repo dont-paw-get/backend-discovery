@@ -430,3 +430,24 @@ async def test_fetch_isbn_and_pages_works_without_cache(
     result = await client.fetch_isbn_and_pages("어린 왕자", "앙투안 드 생텍쥐페리")
 
     assert result == ("9788932917245", 136)
+
+
+def test_clean_title_for_search() -> None:
+    from discovery.domain.orchestrator.tools.book_metadata_client import clean_title_for_search
+
+    assert clean_title_for_search("블랙스완: 극단적 사건 예측 불가능한 세상 다루기") == "블랙스완"
+    assert clean_title_for_search("커피 아틀라스: 생두에서 커피가 되기까지") == "커피 아틀라스"
+    assert clean_title_for_search("초우량 기업의 조건 (개정판)") == "초우량 기업의 조건"
+    assert clean_title_for_search("단순한 제목") == "단순한 제목"
+
+
+def test_clean_author_for_search() -> None:
+    from discovery.domain.orchestrator.tools.book_metadata_client import clean_author_for_search
+
+    assert clean_author_for_search("토마스 J. 피터스, 로버트 H. 워터맨") == "토마스 J. 피터스"
+    assert clean_author_for_search("스콧 F. 파커 / 마이클 W. 오스틴") == "스콧 F. 파커"
+    assert clean_author_for_search("한강 지음") == "한강"
+    assert clean_author_for_search("김초엽 저자") == "김초엽"
+    assert clean_author_for_search("아서 코난 도일 원작") == "아서 코난 도일"
+    assert clean_author_for_search("김영하") == "김영하"
+
