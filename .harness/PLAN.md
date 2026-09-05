@@ -1,34 +1,27 @@
 # PLAN — backend-discovery
 
-## [확정] CLIAR-289: Bedrock 프롬프트 캐싱 활성화 및 송파 교육장 기본 좌표 설정
+## [제안] CLIAR-292: 추천 에이전트 중복 멘트 제거(레이턴시 단축) 및 날씨 질문 오인식 방어 가드레일
 
 **배경**:
-1. **프롬프트 캐싱 활성화 (속도/비용 최적화)**:
-   - 현재 오케스트레이터 및 추천 에이전트의 시스템 프롬프트 + 도구 스키마는 매 턴당 5,000~10,000 토큰에 달함.
-   - Bedrock Anthropic 자동 캐싱 최소 기준(2,048 토큰)을 충분히 상회하나, 현재 `ENABLE_PROMPT_CACHING=false`로 꺼져 있어 캐시 히트율이 0%임.
-   - `ENABLE_PROMPT_CACHING=true`를 활성화하여 오케스트레이터의 3사이클 누적 입력 비용 및 TTFT(첫 토큰 지연)를 대폭 단축한다.
-2. **송파 교육장 기본 좌표 설정 (UX 개선 및 실시간 날씨 연동)**:
-   - 프론트엔드 대화 중 위치 권한 팝업이 뜨면 대화 흐름이 끊기고 지연이 발생하는 문제를 해소하기 위해, 기본 좌표를 송파 교육장(위도 37.5145, 경도 127.1058)으로 설정.
-   - 클라이언트 요청에 좌표가 없을 경우 기본 송파 좌표를 세션 메타에 자동 적재하여 `backend-librarian`으로 전달.
-   - 사서 서버는 이 좌표로 Open-Meteo를 매 턴 실시간 조회하므로 실시간 날씨 정확도 100% 유지 + 권한 팝업 UX 허들 제거.
+1. **도서 추천 시 중복 멘트 제거 및 레이턴시 단축**:
+   - 하위 추천 에이전트(`recommend_books`)가 도서 카드(`### 📖`) 외에 긴 서두/맺음말(921토큰)을 생성하고, 상위 오케스트레이터도 또 서두/맺음말을 생성하여 화면에 인사말/마무리말이 이중 출력되고 LLM 생성 시간만 12초 이상 소모(전체 16.7초)됨.
+   - 하위 에이전트는 순수 도서 카드만 빠르게 생성(토큰 50% 절감)하도록 하고, 따뜻하고 친절한 사서 설명은 상위 오케스트레이터가 딱 1번 전담하여 자연스러운 톤앤매너와 3~4초 속도 단축을 동시에 달성.
+2. **날씨 질문 단어 오탐으로 인한 '비 타령' 거짓말 차단**:
+   - 사용자가 "지금 밖에 비와?"라고 질문했을 때, 사서 서버(`backend-librarian`)가 문맥을 오판하여 발화 속 '비' 단어로 인해 `location_source: text_stated`, `weather: rainy`를 반환하고, 이후 세션 내내 날씨가 '비'로 고착화되는 버그 발생.
+   - 오케스트레이터 가드레일에 날씨 관련 의문문 질문 시 의심스러운 `text_stated` 신호나 이전 대화의 단어 언급에 휘둘리지 않고 실제 기상청 실측 날씨 데이터를 우선하도록 방어 지침 주입.
 
 **작업 체크리스트**:
-- [x] **Task 1: 송파 교육장 기본 좌표 설정 및 세션 메타 자동 적재**
-  - `src/discovery/core/config.py`: `default_latitude: float = 37.5145`, `default_longitude: float = 127.1058` 필드 추가.
-  - `.env.example`: `DEFAULT_LATITUDE=37.5145`, `DEFAULT_LONGITUDE=127.1058` 반영.
-  - `src/discovery/application/orchestrator_service.py`: `chat()` 및 `stream_chat()`에서 클라이언트 요청 및 기존 세션 메타에 좌표가 없으면 `settings.default_latitude`/`settings.default_longitude`를 기본값으로 세션 메타에 저장하고 사서 도구로 전달.
-- [x] **Task 2: K8s ConfigMap 및 환경 설정에 프롬프트 캐싱 활성화**
-  - `k8s/base/configmap.yaml`: `ENABLE_PROMPT_CACHING: "true"` 추가, `DEFAULT_LATITUDE: "37.5145"`, `DEFAULT_LONGITUDE: "127.1058"` 추가.
-  - `.env.example`: `ENABLE_PROMPT_CACHING=true` 주석 및 기본값 갱신.
-- [x] **Task 3: 단위 테스트 및 정적 분석 무회귀 검증**
-  - `tests/unit/test_orchestrator_service.py`: 좌표 미제공 시 기본 송파 좌표가 세션 메타 및 사서 도구로 전달되는지 검증 테스트 추가.
-  - `uv run ruff check .`, `uv run mypy .`, `uv run pytest -m "not integration"` (295 passed) 100% 통과 확인.
-  - `kubectl kustomize k8s/overlays/dev` 문법 검증.
+- [ ] **Task 1: 하위 추천 에이전트(`recommend_books`) 인사/맺음말 제거 및 순수 카드 생성**
+  - `src/discovery/domain/librarian/agent.py`: `LIBRARIAN_SYSTEM_PROMPT`에서 인사말, 서두 멘트, 맺음말 금지 규칙 추가 (오직 `### 📖` 카드 블록만 간결하게 출력).
+  - 서두 설명 및 마무리는 상위 오케스트레이터(`SHARED_GUARDRAILS`)가 책들을 종합하여 1회 풍부하게 전담하도록 단일화.
+- [ ] **Task 2: 날씨 질문 오인식 방어 가드레일 (환각 차단)**
+  - `src/discovery/domain/orchestrator/agent.py`: `SHARED_GUARDRAILS`에 날씨 질문 시("비 와?", "날씨 어때?" 등 의문문) 가상의 날씨를 단정하지 않고 실제 실측 날씨 기준으로 답변하는 방어 지침 주입.
+- [ ] **Task 3: 단위 테스트 및 정적 분석 무회귀 검증**
+  - `test_librarian_agent.py`, `test_orchestrator_agent.py` 단위 테스트 갱신/신설.
+  - `uv run ruff check .`, `uv run mypy .`, `uv run pytest -m "not integration"` 100% 통과 확인.
 - [ ] **Task 4: dev 배포 후 실측 검증 (사용자 승인 시)**
-  - `kubectl exec ... -- env`로 `ENABLE_PROMPT_CACHING=true` 및 기본 좌표 주입 확인.
-  - dev 환경에서 대화 요청 시:
-    1. 사서 응답에 송파구 실시간 날씨가 정상 반영되는지 확인.
-    2. `kubectl logs`에서 `strands_metrics.accumulated_usage`의 `cacheReadInputTokens` 발생 및 TTFT 단축 확인.
+  - 1) "비 와?" 질문 시 맑은 날씨 정상 응답 확인 (거짓말 차단).
+  - 2) 도서 추천 질문 시 중복 멘트 없이 사서의 깔끔한 설명 1회 출력 및 레이턴시 단축 실측.
 
 ---
 

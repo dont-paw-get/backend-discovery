@@ -48,7 +48,12 @@ def format_signals_for_llm(signals: LibrarianSignals | None) -> str:
                 if signals.weather.temperature is not None
                 else ""
             )
-            lines.append(f"- 현재 날씨: {w_text}{temp_str}")
+            source_warn = (
+                " [주의: 사용자 발화 단어 추정치]"
+                if signals.weather.location_source == "text_stated"
+                else ""
+            )
+            lines.append(f"- 현재 날씨: {w_text}{temp_str}{source_warn}")
 
     if lines:
         return "\n\n[사서 분석 정보]\n" + "\n".join(lines)

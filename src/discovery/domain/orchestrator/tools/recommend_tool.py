@@ -81,7 +81,9 @@ class RecommendBooksTool:
             f"{query}\n\n"
             f"[요청] 반드시 {clamped_count}권의 도서만 추천해주세요. "
             "search_books 도구는 정확히 1회만 호출하고, 그 한 번의 검색어로 "
-            f"{clamped_count}권 분량의 후보와 서지 정보를 한꺼번에 확보하세요."
+            f"{clamped_count}권 분량의 후보와 서지 정보를 한꺼번에 확보하세요. "
+            "인사말이나 서두/맺음 멘트는 일절 쓰지 말고, "
+            "오직 '### 📖 {도서 제목}' 카드 규격만 바로 출력하세요."
         )
         event_timeline: list[tuple[float, str]] = []
 
