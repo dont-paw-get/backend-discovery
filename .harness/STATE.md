@@ -59,3 +59,7 @@
 
 | CLIAR-282 오케스트레이터 속도 및 정확도 최적화 (1~2차) | ✅ **PR #54/#55/#56 모두 develop 머지·dev 배포 완료** | Task 1(boto3 세션 재사용), Task 2(장르 결정론적 보강), Task 3(진단: 모델 교체+이벤트 계측), Task 4(페이지수 타임아웃 3→8초), Task 5(서지/장르 Redis 캐싱 + 후처리 병렬화) 모두 완료. dev 실측(2026-09-04)으로 Task 5 효과 확인(`verify_page_counts_ms` 대폭 감소). **다음 조사 과제**: 오케스트레이터 레벨 미계측 지연(전체 35.7초 중 16.5초, 46%)이 여전히 남아있음 — 이 스코프 밖이었음을 실측으로 확인, 별도 조사 계획을 `PLAN.md`에 신설(다음 세션 진행) |
 | CLIAR-286 K8s ConfigMap 모델 ID 동기화 및 도서 추천 카드 유실 버그 수정 | ✅ **PR #58/#59 develop 머지·dev 배포 완료** | Task A(k8s/base/configmap.yaml의 LIBRARIAN/ORCHESTRATOR/GENRE_CLASSIFIER_MODEL_ID를 Haiku 4.5로 동기화, 실측 44.8초 ➔ 18.6초 58% 단축 및 TTFT 9.26초 ➔ 1.61초 82% 단축 확인), 긴급 버그 수정(Haiku 4.5 다중 도구 호출 시 extract_fallback_text 카드 서식 우선 결합으로 추천 카드 유실 방지), Task B(가상/조건문 발화 시 실시간 시그널 단정 방지 SHARED_GUARDRAILS 보강) 모두 완료 |
+| CLIAR-289 Bedrock 프롬프트 캐싱 활성화 및 송파 기본 좌표 설정 | ✅ **PR #60 develop 머지·dev 배포 완료** | Task 1(송파 교육장 기본 좌표 default_latitude=37.5145, default_longitude=127.1058 세션 메타 자동 적재), Task 2(k8s configmap에 ENABLE_PROMPT_CACHING=true 및 기본 좌표 주입), Task 3(단위 테스트 295건 통과) 모두 완료 |
+| CLIAR-292 추천 에이전트 중복 멘트 제거 및 날씨 질문 오탐 방어 가드레일 | ✅ **PR #61 develop 머지 완료** | 하위 추천 에이전트 멘트 제거(카드만 출력), 날씨 질문 오탐 방어, 단위 테스트 295건 통과 |
+| CLIAR-293 서재 도서 전량 출력 보장 및 고양이 사서 말투 완전 통일 | 🔄 진행 중 | 내 서재 조회 시 질문 조건에 맞는 모든 도서를 마크다운 카드(### 📚)로 출력하도록 가드레일 보강, 고양이 사서 말투 100% 반말체 통일 및 도서 추천 서두 압축 |
+
