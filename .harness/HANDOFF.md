@@ -1337,3 +1337,37 @@
    전후 비교 실측을 남긴다.
 5. 이 조사는 "직결 스트리밍 아키텍처 변경"을 다시 검토하는 게 아니다 — 그 결론
    (`.harness/DECISIONS.md` 2026-09-01)은 이미 확정된 것으로 취급하고 재론하지 않는다.
+
+
+## 2026-09-05 — CLIAR-289: Bedrock 프롬프트 캐싱 활성화 및 송파 교육장 기본 좌표 설정 (PR #60 생성)
+
+- **브랜치**: `CLIAR-289-Prompt-Caching-And-Default-Location` (`origin/develop` 최신 헤드에서 분기).
+- **수행 작업**:
+  1. **실환경 진단 및 사서팀 프리페치 제안 피드백**:
+     - `kubectl exec ... -- env` 및 live log 실측으로 오케스트레이터가 Haiku 4.5로 구동 중임을 확인.
+     - 도서 추천 시 `consult_librarian` ➔ `recommend_books` ➔ 응답 생성의 3사이클(15.9초) 루프 확인.
+     - `backend-librarian` 팀의 `/api/v1/session/init` 날씨 프리페치 제안 검토: 150ms 외부 호출은 병목의 1% 미만이며, 인메모리 프리페치 시 다중 Pod 유실 및 날씨 노후화(Stale) 위험 분석.
+     - 시연/테스트 환경이 송파 교육장인 점에 착안하여, 불필요한 브라우저 위치 권한 팝업을 제거하면서도 사서가 매 턴 실시간 날씨를 송파구 기준으로 정확히 조회할 수 있도록 **기본 좌표(송파구: 37.5145, 127.1058)**를 설정하기로 확정.
+  2. **Task 1: 송파 교육장 기본 좌표 설정 및 세션 메타 자동 적재**:
+     - `core/config.py`: `default_latitude: float = 37.5145`, `default_longitude: float = 127.1058` 추가.
+     - `orchestrator_service.py`: `chat()`, `stream_chat()`에서 좌표 미제공 시 송파 기본 좌표를 세션 메타에 자동 적재. `get_initial_meta()`, `_build_agent()`에서 사서 도구 호출 시 기본 좌표 fallback 주입.
+  3. **Task 2: K8s ConfigMap 및 환경 설정에 프롬프트 캐싱 활성화**:
+     - `k8s/base/configmap.yaml` 및 `.env.example`에 `ENABLE_PROMPT_CACHING: "true"`, `DEFAULT_LATITUDE: "37.5145"`, `DEFAULT_LONGITUDE: "127.1058"` 반영.
+  4. **Task 3: 단위 테스트 및 정적 분석 무회귀 검증**:
+     - `test_orchestrator_service.py`에 기본 좌표 자동 적재 및 사서 도구 전달 검증 테스트 추가.
+     - `test_safety_gate.py`, `test_input_gate.py`의 비동기 세션 메타 mock 보강.
+     - 정적 분석(`ruff check .`, `mypy .`) 100% 통과, 단위 테스트 295건 전체 통과 (`pytest -m "not integration"`).
+     - `kubectl kustomize k8s/overlays/dev` 문법 검증 완료.
+  5. **커밋 및 PR 생성**:
+     - 커밋 `ca874ae` 생성, 원격 브랜치 푸시 및 `develop` 대상 PR #60 오픈 완료.
+
+### 다음 세션이 할 일
+1. **PR #60 코드 리뷰 및 머지 (develop)** ➔ ArgoCD / dev 자동 배포 확인.
+2. **dev 배포 후 실측 검증 (Task 4)**:
+   - `kubectl exec ... -- env`로 `ENABLE_PROMPT_CACHING=true` 및 `DEFAULT_LATITUDE/LONGITUDE` 확인.
+   - 실제 채팅 요청을 2~3회 연속 실행 후 `kubectl logs`에서:
+     - 사서 응답에 송파구 실시간 날씨가 정상 반영되는지 확인.
+     - `strands_metrics.accumulated_usage`에 `cacheReadInputTokens` 발생 여부 및 TTFT 단축 수치 실측.
+3. **오케스트레이터 3사이클 ➔ 2사이클 축소 검토**:
+   - 명시적 도서 추천 질문 시 사서 상담(`consult_librarian`)을 스킵하거나 1회로 압축할 수 있도록 오케스트레이터 프롬프트 가드레일 튜닝.
+

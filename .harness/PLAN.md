@@ -1,68 +1,34 @@
 # PLAN — backend-discovery
 
-## [진행 중] CLIAR-286: K8s ConfigMap 모델 ID 코드-배포 동기화 및 가드레일 개선
+## [확정] CLIAR-289: Bedrock 프롬프트 캐싱 활성화 및 송파 교육장 기본 좌표 설정
 
-**발견 경위 (2026-09-04, PR #57 dev 실측 중)**: 사용자가 "비 올 때 읽을만한 책 추천해줘"
-(가정법)에 대해 응답이 실제 현재 날씨("오늘같이 비 내리는 날엔")로 오인 반영되고, 44초가
-걸린 것을 제보. 조사 중 `kubectl exec ... -- env`로 dev 파드의 실제 환경변수를 직접 확인한
-결과, **`src/discovery/core/config.py`의 파이썬 기본값(Haiku 4.5, CLIAR-278에서 이미
-교체됨)과 무관하게 `k8s/base/configmap.yaml`이 구형 값을 그대로 하드코딩하고 있어 dev가
-실제로는 한 번도 Haiku 4.5로 돌아간 적이 없었다**는 것이 코드로 확인됨(Pydantic Settings는
-환경변수를 코드 기본값보다 우선함).
+**배경**:
+1. **프롬프트 캐싱 활성화 (속도/비용 최적화)**:
+   - 현재 오케스트레이터 및 추천 에이전트의 시스템 프롬프트 + 도구 스키마는 매 턴당 5,000~10,000 토큰에 달함.
+   - Bedrock Anthropic 자동 캐싱 최소 기준(2,048 토큰)을 충분히 상회하나, 현재 `ENABLE_PROMPT_CACHING=false`로 꺼져 있어 캐시 히트율이 0%임.
+   - `ENABLE_PROMPT_CACHING=true`를 활성화하여 오케스트레이터의 3사이클 누적 입력 비용 및 TTFT(첫 토큰 지연)를 대폭 단축한다.
+2. **송파 교육장 기본 좌표 설정 (UX 개선 및 실시간 날씨 연동)**:
+   - 프론트엔드 대화 중 위치 권한 팝업이 뜨면 대화 흐름이 끊기고 지연이 발생하는 문제를 해소하기 위해, 기본 좌표를 송파 교육장(위도 37.5145, 경도 127.1058)으로 설정.
+   - 클라이언트 요청에 좌표가 없을 경우 기본 송파 좌표를 세션 메타에 자동 적재하여 `backend-librarian`으로 전달.
+   - 사서 서버는 이 좌표로 Open-Meteo를 매 턴 실시간 조회하므로 실시간 날씨 정확도 100% 유지 + 권한 팝업 UX 허들 제거.
 
-**확인된 사실 (코드 직접 읽고 dev 파드 실측으로 검증 완료)**:
-- dev 파드 실제 환경변수(`kubectl exec backend-discovery-... -n dpyb-discovery-dev -- env`):
-  ```
-  LIBRARIAN_MODEL_ID=global.anthropic.claude-sonnet-5
-  ORCHESTRATOR_MODEL_ID=global.anthropic.claude-sonnet-5
-  GENRE_CLASSIFIER_MODEL_ID=anthropic.claude-3-haiku-20240307-v1:0
-  ```
-- `config.py` 코드 기본값(43~44, 56행)은 이미 셋 다 Haiku 4.5
-  (`global.anthropic.claude-haiku-4-5-20251001-v1:0`)로 CLIAR-278/282에서 교체돼 있음.
-- `k8s/base/configmap.yaml`(15~16, 21행)은 `LIBRARIAN_MODEL_ID`/`ORCHESTRATOR_MODEL_ID`를
-  `global.anthropic.claude-sonnet-5`로, `GENRE_CLASSIFIER_MODEL_ID`를 구형
-  `anthropic.claude-3-haiku-20240307-v1:0`으로 여전히 하드코딩 중.
-- `k8s/overlays/dev/configmap-patch.yaml`은 이 세 키를 오버라이드하지 않음(OTel/CloudWatch/
-  `LIBRARIAN_AGENT_URL`만 설정) → base 값이 그대로 dev에 적용됨.
-- `k8s/overlays/prod/configmap-patch.yaml`은 전체가 주석 처리(prod 미사용 확정 상태) →
-  base를 고치면 prod에도 자동으로 올바른 값이 적용됨(별도 patch 불필요).
-- **사서 에이전트(`LIBRARIAN_MODEL_ID`)는 별도 확인 필요**: dev overlay에
-  `LIBRARIAN_AGENT_URL`이 설정돼 있어 사서 상담이 `backend-discovery` 프로세스가 아니라
-  원격 `backend-librarian` 서비스로 위임되는 구조(`librarian_tool.py`, 이전 세션 확인).
-  즉 `backend-discovery`의 `LIBRARIAN_MODEL_ID` 환경변수가 실제로 이 경로에서 쓰이는지는
-  불확실 — `backend-librarian`이 실제로 어떤 모델을 쓰는지는 그 별도 저장소를 봐야
-  확정되며, 이번 티켓 범위 밖(명시).
-
-**이번 티켓의 스코프 (2개 트랙, 별도 PR로 분리)**:
-
-### 트랙 A: K8s ConfigMap 모델 ID 동기화 (완료 · dev 배포 및 실측 완료)
-- [x] 1. `k8s/base/configmap.yaml`의 `LIBRARIAN_MODEL_ID`/`ORCHESTRATOR_MODEL_ID`를
-   `global.anthropic.claude-haiku-4-5-20251001-v1:0`로, `GENRE_CLASSIFIER_MODEL_ID`를
-   동일 값으로 교체(코드 기본값과 1:1 일치시킴). 상단 주석("Claude Sonnet 5 글로벌
-   프로파일 사용 시 us-east-1 필수")도 Haiku 4.5 기준으로 갱신.
-- [x] 2. `.env.example`도 동일하게 동기화(코드-configmap-예시 3자 일치 원칙, 이미
-   `config.py` 기본값과는 일치하는지 확인 필요 — 스크리닝 후 다르면 맞춘다).
-- [x] 3. `kubectl kustomize k8s/overlays/dev` 문법 검증 및 기존 단위 테스트 무회귀 검증.
-- [x] 4. dev 재배포 후 `kubectl exec ... -- env`로 실제 반영 재확인 (PR #58 머지 완료,
-   Haiku 4.5 파드 정상 구동 확인).
-- [x] 5. 실측 결과: 전체 소요시간 **44.8초 ➔ 18.6초 (58% 단축)**, TTFT **9.26초 ➔ 1.61초 (82% 단축)**.
-- [x] 6. `backend-librarian`이 실제로 어떤 모델을 쓰는지는 그 저장소 확인이 필요하다는 점을
-   `.harness/BACKLOG.md`에 후속 조사 항목으로 남긴다(이번 PR 범위 밖).
-
-### 긴급 수정: 도서 추천 카드 유실 버그 해결 (`extract_fallback_text`)
-- [x] Haiku 4.5의 `consult_librarian` + `recommend_books` 동시 호출 시, `extract_fallback_text`가
-  사서 상담 텍스트를 먼저 반환하여 `### 📖` 카드가 누락되던 버그 수정 (카드 서식 포함 블록 우선 수집).
-- [x] 단위 테스트(`test_extract_fallback_text` 다중 도구 결과 케이스) 추가 및 검증.
-
-### 트랙 B: 가정법/실제 상황 구분 프롬프트 가드레일 (진행 중)
-- [x] 1. `orchestrator/agent.py`의 `SHARED_GUARDRAILS`에 "사용자 발화가 가정법·조건문
-   (~할 때, 만약 ~라면 등)이면 시그널을 실제 현재 상황으로 서술하지 말 것" 지시 추가.
-- [ ] 2. `librarian_tool.py`의 `format_signals_for_llm()`가 만드는 "- 현재 날씨: ..." 텍스트
-   블록에도 시제 관련 안내를 보강할지 여부는 A안 프롬프트만으로 충분한지 실측 후 판단.
-- [x] 3. 단위 테스트로 프롬프트 문자열 및 로직 검증 무회귀 통과.
-- [ ] 4. dev 재배포 후 "비 올 때/만약 눈이 온다면" 등 가정법 질의로 재현 테스트.
-
-**브랜치**: `CLIAR-286-K8s-Model-Config-Sync` (`develop`에서 분기)
+**작업 체크리스트**:
+- [x] **Task 1: 송파 교육장 기본 좌표 설정 및 세션 메타 자동 적재**
+  - `src/discovery/core/config.py`: `default_latitude: float = 37.5145`, `default_longitude: float = 127.1058` 필드 추가.
+  - `.env.example`: `DEFAULT_LATITUDE=37.5145`, `DEFAULT_LONGITUDE=127.1058` 반영.
+  - `src/discovery/application/orchestrator_service.py`: `chat()` 및 `stream_chat()`에서 클라이언트 요청 및 기존 세션 메타에 좌표가 없으면 `settings.default_latitude`/`settings.default_longitude`를 기본값으로 세션 메타에 저장하고 사서 도구로 전달.
+- [x] **Task 2: K8s ConfigMap 및 환경 설정에 프롬프트 캐싱 활성화**
+  - `k8s/base/configmap.yaml`: `ENABLE_PROMPT_CACHING: "true"` 추가, `DEFAULT_LATITUDE: "37.5145"`, `DEFAULT_LONGITUDE: "127.1058"` 추가.
+  - `.env.example`: `ENABLE_PROMPT_CACHING=true` 주석 및 기본값 갱신.
+- [x] **Task 3: 단위 테스트 및 정적 분석 무회귀 검증**
+  - `tests/unit/test_orchestrator_service.py`: 좌표 미제공 시 기본 송파 좌표가 세션 메타 및 사서 도구로 전달되는지 검증 테스트 추가.
+  - `uv run ruff check .`, `uv run mypy .`, `uv run pytest -m "not integration"` (295 passed) 100% 통과 확인.
+  - `kubectl kustomize k8s/overlays/dev` 문법 검증.
+- [ ] **Task 4: dev 배포 후 실측 검증 (사용자 승인 시)**
+  - `kubectl exec ... -- env`로 `ENABLE_PROMPT_CACHING=true` 및 기본 좌표 주입 확인.
+  - dev 환경에서 대화 요청 시:
+    1. 사서 응답에 송파구 실시간 날씨가 정상 반영되는지 확인.
+    2. `kubectl logs`에서 `strands_metrics.accumulated_usage`의 `cacheReadInputTokens` 발생 및 TTFT 단축 확인.
 
 ---
 

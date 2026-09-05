@@ -97,6 +97,7 @@ async def test_orchestrator_chat_bypasses_llm_on_invalid_input() -> None:
     mock_session_store = MagicMock()
     mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "cat"})
     mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.update_session_meta = AsyncMock()
     mock_session_store.append_turn = AsyncMock()
 
     settings = Settings(
@@ -130,6 +131,7 @@ async def test_orchestrator_stream_chat_bypasses_llm_on_invalid_input() -> None:
     mock_session_store = MagicMock()
     mock_session_store.get_session_meta = AsyncMock(return_value={"librarian_id": "stork"})
     mock_session_store.get_history = AsyncMock(return_value=[])
+    mock_session_store.update_session_meta = AsyncMock()
     mock_session_store.append_turn = AsyncMock()
 
     settings = Settings(
