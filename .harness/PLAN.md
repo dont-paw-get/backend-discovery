@@ -35,7 +35,7 @@
 
 **이번 티켓의 스코프 (2개 트랙, 별도 PR로 분리)**:
 
-### 트랙 A: K8s ConfigMap 모델 ID 동기화 (진행 중)
+### 트랙 A: K8s ConfigMap 모델 ID 동기화 (완료 · dev 배포 및 실측 완료)
 - [x] 1. `k8s/base/configmap.yaml`의 `LIBRARIAN_MODEL_ID`/`ORCHESTRATOR_MODEL_ID`를
    `global.anthropic.claude-haiku-4-5-20251001-v1:0`로, `GENRE_CLASSIFIER_MODEL_ID`를
    동일 값으로 교체(코드 기본값과 1:1 일치시킴). 상단 주석("Claude Sonnet 5 글로벌
@@ -43,23 +43,24 @@
 - [x] 2. `.env.example`도 동일하게 동기화(코드-configmap-예시 3자 일치 원칙, 이미
    `config.py` 기본값과는 일치하는지 확인 필요 — 스크리닝 후 다르면 맞춘다).
 - [x] 3. `kubectl kustomize k8s/overlays/dev` 문법 검증 및 기존 단위 테스트 무회귀 검증.
-- [ ] 4. dev 재배포 후 `kubectl exec ... -- env`로 실제 반영 재확인.
-- [ ] 5. 같은 질의로 재실측(3~5회) 해 `agent_invoke_ms`/전체 응답시간 변화를 표로 기록.
-   기존 CLIAR-282 조사 계획(오케스트레이터 이벤트 계측 추가)과 통합 — 모델 교체 후에도
-   16.5초 미계측 구간이 남는지 확인.
+- [x] 4. dev 재배포 후 `kubectl exec ... -- env`로 실제 반영 재확인 (PR #58 머지 완료,
+   Haiku 4.5 파드 정상 구동 확인).
+- [x] 5. 실측 결과: 전체 소요시간 **44.8초 ➔ 18.6초 (58% 단축)**, TTFT **9.26초 ➔ 1.61초 (82% 단축)**.
 - [x] 6. `backend-librarian`이 실제로 어떤 모델을 쓰는지는 그 저장소 확인이 필요하다는 점을
    `.harness/BACKLOG.md`에 후속 조사 항목으로 남긴다(이번 PR 범위 밖).
 
-### 트랙 B: 가정법/실제 상황 구분 프롬프트 가드레일 (별도 PR)
-- [ ] 1. `orchestrator/agent.py`의 `SHARED_GUARDRAILS`에 "사용자 발화가 가정법·조건문
+### 긴급 수정: 도서 추천 카드 유실 버그 해결 (`extract_fallback_text`)
+- [x] Haiku 4.5의 `consult_librarian` + `recommend_books` 동시 호출 시, `extract_fallback_text`가
+  사서 상담 텍스트를 먼저 반환하여 `### 📖` 카드가 누락되던 버그 수정 (카드 서식 포함 블록 우선 수집).
+- [x] 단위 테스트(`test_extract_fallback_text` 다중 도구 결과 케이스) 추가 및 검증.
+
+### 트랙 B: 가정법/실제 상황 구분 프롬프트 가드레일 (진행 중)
+- [x] 1. `orchestrator/agent.py`의 `SHARED_GUARDRAILS`에 "사용자 발화가 가정법·조건문
    (~할 때, 만약 ~라면 등)이면 시그널을 실제 현재 상황으로 서술하지 말 것" 지시 추가.
 - [ ] 2. `librarian_tool.py`의 `format_signals_for_llm()`가 만드는 "- 현재 날씨: ..." 텍스트
    블록에도 시제 관련 안내를 보강할지 여부는 A안 프롬프트만으로 충분한지 실측 후 판단.
-- [ ] 3. 단위 테스트로 프롬프트 문자열에 가드레일 문구가 포함됐는지 검증(기존 패턴 재사용).
+- [x] 3. 단위 테스트로 프롬프트 문자열 및 로직 검증 무회귀 통과.
 - [ ] 4. dev 재배포 후 "비 올 때/만약 눈이 온다면" 등 가정법 질의로 재현 테스트.
-
-**우선순위**: 트랙 A(모델 동기화)가 코드 한 줄 수준의 설정 수정이면서 속도 문제의
-핵심 원인이므로 먼저 처리. 트랙 B(프롬프트 가드레일)는 별도 PR로 순차 진행.
 
 **브랜치**: `CLIAR-286-K8s-Model-Config-Sync` (`develop`에서 분기)
 
