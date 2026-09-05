@@ -34,7 +34,7 @@ from typing import Any
 
 import httpx
 
-CSV_PATH = Path(__file__).resolve().parent.parent / "chatbot_qa_testv2.csv"
+CSV_PATH = Path(__file__).resolve().parent / "data" / "chatbot_qa_testv2.csv"
 RESULTS_DIR = Path(__file__).resolve().parent / "qa_results"
 
 # 5턴 이상 연속 대화, 세션 격리 등 여러 요청이 하나의 시나리오를 구성하는 카테고리.

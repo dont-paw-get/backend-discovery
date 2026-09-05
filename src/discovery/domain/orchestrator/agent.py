@@ -173,6 +173,8 @@ def create_orchestrator_agent(
     system_prompt: str | None = None,
     enable_prompt_caching: bool = False,
     max_tokens: int = 1024,
+    guardrail_id: str | None = None,
+    guardrail_version: str | None = None,
 ) -> Agent:
     """오케스트레이터 에이전트를 생성한다.
 
@@ -190,6 +192,8 @@ def create_orchestrator_agent(
         system_prompt: 명시적 시스템 프롬프트. None이면 librarian_id에 맞는 전용 프롬프트 주입.
         enable_prompt_caching: Bedrock 자동 프롬프트 캐싱 활성화 여부.
         max_tokens: 최대 출력 토큰 수 (서두 멘트 및 도구 라우팅에 최적화된 1024).
+        guardrail_id: Bedrock Guardrail 식별자 (선택).
+        guardrail_version: Bedrock Guardrail 버전 (선택, 기본 DRAFT).
 
     Note:
         `temperature`와 `top_p`는 Claude Sonnet 5에서 둘 다 deprecated되어
@@ -208,6 +212,9 @@ def create_orchestrator_agent(
     if enable_prompt_caching:
         model_kwargs["cache_config"] = CacheConfig(strategy="auto")
         model_kwargs["cache_tools"] = "default"
+    if guardrail_id:
+        model_kwargs["guardrail_id"] = guardrail_id
+        model_kwargs["guardrail_version"] = guardrail_version or "DRAFT"
 
     model = BedrockModel(**model_kwargs)
     effective_prompt = system_prompt or get_orchestrator_system_prompt(librarian_id)

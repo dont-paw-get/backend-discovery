@@ -37,6 +37,12 @@ data:
   LIBRARY_HTTP_TIMEOUT_SECONDS: "10"
   # CORS 허용 오리진 (콤마로 구분). 프론트 배포 도메인 + 로컬 개발 주소.
   CORS_ALLOWED_ORIGINS: "https://d1wab52ln5by5k.cloudfront.net,http://localhost:3000"
+  # CLIAR-276: AWS CloudWatch 커스텀 메트릭 (비용/토큰/지연시간/캐시) 활성화
+  ENABLE_CLOUDWATCH_METRICS: "true"
+  # CLIAR-298: Amazon Bedrock Guardrails (프롬프트 공격 차단, 탈옥 방어, PII 마스킹)
+  ENABLE_BEDROCK_GUARDRAIL: "false"
+  BEDROCK_GUARDRAIL_ID: ""
+  BEDROCK_GUARDRAIL_VERSION: "DRAFT"
   # OpenTelemetry 분산 트레이싱: OTEL_EXPORTER_OTLP_ENDPOINT가 설정된 환경에서만
   # 활성화된다(미설정 시 앱은 정상 기동, export 없음). 환경별 값은 overlay에서 주입한다
   # (dev: overlays/dev/configmap-patch.yaml). 관측 설정은 비밀이 아니므로 ConfigMap에 둔다.
