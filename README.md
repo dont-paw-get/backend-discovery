@@ -419,4 +419,26 @@ uv run mypy .
 uv run pytest -m "not integration"
 ```
 
+---
+
+## 📊 관측 가능성 (Observability)
+
+- **메트릭**: Prometheus (`/metrics`) - FastAPI ASGI 미들웨어 기반 HTTP 요청 지연/처리량/에러율 수집 (`ServiceMonitor` 30초 스크레이핑)
+- **트레이싱**: OpenTelemetry (OTLP) - W3C `traceparent` 헤더 전파로 사서(`backend-librarian`) 및 도서(`backend-book`) 서비스 간 분산 추적 (Grafana Tempo)
+- **로깅**: 구조화 JSON 로깅 (Grafana Alloy + Loki 수집, PII 및 LLM 프롬프트 원문 마스킹)
+- **비용 & LLM 관측**: AWS CloudWatch 커스텀 메트릭 (`DPYB/Discovery/LLM`) - Bedrock Haiku 4.5 토큰 사용량, 실시간 비용(USD), TTFT 및 지연 시간 계측
+
+---
+
+## 🚀 CI / CD 파이프라인
+
+- **CI (지속적 통합)**:
+  - `pr-convention-check.yml`: PR 제목/본문 컨벤션(`[CLIAR-XX]`) 자동 검증
+  - 코드 품질 검증: PR 생성 전 `ruff check`, `mypy`, `pytest`를 통한 린트·타입·단위 테스트 사전 검증
+- **CD (지속적 배포)**:
+  - `build-push-ecr.yml`: `develop` 브랜치 병합 시 AWS ECR 멀티플랫폼 컨테이너 이미지 자동 빌드 및 푸시
+  - **GitOps 배포**: Kustomize 이미지 태그 자동 갱신 ➔ ArgoCD가 EKS `dev` 네임스페이스에 무중단 롤링 업데이트 배포
+  - **K8s 인프라 연동**: `ServiceMonitor`를 통한 Prometheus 메트릭 자동 수집 및 OTel Collector(4318) 엔드포인트 자동 주입
+
+
 

@@ -68,5 +68,6 @@
 | CLIAR-298 Bedrock Guardrails 보안 게이트 구축 | ✅ 코드 완료 | Task 1(설정 분리: enable_bedrock_guardrail, id, version), Task 2(BedrockGuardrailGate 신설, apply_guardrail 비동기 호출 및 fail-open), Task 3(OrchestratorService chat/stream_chat 단락 배선 및 에이전트 연동), Task 4(단위 테스트 12건 추가, 총 317건 100% 통과), Task 5(AWS 콘솔 가이드 작성) 완료 |
 | README 및 아키텍처 다이어그램 최신화 | ✅ 완료 | 시스템 통합 아키텍처(Bedrock Guardrails 게이트 연동, 고해상도 PNG 렌더링), Agent-as-a-Tool 토폴로지, 상세 파이프라인 동기화, `backend-librarian` 레포지토리 동기화 및 커밋 완료 |
 | CLIAR-298 핵심 도메인 기능 및 CloudWatch 대시보드 IaC 문서화 | ✅ 완료 | CloudWatch LLM 대시보드 CloudFormation IaC(`cloudwatch-dashboard-stack.yaml`), 알라딘 서지 검증 파이프라인(`aladin-book-verification.md`), 4계층 안전/가드레일 및 Fallback 엔진(`multi-tier-safety-and-fallback.md`), 16개 표준 장르 분류 파이프라인(`genre-classification-pipeline.md`), 기술 문서 종합 색인(`docs/README.md`) 작성 및 ARCHITECTURE 동기화 완료 |
+| Prometheus/Tempo/Loki 관측 스택 및 GitHub Actions/ArgoCD CI/CD 문서화 | ✅ 완료 | `docs/observability/prometheus-grafana-loki-guide.md`(Micrometer 호환 `http_server_requests_seconds` 메트릭, ServiceMonitor 스크레이핑, OTel 자동계측·`_SanitizingSpanExporter` 스크러빙, stdout JSON 로깅·Loki correlation) 및 `docs/cicd/github-actions-argocd-guide.md`(`pr-convention-check.yml`/`build-push-ecr.yml` 워크플로우, Kustomize `newTag` GitOps 커밋, ArgoCD Application dev/prod sync 정책) 신설, `docs/README.md` 인덱스 갱신 완료 |
 
 
