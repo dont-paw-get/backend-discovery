@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     # Claude Sonnet 5 글로벌 프로파일 사용 시 us-east-1 필수
     aws_region: str | None = "us-east-1"
     chat_history_max_turns: int = 20
-    chat_session_ttl_seconds: int = 3600
+    # CLIAR-266: 마이페이지(대화 히스토리 조회) 연동 전까지 세션 만료로 대화 맥락이
+    # 끊기는 것을 방지하기 위해 1시간(3600초)에서 30일(2,592,000초)로 상향. CLIAR-294에서
+    # 검색/서지/장르 Redis 캐시는 이미 30일로 맞춰뒀으나 대화 세션 TTL만 누락되어 있었음.
+    chat_session_ttl_seconds: int = 2_592_000
     # 추천 에이전트 및 오케스트레이터 모델: Claude Haiku 4.5 글로벌 크로스리전 프로필
     # (CLIAR-278, 2026-09-04). Sonnet 5(`global.anthropic.claude-sonnet-5`)보다 레이턴시가
     # 짧은 경량 모델로 교체. 모델 ID는 AWS 공식 문서 기준
