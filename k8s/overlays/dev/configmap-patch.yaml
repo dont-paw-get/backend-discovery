@@ -10,8 +10,12 @@ data:
   # 커스텀 메트릭(Bedrock 비용 USD, 토큰 사용량, 검색 캐시 히트율) 발행 스위치.
   ENABLE_CLOUDWATCH_METRICS: "true"
   # CLIAR-298: Amazon Bedrock Guardrails 활성화 (CloudFormation dpyb-discovery-guardrail 스택)
+  # 2026-09-06: 기존 ID(35g4g149bbe7)는 us-east-1에 생성되어 있었으나, discovery pod의
+  # 실제 Bedrock 호출 리전(IRSA가 주입하는 AWS_REGION=ap-northeast-2, 서울)과 불일치해
+  # ConverseStream이 "guardrail identifier ... does not exist" ValidationException으로
+  # 매번 실패했다(BEDROCK_FALLBACK). 서울 리전에 동일 스택을 재배포해 새 ID로 교체.
   ENABLE_BEDROCK_GUARDRAIL: "true"
-  BEDROCK_GUARDRAIL_ID: "35g4g149bbe7"
+  BEDROCK_GUARDRAIL_ID: "m81pa4dhk7pc"
   BEDROCK_GUARDRAIL_VERSION: "1"
   # --- OpenTelemetry 분산 트레이싱 (dev) ---
   # OTel Collector(OTLP HTTP)로 전송 → Grafana Tempo. stdout JSON 로그는 Alloy가
