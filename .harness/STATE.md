@@ -71,3 +71,6 @@
 | Prometheus/Tempo/Loki 관측 스택 및 GitHub Actions/ArgoCD CI/CD 문서화 | ✅ 완료 | `docs/observability/prometheus-grafana-loki-guide.md`(Micrometer 호환 `http_server_requests_seconds` 메트릭, ServiceMonitor 스크레이핑, OTel 자동계측·`_SanitizingSpanExporter` 스크러빙, stdout JSON 로깅·Loki correlation) 및 `docs/cicd/github-actions-argocd-guide.md`(`pr-convention-check.yml`/`build-push-ecr.yml` 워크플로우, Kustomize `newTag` GitOps 커밋, ArgoCD Application dev/prod sync 정책) 신설, `docs/README.md` 인덱스 갱신 완료 |
 
 
+
+
+| CLIAR-300 dev Bedrock Guardrail 리전 불일치 장애 대응 | ✅ 완료 (PR #71 develop 머지, 실제 정상화 확인) | `BEDROCK_GUARDRAIL_ID`(us-east-1 생성)가 discovery pod의 실제 Bedrock 호출 리전(서울)과 불일치해 모든 채팅 요청이 `ValidationException`으로 실패(`[BEDROCK_FALLBACK]`)하던 장애를 해결. 리전 불일치가 모델 호출 자체를 막는다는 최초 가설은 pod 내부 직접 검증으로 반증(Haiku 4.5는 서울에서 정상 호출됨), 실제 원인은 무효한 가드레일 ID뿐임을 확정. `guardrail-stack.yaml`을 ap-northeast-2에 재배포해 새 GuardrailId(`m81pa4dhk7pc`)로 교체, us-east-1 기존 스택 삭제. ArgoCD GitOps 클러스터 특성(kubectl 직접 조작 무효, ConfigMap 갱신 후 pod rollout restart 별도 필요) 확인. pod 내부 `ApplyGuardrail`/`Converse` 재현으로 정상 동작 최종 검증 완료 |
