@@ -146,3 +146,15 @@ def test_librarian_prompts_contain_hallucination_guard() -> None:
         assert "가상의 제목/저자" in prompt
         assert "실존 도서만" in prompt
 
+
+def test_librarian_prompts_restrict_to_domestic_and_post_2000_books() -> None:
+    """국내 정발 도서, 2000년 이후 출간작만 추천하도록 제한하는 지침이 존재해야 한다."""
+    from discovery.domain.librarian.agent import get_librarian_system_prompt
+
+    for librarian_id in ("cat", "stork"):
+        prompt = get_librarian_system_prompt(librarian_id)
+        assert "국내 출간 및 최신성 제한" in prompt
+        assert "정식 국내 출간(정발) 도서만 추천" in prompt
+        assert "2000년 이후에 국내에서 출간된 도서만" in prompt
+        assert "고전문학" in prompt
+
