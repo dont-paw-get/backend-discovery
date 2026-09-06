@@ -147,14 +147,19 @@ def test_librarian_prompts_contain_hallucination_guard() -> None:
         assert "실존 도서만" in prompt
 
 
-def test_librarian_prompts_restrict_to_domestic_and_post_2000_books() -> None:
-    """국내 정발 도서, 2000년 이후 출간작만 추천하도록 제한하는 지침이 존재해야 한다."""
+def test_librarian_prompts_prefer_domestic_famous_recent_books() -> None:
+    """국내 검색 가능·유명·최신작을 우선하고, 2000년 이전 고전은 배제하는 지침이 존재해야 한다.
+
+    CLIAR-305 후속(2026-09-06): 해외 원서 전면 금지에서 "국내 정발된 유명 번역서는 허용,
+    무명/미출간작 회피, 최신작 우선"으로 완화. 사용자가 명시적으로 고전을 요청하면 예외.
+    """
     from discovery.domain.librarian.agent import get_librarian_system_prompt
 
     for librarian_id in ("cat", "stork"):
         prompt = get_librarian_system_prompt(librarian_id)
-        assert "국내 출간 및 최신성 제한" in prompt
-        assert "정식 국내 출간(정발) 도서만 추천" in prompt
-        assert "2000년 이후에 국내에서 출간된 도서만" in prompt
+        assert "국내 검색 가능·유명·최신작 우선" in prompt
+        assert "인지도가 높은 유명 도서" in prompt
+        assert "되도록 최근에 출간된 도서" in prompt
         assert "고전문학" in prompt
+        assert "명시적으로 고전을 요청하지 않는 한" in prompt
 
