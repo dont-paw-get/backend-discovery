@@ -41,6 +41,7 @@ from discovery.domain.orchestrator.librarian_response import (
 )
 from discovery.domain.orchestrator.library_response import LibraryBookItem
 from discovery.domain.orchestrator.safety_gate import evaluate_safety_gate
+from discovery.domain.orchestrator.switch_gate import evaluate_switch_gate
 from discovery.domain.orchestrator.tools.librarian_tool import (
     ConsultLibrarianTool,
     evaluate_local_persona_response,
@@ -413,6 +414,44 @@ class OrchestratorService:
             )
             return guardrail_response, None, None, None, None
 
+        # 사서 전환 결정론적 게이트: "블루/슈빌로 바꿔줘"처럼 상대 사서로의 명시적
+        # 전환 요청이면 LLM 도구 호출을 기다리지 않고 즉시 switch_to를 채워 반환한다
+        # (Haiku가 도구 호출을 확률적으로 건너뛰어 전환이 실패하던 버그 방어).
+        switch_response = evaluate_switch_gate(
+            message,
+            meta.get("librarian_id"),
+            latitude=effective_latitude,
+            longitude=effective_longitude,
+        )
+        if switch_response is not None and switch_response.switch_to is not None:
+            await self._session_store.append_turn(
+                session_id, {"role": "user", "content": message}
+            )
+            await self._session_store.append_turn(
+                session_id, {"role": "assistant", "content": switch_response.message}
+            )
+            # 전환 확정: 세션 메타의 활성 사서를 대상 사서로 갱신
+            await self._session_store.update_session_meta(
+                session_id, librarian_id=switch_response.switch_to.id
+            )
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            log_agent_metrics(
+                phase="orchestrator",
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                mode="sync",
+                message_length=len(message),
+                metrics_summary=None,
+                direct_metrics={"total_duration_ms": duration_ms, "switch_gate_triggered": True},
+            )
+            return (
+                switch_response.message,
+                switch_response.switch_to,
+                switch_response.signals,
+                None,
+                None,
+            )
+
         switch_to_holder: list[SwitchToSuggestion] = []
         signals_holder: list[LibrarianSignals] = []
         library_books_holder: list[LibraryBookCard] = []
@@ -616,6 +655,34 @@ class OrchestratorService:
         if librarian_id is not None:
             await self._session_store.update_session_meta(session_id, librarian_id=librarian_id)
 
+        # 사서 전환 결정론적 게이트: 스트리밍 헤더(X-Switch-To)가 LLM 도구 호출에
+        # 의존하지 않고 결정론적으로 채워지도록, consult보다 먼저 전환 요청을 감지한다.
+        active_librarian_id = librarian_id
+        if active_librarian_id is None:
+            meta_for_switch = await self._session_store.get_session_meta(session_id)
+            active_librarian_id = meta_for_switch.get("librarian_id")
+        switch_response = evaluate_switch_gate(
+            message,
+            active_librarian_id,
+            latitude=latitude if latitude is not None else self._settings.default_latitude,
+            longitude=longitude if longitude is not None else self._settings.default_longitude,
+        )
+        if switch_response is not None and switch_response.switch_to is not None:
+            init_duration_ms = round((time.perf_counter() - init_start) * 1000, 2)
+            log_agent_metrics(
+                phase="initial_meta",
+                session_id=session_id,
+                librarian_id=active_librarian_id or "cat",
+                mode="stream",
+                message_length=len(message),
+                metrics_summary=None,
+                direct_metrics={
+                    "total_duration_ms": init_duration_ms,
+                    "switch_gate_triggered": True,
+                },
+            )
+            return switch_response
+
         lib_res: LibrarianResponse | None = None
         if self._librarian_tool is not None:
             timeout_sec = self._settings.initial_meta_timeout_seconds
@@ -783,6 +850,42 @@ class OrchestratorService:
                 },
             )
             yield guardrail_response
+            return
+
+        # 사서 전환 결정론적 게이트: 상대 사서로의 명시적 전환 요청이면 LLM을 거치지 않고
+        # 전환 안내 문구를 단일 청크로 흘리고, 세션 메타의 활성 사서를 갱신한다.
+        # (X-Switch-To 헤더는 라우터가 get_initial_meta 결과로 이미 세팅함)
+        switch_response = evaluate_switch_gate(
+            message,
+            meta.get("librarian_id"),
+            latitude=effective_latitude,
+            longitude=effective_longitude,
+        )
+        if switch_response is not None and switch_response.switch_to is not None:
+            await self._session_store.append_turn(
+                session_id, {"role": "user", "content": message}
+            )
+            await self._session_store.append_turn(
+                session_id, {"role": "assistant", "content": switch_response.message}
+            )
+            await self._session_store.update_session_meta(
+                session_id, librarian_id=switch_response.switch_to.id
+            )
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            log_agent_metrics(
+                phase="orchestrator",
+                session_id=session_id,
+                librarian_id=meta.get("librarian_id"),
+                mode="stream",
+                message_length=len(message),
+                metrics_summary=None,
+                direct_metrics={
+                    "ttfb_ms": duration_ms,
+                    "total_duration_ms": duration_ms,
+                    "switch_gate_triggered": True,
+                },
+            )
+            yield switch_response.message
             return
 
         switch_to_holder: list[SwitchToSuggestion] = []

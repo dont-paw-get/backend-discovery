@@ -554,3 +554,167 @@ async def test_recommend_uses_cached_isbn_and_pages_without_http_call(
     mock_metadata_client.fetch_isbn_only.assert_not_awaited()
     mock_metadata_client.fetch_total_pages.assert_not_awaited()
     mock_metadata_client.cache_isbn_and_pages.assert_not_awaited()
+
+
+
+# ---------------------------------------------------------------------------
+# CLIAR-305 후속: ISBN 미검증(알라딘 미식별) 도서 카드 제거
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_recommend_removes_isbn_unverified_book_when_others_verified(
+    mocker: MockerFixture,
+) -> None:
+    """auth_token이 있고 검증된 도서가 하나라도 남을 때, ISBN을 못 찾은 도서 카드는
+    마크다운에서 제거된다(쪽수·장르가 빈 카드 노출 방지)."""
+    mock_search_tool = mocker.MagicMock()
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = mocker.MagicMock()
+    raw_text = (
+        "### 📖 사피엔스\n"
+        "- **저자**: 유발 하라리 (600쪽)\n"
+        "- **추천 이유**: 인류사 통찰.\n\n"
+        "### 📖 듣도보도못한책\n"
+        "- **저자**: 무명 저자 (300쪽)\n"
+        "- **추천 이유**: 알라딘에 없는 책."
+    )
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mocker.patch(
+        "discovery.domain.orchestrator.tools.recommend_tool.create_librarian_agent",
+        return_value=mock_agent,
+    )
+
+    # 사피엔스는 ISBN 확보 성공, 듣도보도못한책은 실패(None)
+    async def _fetch_isbn_only(
+        title: str, author: str, auth_token: str | None = None
+    ) -> str | None:
+        return "9788934972464" if title == "사피엔스" else None
+
+    mock_metadata_client = mocker.MagicMock()
+    mock_metadata_client.get_cached_isbn_and_pages = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_isbn_only = _fetch_isbn_only
+    mock_metadata_client.fetch_total_pages = AsyncMock(return_value=636)
+    mock_metadata_client.cache_isbn_and_pages = AsyncMock()
+
+    tool_instance = RecommendBooksTool(
+        book_search_tool=mock_search_tool,
+        settings=settings,
+        book_metadata_client=mock_metadata_client,
+    )
+
+    result_text = await tool_instance.recommend(
+        query="책 2권 추천해줘", count=2, auth_token="Bearer test-jwt"
+    )
+
+    assert "### 📖 사피엔스" in result_text
+    assert "### 📖 듣도보도못한책" not in result_text
+    assert "무명 저자" not in result_text
+    assert result_text.count("### 📖") == 1
+
+
+@pytest.mark.asyncio
+async def test_recommend_keeps_all_books_when_all_unverified(
+    mocker: MockerFixture,
+) -> None:
+    """모든 도서가 ISBN 검증에 실패하면(예: 인증/네트워크 문제) 0권이 되지 않도록
+    제거하지 않고 원본을 그대로 유지한다."""
+    mock_search_tool = mocker.MagicMock()
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = mocker.MagicMock()
+    raw_text = (
+        "### 📖 책하나\n- **저자**: 저자하나 (100쪽)\n- **추천 이유**: 이유.\n\n"
+        "### 📖 책둘\n- **저자**: 저자둘 (200쪽)\n- **추천 이유**: 이유."
+    )
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mocker.patch(
+        "discovery.domain.orchestrator.tools.recommend_tool.create_librarian_agent",
+        return_value=mock_agent,
+    )
+
+    mock_metadata_client = mocker.MagicMock()
+    mock_metadata_client.get_cached_isbn_and_pages = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_isbn_only = AsyncMock(return_value=None)  # 전량 실패
+    mock_metadata_client.fetch_total_pages = AsyncMock(return_value=None)
+    mock_metadata_client.cache_isbn_and_pages = AsyncMock()
+
+    tool_instance = RecommendBooksTool(
+        book_search_tool=mock_search_tool,
+        settings=settings,
+        book_metadata_client=mock_metadata_client,
+    )
+
+    result_text = await tool_instance.recommend(
+        query="책 2권 추천해줘", count=2, auth_token="Bearer test-jwt"
+    )
+
+    # 전량 실패 시에는 제거하지 않는다(0권 방지).
+    assert "### 📖 책하나" in result_text
+    assert "### 📖 책둘" in result_text
+    assert result_text.count("### 📖") == 2
+
+
+@pytest.mark.asyncio
+async def test_recommend_skips_isbn_filter_without_auth_token(
+    mocker: MockerFixture,
+) -> None:
+    """auth_token이 없으면(무인증) 알라딘 조회가 401로 전량 실패하므로, ISBN 미검증
+    제거 필터를 건너뛰어 기존 동작(원본 유지)을 보존한다."""
+    mock_search_tool = mocker.MagicMock()
+    settings = Settings(
+        redis_url="redis://localhost:6379",
+        internal_api_token="test-token",
+        tavily_api_key="test-tavily-key",
+    )
+
+    mock_agent = mocker.MagicMock()
+    raw_text = (
+        "### 📖 사피엔스\n- **저자**: 유발 하라리 (600쪽)\n- **추천 이유**: 인류사.\n\n"
+        "### 📖 듣도보도못한책\n- **저자**: 무명 저자 (300쪽)\n- **추천 이유**: 없음."
+    )
+    mock_result = mocker.MagicMock()
+    mock_result.message = {"role": "assistant", "content": [{"text": raw_text}]}
+    mock_agent.invoke_async = AsyncMock(return_value=mock_result)
+    mocker.patch(
+        "discovery.domain.orchestrator.tools.recommend_tool.create_librarian_agent",
+        return_value=mock_agent,
+    )
+
+    async def _fetch_isbn_only(
+        title: str, author: str, auth_token: str | None = None
+    ) -> str | None:
+        return "9788934972464" if title == "사피엔스" else None
+
+    mock_metadata_client = mocker.MagicMock()
+    mock_metadata_client.get_cached_isbn_and_pages = AsyncMock(return_value=None)
+    mock_metadata_client.fetch_isbn_only = _fetch_isbn_only
+    mock_metadata_client.fetch_total_pages = AsyncMock(return_value=636)
+    mock_metadata_client.cache_isbn_and_pages = AsyncMock()
+
+    tool_instance = RecommendBooksTool(
+        book_search_tool=mock_search_tool,
+        settings=settings,
+        book_metadata_client=mock_metadata_client,
+    )
+
+    # auth_token 미전달(무인증)
+    result_text = await tool_instance.recommend(query="책 2권 추천해줘", count=2)
+
+    # 무인증이면 필터를 건너뛰므로 미검증 도서도 그대로 남는다.
+    assert "### 📖 사피엔스" in result_text
+    assert "### 📖 듣도보도못한책" in result_text
+    assert result_text.count("### 📖") == 2

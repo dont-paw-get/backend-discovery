@@ -177,11 +177,23 @@ class RecommendBooksTool:
             )
         )
 
-        for title, (verified_page, genre_response) in zip(titles, resolved, strict=True):
+        # ISBN 검증 실패(알라딘 미식별) 도서를 카드에서 제거할지 결정한다.
+        # backend-book 서지 조회는 인증 토큰이 있어야 성공하므로(무인증 401), auth_token이
+        # 없으면 전량 실패가 되어 0권이 될 수 있다. 이 경우 필터를 건너뛰어 기존 동작을 유지한다.
+        unverified_titles: list[str] = []
+
+        for title, (isbn, verified_page, genre_response) in zip(titles, resolved, strict=True):
             if verified_page:
                 markdown = _replace_page_count_for_title(markdown, title, verified_page)
             if genre_response is not None and genre_response.genre != StandardGenre.NONE:
                 markdown = _upsert_genre_for_title(markdown, title, genre_response.genre.value)
+            if isbn is None:
+                unverified_titles.append(title)
+
+        if auth_token and unverified_titles and len(unverified_titles) < len(titles):
+            # 검증된 도서가 하나라도 남는 경우에만 미검증 도서를 제거한다.
+            for title in unverified_titles:
+                markdown = _remove_book_block(markdown, title)
 
         return markdown
 
@@ -191,14 +203,18 @@ class RecommendBooksTool:
         author: str,
         needs_genre: bool,
         auth_token: str | None,
-    ) -> tuple[int | None, BookClassificationResponse | None]:
-        """한 도서의 (검증된 페이지수, 장르 분류 결과)를 확보한다.
+    ) -> tuple[str | None, int | None, BookClassificationResponse | None]:
+        """한 도서의 (확보된 ISBN, 검증된 페이지수, 장르 분류 결과)를 확보한다.
 
         `BookMetadataCache`에 히트하면 캐시된 (ISBN, 페이지수)를 그대로 쓰고 이 책에
         대한 HTTP 호출은 발생하지 않는다(장르는 캐시되지 않으므로 `needs_genre`이면
         여전히 LLM 분류를 수행한다). 캐시 미스이면 1단계(`by-title-author`)로 ISBN을
         먼저 확보한 뒤, 서로 의존성이 없는 "페이지수 2단계 조회"와 "장르 분류
         LLM 호출"을 `asyncio.gather`로 동시 실행한다.
+
+        반환하는 `isbn`이 None이면 backend-book(알라딘)에서 도서를 식별하지 못한
+        것으로, 호출부(`_verify_page_counts`)가 이 도서를 "검증 실패"로 판단해
+        카드에서 제거할지 결정한다.
         """
         client = self._book_metadata_client
         assert client is not None  # 호출부에서 이미 None 체크됨
@@ -231,7 +247,7 @@ class RecommendBooksTool:
         else:
             genre_response = await genre_task if genre_task is not None else None
 
-        return (pages, genre_response)
+        return (isbn, pages, genre_response)
 
     async def _backfill_missing_genres(
         self,
@@ -360,6 +376,26 @@ def _replace_page_count_for_title(markdown: str, title: str, verified_page: int)
         return f"{prefix}{author_only} ({verified_page}쪽){suffix}"
 
     return block_pattern.sub(_replace, markdown, count=1)
+
+
+def _remove_book_block(markdown: str, title: str) -> str:
+    """지정된 도서 제목의 `### 📖` 블록 전체를 마크다운에서 제거한다.
+
+    블록 경계는 해당 헤더부터 다음 `### 📖` 헤더 직전(또는 텍스트 끝)까지로 본다.
+    ISBN 검증 실패(알라딘 미식별) 도서를 카드에서 빼내 쪽수·장르가 비어있는 카드가
+    프론트에 노출되는 것을 방지한다(CLIAR-305 후속).
+    """
+    block_start_pattern = re.compile(r"### 📖\s*" + re.escape(title) + r"\s*\n")
+    start_match = block_start_pattern.search(markdown)
+    if not start_match:
+        return markdown
+
+    block_start = start_match.start()
+    next_header_match = re.search(r"### 📖", markdown[start_match.end() :])
+    block_end = (
+        start_match.end() + next_header_match.start() if next_header_match else len(markdown)
+    )
+    return (markdown[:block_start] + markdown[block_end:]).strip()
 
 
 def _upsert_genre_for_title(markdown: str, title: str, genre_value: str) -> str:
