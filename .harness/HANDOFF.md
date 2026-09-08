@@ -1752,3 +1752,15 @@
 3. 스트리밍 경로 전환 문구: chat(동기)은 로컬 엔진 message를 그대로 쓰고, stream은 같은
    message를 단일 청크로 흘린다 — 프론트가 스트리밍/논스트리밍 어느 쪽을 쓰는지에 따라
    전환 UX 확인 필요(현재 프론트에 "블루로 전환"/"슈빌로 전환" 버튼 있음).
+
+
+## 2026-09-08 — 저장소 정리(.gitignore), README 최신화, AWS IaC 문서 정합성 동기화
+- 발표 종료 후 저장소 정숙성 확보 및 산출물 최신화 작업 진행:
+  - Task 1: `.gitignore`에 `docs/presentation/` 및 OS 메타파일(`.DS_Store`, `**/.DS_Store`)을 등록하여 슬라이드/스크립트/폰트 파일의 불필요한 트래킹을 차단하고 저장소 순도 유지.
+  - Task 2: `README.md`에 고해상도 렌더링 다이어그램 이미지(`docs/images/system-integration.png`, `discovery-pipeline.png`, `librarian-pipeline.png`) 링크를 삽입하고 Mermaid 다이어그램을 `<details>` 태그로 감싸 웹상 가독성 개선. 최근 반영된 `switch_gate`(사서 전환 10ms 단락 게이트), 알라딘 서지 실조회 및 ISBN 미검증 도서 필터링, 최신 단위 테스트 수(331건 및 통합 25건)를 동기화.
+  - Task 3: AWS 서비스 활용 및 IaC 문서화 점검을 진행하여, `docs/security/bedrock-guardrail-guide.md`의 배포 리전(`us-east-1` ➔ `ap-northeast-2`), PII 설정(`NAME`/`PHONE` 오탐 방지 제외), 버전(`DRAFT` 권장)을 `guardrail-stack.yaml` 및 실제 프로덕션 상태와 100% 일치하도록 정정. `docs/README.md` 인덱스도 동기화 완료.
+  - Task 4: `ruff`, `mypy`(92파일 100% 통과), `pytest -m "not integration"`(331건 100% 통과) 검증 완료. `.harness/STATE.md` 갱신 및 `PLAN.md` 완료 항목 정리.
+
+### 다음 세션이 할 일
+1. 사용자 승인 시 커밋 생성 및 원격 push 진행.
+2. dev 배포 환경에서 최신 기능 라이브 실측 (사서 전환 결정론화, 외국 도서 ISBN 필터링).

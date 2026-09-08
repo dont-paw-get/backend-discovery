@@ -49,7 +49,7 @@ docs/
   - 제목·저자 전처리 정규화 ➔ `by-title-author`(ISBN) ➔ `search?isbn=`(실제 총 쪽수) 2단 조회
   - Redis 30일(2,592,000초) 캐시 및 `asyncio.gather` 병렬화
 - [다계층 안전 게이트 & 무중단 Fallback 엔진](features/multi-tier-safety-and-fallback.md):
-  - Gate 1(Safety 109 핫라인) ➔ Gate 2(Input 자모 필터) ➔ Gate 3(Bedrock Guardrails)
+  - Gate 1(Safety 109 핫라인) ➔ Gate 2(Input 자모 필터) ➔ Gate 3(Bedrock Guardrails) ➔ Gate 4(Switch Gate)
   - 원격 사서 장애 시 인프로세스 페르소나 및 switch_to 스위칭 자체 완결 엔진
 - [16개 표준 장르 분류 파이프라인](features/genre-classification-pipeline.md):
   - ISBN 단일 식별자 기반 제로샷 분류, 3단계 완화 매칭 테이블 및 `NONE` 방어선
@@ -59,7 +59,7 @@ docs/
 - **보안 (Amazon Bedrock Guardrails)**:
   - 템플릿: [`guardrail-stack.yaml`](security/guardrail-stack.yaml)
   - 가이드: [Bedrock Guardrails 가이드](security/bedrock-guardrail-guide.md)
-  - 내용: 프롬프트 공격/탈옥/PII 방어 Guardrail, 버전 1, 파드 IRSA IAM Role 권한
+  - 내용: 프롬프트 공격/탈옥/PII 방어 Guardrail, 서울 리전(ap-northeast-2), 파드 IRSA IAM Role 권한
 - **관측성 (AWS CloudWatch LLM 커스텀 대시보드)**:
   - 템플릿: [`cloudwatch-dashboard-stack.yaml`](observability/cloudwatch-dashboard-stack.yaml)
   - 가이드: [CloudWatch 대시보드 가이드](observability/cloudwatch-dashboard-guide.md)

@@ -11,6 +11,13 @@ Strands Agents SDK와 AWS Bedrock(Claude Haiku 4.5)을 기반으로, 실시간 �
 ### 1. 시스템 통합 아키텍처 (마이크로서비스 & 인프라 뷰)
 디스커버리 오케스트레이터와 사서 에이전트(`backend-librarian`), 도서 CRUD(`backend-book`) 및 외부 API 간의 마이크로서비스 연동 구조입니다.
 
+<p align="center">
+  <img src="docs/images/system-integration.png" alt="시스템 통합 아키텍처" width="100%" />
+</p>
+
+<details>
+<summary><b>📐 시스템 통합 아키텍처 Mermaid 소스코드 펼치기</b></summary>
+
 ```mermaid
 flowchart TB
     Client["📱 클라이언트 (my-reading-room)"]
@@ -112,11 +119,14 @@ flowchart TB
     style Aladin fill:#ffffff,stroke:#dc2626,stroke-width:2px,color:#7f1d1d
     style Bedrock fill:#ffffff,stroke:#d13b68,stroke-width:2px,color:#831843
 ```
+</details>
 
 ---
 
 ### 2. 순수 에이전트 토폴로지 (Agent-as-a-Tool 뷰)
 인프라 세부사항을 배제하고, **오케스트레이터와 서브 에이전트 간의 계층적 역할 분담 및 도구 조율 흐름**을 나타낸 다이어그램입니다.
+
+> 💡 사서 페르소나 마이크로서비스(`backend-librarian`)의 내부 아키텍처 및 처리 파이프라인은 [사서 파이프라인 다이어그램](docs/images/librarian-pipeline.png)에서 확인하실 수 있습니다.
 
 ```mermaid
 flowchart TD
@@ -191,6 +201,13 @@ flowchart TD
 ### 3. backend-discovery 내부 상세 파이프라인 (Agent-as-a-Tool 실행 엔진)
 오케스트레이터가 **사용자 입력을 분석하여 3개의 Agent-as-a-Tool을 어떻게 호출·합성하는지** 나타낸 상세 실행 파이프라인입니다.
 
+<p align="center">
+  <img src="docs/images/discovery-pipeline.png" alt="backend-discovery 내부 오케스트레이션 파이프라인" width="100%" />
+</p>
+
+<details>
+<summary><b>📐 내부 상세 파이프라인 Mermaid 소스코드 펼치기</b></summary>
+
 ```mermaid
 flowchart TD
     %% ==========================================
@@ -202,13 +219,14 @@ flowchart TD
         %% 1. 진입 및 가드레일
         Entry["FastAPI Entrypoint (/api/v1/chat)"]
         
-        subgraph GatePipeline["🛡️ 4단계 다계층 보안 & 가드레일 레이어"]
+        subgraph GatePipeline["🛡️ 5단계 다계층 보안 & 가드레일 레이어"]
             direction TB
             G0["0차: Bearer 토큰 Presence Check (401 즉시 차단)"]
             G1["1차: Safety Gate (자해/위기 109 핫라인 즉시 단락)"]
             G2["2차: Input Gate (자모/단발/이모지 결정론적 우회)"]
             G3["3차: Bedrock Guardrails Gate (프롬프트 인젝션/탈옥/PII 사전 차단)"]
-            G0 --> G1 --> G2 --> G3
+            G4["4차: Switch Gate (사서 전환 '블루/슈빌로 바꿔줘' 10ms 단락)"]
+            G0 --> G1 --> G2 --> G3 --> G4
         end
 
         %% 2. 오케스트레이터 에이전트 코어
@@ -238,7 +256,7 @@ flowchart TD
                 direction TB
                 T_Rec["도서 리서치 에이전트 인보크"]
                 TavilyCall["1. Tavily 웹 실시간 도서 검색"]
-                AladinFactCheck["2. 알라딘 서지/쪽수 2단 실조회"]
+                AladinFactCheck["2. 알라딘 서지/쪽수 2단 실조회 & 미검증 도서 필터링"]
                 TruncateFilter["3. count 상한 강제 (truncate_books)"]
                 T_Rec --> TavilyCall --> AladinFactCheck --> TruncateFilter
             end
@@ -263,7 +281,8 @@ flowchart TD
 
         %% 전체 연결 흐름
         Entry --> GatePipeline
-        G3 -->|통과| ReasoningLoop
+        G4 -->|통과| ReasoningLoop
+        G4 -.->|전환 감지| ResponseComposer
         ReasoningLoop ==>|"의도: 페르소나/날씨"| RemoteLibrarianTool
         ReasoningLoop ==>|"의도: 실시간 도서 탐색"| LocalResearchAgent
         ReasoningLoop ==>|"의도: 서재 조회/필터링"| RemoteLibraryTool
@@ -283,6 +302,7 @@ flowchart TD
     style RemoteLibraryTool fill:#f3e8ff,stroke:#9333ea,color:#581c87
     style OutputPipeline fill:#fef9c3,stroke:#ca8a04,stroke-width:2px,color:#713f12
 ```
+</details>
 
 ---
 
@@ -295,9 +315,9 @@ flowchart TD
 | **AI / 에이전트** | Strands Agents SDK | Agent-as-a-Tool 패턴 기반 오케스트레이션 |
 | **LLM 추론** | AWS Bedrock (Claude Haiku 4.5) | 글로벌 프로필 (`global.anthropic.claude-haiku-4-5-20251001-v1:0`, `us-east-1`) |
 | **외부 검색** | Tavily Web Search API | `search_depth="basic"`, `sanitize_search_results` 페이로드 축소 |
-| **서지 검증** | 알라딘 Open API (via backend-book) | 제목·저자 기반 ISBN/총 페이지수 2단 실조회 (환각 방지) |
+| **서지 검증** | 알라딘 Open API (via backend-book) | 제목·저자 기반 ISBN/총 페이지수 2단 실조회 & 미검증 도서 필터링 (환각 방지) |
 | **캐시 & 세션** | Redis 7 (`ChatSessionStore`) | 대화 20턴 슬라이딩 윈도우, 세션 메타(좌표/사서ID), 서지 캐시(30일) |
-| **보안 & 안전** | AWS Bedrock Guardrails, 109 Safety Gate | 악의적 프롬프트/탈옥/PII 사전 차단, 위기/자해 109 핫라인 즉시 우회 |
+| **보안 & 안전** | AWS Bedrock Guardrails, 109 Safety Gate | 악의적 프롬프트/탈옥/PII 사전 차단, 위기/자해 109 핫라인 즉시 우회, 사서 전환 단락 |
 | **관측성** | OpenTelemetry + Prometheus + CloudWatch | OTel 트레이싱(Tempo), JSON 로그(Loki), `/metrics`, Bedrock 비용/지연 메트릭 |
 
 ---
@@ -313,6 +333,7 @@ backend-discovery/
 │   │   ├── orchestrator/        # 오케스트레이터 에이전트 빌더, 사서별 전용 프롬프트, 도구군
 │   │   │   ├── tools/           # recommend_tool, librarian_tool, library_tool
 │   │   │   ├── gates/           # safety_gate(109 핫라인), input_gate(자모 단락)
+│   │   │   ├── switch_gate.py   # 사서 전환(블루/슈빌) 결정론적 10ms 게이트
 │   │   │   ├── bedrock_guardrail_gate.py  # Amazon Bedrock Guardrails 입력 검증 게이트
 │   │   │   └── fallback.py      # 사서 장애 대응 로컬 페르소나 fallback 엔진
 │   │   ├── librarian/           # 도서 추천 로컬 에이전트, 후처리기(truncate, sanitize)
@@ -327,7 +348,7 @@ backend-discovery/
 │       └── v1/routers/          # chat.py, genre.py
 ├── docs/api/                    # openapi.yaml, ADR 결정 문서
 ├── k8s/                         # Kubernetes 배포 매니페스트 (base, overlays/dev)
-└── tests/                       # 단위 테스트(305건 100% 통과) 및 Redis 통합 테스트
+└── tests/                       # 단위 테스트(331건 100% 통과) 및 Redis 통합 테스트(25건)
 ```
 
 ---

@@ -14,3 +14,10 @@ __pycache__/
 
 # CLIAR-215 QA 실측 러너 결과 (재실행마다 생성, 커밋 대상 아님)
 scripts/qa_results/
+
+# OS 메타파일
+.DS_Store
+**/.DS_Store
+
+# 발표 및 프레젠테이션 작업 산출물
+docs/presentation/
